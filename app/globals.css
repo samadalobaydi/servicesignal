@@ -1,0 +1,224 @@
+@import url("https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800;900&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --navy-950: #05080f;
+  --navy-900: #0a0e1a;
+  --navy-800: #0f1628;
+  --navy-700: #151e38;
+  --navy-600: #1e2d4f;
+  --signal-blue: #00c8ff;
+  --signal-blue-dim: #0099cc;
+  --signal-green: #00e676;
+  --signal-green-dim: #00b35a;
+  --text-muted: #64748b;
+  --text-soft: #94a3b8;
+  --border: rgba(0, 200, 255, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--navy-900);
+  color: #ffffff;
+  font-family: "DM Sans", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Utility classes ── */
+.font-display {
+  font-family: "Barlow Condensed", sans-serif;
+}
+
+/* Grid texture overlay */
+.bg-grid {
+  background-image: linear-gradient(
+      rgba(0, 200, 255, 0.03) 1px,
+      transparent 1px
+    ),
+    linear-gradient(90deg, rgba(0, 200, 255, 0.03) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+
+/* Glowing blue line accent */
+.signal-line {
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--signal-blue),
+    transparent
+  );
+}
+
+/* Card base */
+.card {
+  background: var(--navy-800);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+/* Blue glow effect */
+.glow-blue {
+  box-shadow: 0 0 40px rgba(0, 200, 255, 0.15);
+}
+
+/* CTA button */
+.btn-primary {
+  background: var(--signal-blue);
+  color: var(--navy-900);
+  font-family: "Barlow Condensed", sans-serif;
+  font-weight: 700;
+  font-size: 1.1rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.85rem 2.5rem;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-block;
+  text-decoration: none;
+}
+
+.btn-primary:hover {
+  background: #33d6ff;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 30px rgba(0, 200, 255, 0.35);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-outline {
+  background: transparent;
+  color: var(--signal-blue);
+  font-family: "Barlow Condensed", sans-serif;
+  font-weight: 700;
+  font-size: 1.1rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.85rem 2.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--signal-blue);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-block;
+  text-decoration: none;
+}
+
+.btn-outline:hover {
+  background: rgba(0, 200, 255, 0.1);
+}
+
+/* Input styles */
+.form-input {
+  background: var(--navy-950);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: #ffffff;
+  padding: 0.75rem 1rem;
+  width: 100%;
+  font-family: "DM Sans", sans-serif;
+  font-size: 0.95rem;
+  transition: border-color 0.2s ease;
+  outline: none;
+}
+
+.form-input:focus {
+  border-color: var(--signal-blue);
+  box-shadow: 0 0 0 3px rgba(0, 200, 255, 0.1);
+}
+
+.form-input::placeholder {
+  color: var(--text-muted);
+}
+
+.form-input option {
+  background: var(--navy-900);
+}
+
+/* Section spacing */
+.section {
+  padding: 6rem 0;
+}
+
+/* Number badge */
+.step-number {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(0, 200, 255, 0.1);
+  border: 1px solid rgba(0, 200, 255, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Barlow Condensed", sans-serif;
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--signal-blue);
+  flex-shrink: 0;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--navy-900);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--navy-600);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--signal-blue-dim);
+}
+
+/* Fade in animation */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-up {
+  animation: fadeUp 0.6s ease forwards;
+}
+
+/* Pulse dot */
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--signal-green);
+  animation: pulse-dot 2s ease-in-out infinite;
+  display: inline-block;
+  margin-right: 8px;
+}
