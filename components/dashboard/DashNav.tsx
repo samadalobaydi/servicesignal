@@ -1,10 +1,23 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+import { getSupabaseBrowser } from "@/lib/supabase-browser";
+
 interface DashNavProps {
   onAddInvoice: () => void;
+  userEmail?: string;
 }
 
-export default function DashNav({ onAddInvoice }: DashNavProps) {
+export default function DashNav({ onAddInvoice, userEmail }: DashNavProps) {
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    const supabase = getSupabaseBrowser();
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
+  };
+
   return (
     <header
       className="sticky top-0 z-40 border-b"
@@ -32,18 +45,6 @@ export default function DashNav({ onAddInvoice }: DashNavProps) {
           >
             SERVICE<span style={{ color: "#00c8ff" }}>SIGNAL</span>
           </span>
-          <span
-            className="ml-2 text-xs px-2 py-0.5 rounded font-display"
-            style={{
-              background: "rgba(0,200,255,0.1)",
-              border: "1px solid rgba(0,200,255,0.2)",
-              color: "#00c8ff",
-              fontWeight: 600,
-              letterSpacing: "0.06em",
-            }}
-          >
-            BETA
-          </span>
         </div>
 
         {/* Centre label */}
@@ -56,6 +57,18 @@ export default function DashNav({ onAddInvoice }: DashNavProps) {
 
         {/* Right actions */}
         <div className="flex items-center gap-3">
+          {/* User email — small, muted */}
+          {userEmail && (
+            <span
+              className="text-xs hidden sm:block truncate max-w-[160px]"
+              style={{ color: "#475569" }}
+              title={userEmail}
+            >
+              {userEmail}
+            </span>
+          )}
+
+          {/* Back to landing */}
           <a
             href="/"
             className="text-xs flex items-center gap-1.5 transition-colors"
@@ -64,31 +77,48 @@ export default function DashNav({ onAddInvoice }: DashNavProps) {
             onMouseLeave={(e) => (e.currentTarget.style.color = "#64748b")}
           >
             <svg width="13" height="13" fill="none" viewBox="0 0 24 24">
-              <path
-                d="M10 19l-7-7m0 0l7-7m-7 7h18"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
+              <path d="M10 19l-7-7m0 0l7-7m-7 7h18" stroke="currentColor"
+                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <span className="hidden sm:inline">Landing page</span>
+            <span className="hidden sm:inline">Home</span>
           </a>
 
+          {/* Add Invoice */}
           <button
             onClick={onAddInvoice}
             className="btn-primary flex items-center gap-1.5"
             style={{ padding: "0.45rem 1rem", fontSize: "0.82rem" }}
           >
             <svg width="13" height="13" fill="none" viewBox="0 0 24 24">
-              <path
-                d="M12 5v14M5 12h14"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-              />
+              <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
             </svg>
             Add Invoice
+          </button>
+
+          {/* Logout */}
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors"
+            style={{
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              color: "#64748b",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = "#ff6b6b";
+              e.currentTarget.style.borderColor = "rgba(255,107,107,0.2)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = "#64748b";
+              e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)";
+            }}
+            title="Sign out"
+          >
+            <svg width="13" height="13" fill="none" viewBox="0 0 24 24">
+              <path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span className="hidden sm:inline">Sign out</span>
           </button>
         </div>
       </div>

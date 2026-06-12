@@ -1,13 +1,17 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import type { Invoice, InvoiceFormData } from "@/types";
 import {
-  loadInvoices,
-  saveInvoices,
   refreshStatuses,
   calcStats,
+  fetchInvoices,
+  insertInvoice,
+  markInvoicePaid,
+  deleteInvoice,
 } from "@/lib/invoices";
+import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import DashNav from "@/components/dashboard/DashNav";
 import StatsCards from "@/components/dashboard/StatsCards";
 import AddInvoiceForm from "@/components/dashboard/AddInvoiceForm";
@@ -23,24 +27,43 @@ const TAB_LABELS: Record<FilterTab, string> = {
 };
 
 export default function DashboardPage() {
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [formOpen, setFormOpen] = useState(false);
-  const [filter, setFilter]     = useState<FilterTab>("all");
-  const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [mounted, setMounted]   = useState(false);
+  const router = useRouter();
 
+  const [invoices, setInvoices]   = useState<Invoice[]>([]);
+  const [userEmail, setUserEmail] = useState<string>("");
+  const [formOpen, setFormOpen]   = useState(false);
+  const [filter, setFilter]       = useState<FilterTab>("all");
+  const [deleteId, setDeleteId]   = useState<string | null>(null);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState<string | null>(null);
+
+  // ── Auth check + load invoices on mount ──────────────────────────────────
   useEffect(() => {
-    setInvoices(refreshStatuses(loadInvoices()));
-    setMounted(true);
-  }, []);
+    const init = async () => {
+      const supabase = getSupabaseBrowser();
 
-  useEffect(() => {
-    if (mounted) saveInvoices(invoices);
-  }, [invoices, mounted]);
+      // Validate session — belt-and-braces alongside middleware
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
 
-  const handleAddInvoice = useCallback((data: InvoiceFormData) => {
-    const newInvoice: Invoice = {
-      id: crypto.randomUUID(),
+      setUserEmail(user.email ?? "");
+
+      // Load this user's invoices (RLS ensures they only get their own)
+      const data = await fetchInvoices(supabase);
+      setInvoices(refreshStatuses(data));
+      setLoading(false);
+    };
+
+    init();
+  }, [router]);
+
+  // ── Mutations ─────────────────────────────────────────────────────────────
+  const handleAddInvoice = useCallback(async (data: InvoiceFormData) => {
+    const supabase = getSupabaseBrowser();
+    const inserted = await insertInvoice(supabase, {
       customer_name:      data.customer_name.trim(),
       customer_email:     data.customer_email.trim(),
       customer_phone:     data.customer_phone.trim(),
@@ -50,40 +73,58 @@ export default function DashboardPage() {
       reminder_tone:      data.reminder_tone,
       reminder_schedules: data.reminder_schedules,
       status:             "unpaid",
-      created_at:         new Date().toISOString(),
-      paid_at:            null,
       reminders_sent:     [],
-    };
-    setInvoices((prev) => refreshStatuses([newInvoice, ...prev]));
+    });
+
+    if (inserted) {
+      setInvoices((prev) => refreshStatuses([inserted, ...prev]));
+    } else {
+      setError("Failed to save invoice. Please try again.");
+    }
   }, []);
 
-  const handleMarkPaid = useCallback((id: string) => {
-    setInvoices((prev) =>
-      refreshStatuses(
-        prev.map((inv) =>
-          inv.id === id
-            ? { ...inv, status: "paid", paid_at: new Date().toISOString() }
-            : inv
+  const handleMarkPaid = useCallback(async (id: string) => {
+    const supabase = getSupabaseBrowser();
+    const ok = await markInvoicePaid(supabase, id);
+    if (ok) {
+      setInvoices((prev) =>
+        refreshStatuses(
+          prev.map((inv) =>
+            inv.id === id
+              ? { ...inv, status: "paid", paid_at: new Date().toISOString() }
+              : inv
+          )
         )
-      )
-    );
+      );
+    } else {
+      setError("Failed to update invoice. Please try again.");
+    }
   }, []);
 
   const handleDelete = useCallback((id: string) => {
     setDeleteId(id);
   }, []);
 
-  const confirmDelete = useCallback(() => {
+  const confirmDelete = useCallback(async () => {
     if (!deleteId) return;
-    setInvoices((prev) => refreshStatuses(prev.filter((inv) => inv.id !== deleteId)));
+    const supabase = getSupabaseBrowser();
+    const ok = await deleteInvoice(supabase, deleteId);
+    if (ok) {
+      setInvoices((prev) =>
+        refreshStatuses(prev.filter((inv) => inv.id !== deleteId))
+      );
+    } else {
+      setError("Failed to delete invoice. Please try again.");
+    }
     setDeleteId(null);
   }, [deleteId]);
 
-  const live   = refreshStatuses(invoices);
-  const stats  = calcStats(live);
-
-  const filtered = live.filter((inv) => filter === "all" || inv.status === filter);
-
+  // ── Derived data ──────────────────────────────────────────────────────────
+  const live  = refreshStatuses(invoices);
+  const stats = calcStats(live);
+  const filtered = live.filter(
+    (inv) => filter === "all" || inv.status === filter
+  );
   const tabCounts: Record<FilterTab, number> = {
     all:     live.length,
     overdue: live.filter((i) => i.status === "overdue").length,
@@ -91,15 +132,24 @@ export default function DashboardPage() {
     paid:    live.filter((i) => i.status === "paid").length,
   };
 
-  if (!mounted) {
+  // ── Loading state ─────────────────────────────────────────────────────────
+  if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "#0a0e1a" }}>
+      <div
+        className="min-h-screen flex items-center justify-center"
+        style={{ background: "#0a0e1a" }}
+      >
         <div className="flex items-center gap-3" style={{ color: "#64748b" }}>
           <svg className="animate-spin" width="18" height="18" fill="none" viewBox="0 0 24 24">
             <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.3" />
             <path d="M12 2a10 10 0 0110 10" stroke="#00c8ff" strokeWidth="3" strokeLinecap="round" />
           </svg>
-          <span className="text-sm font-display" style={{ fontWeight: 600, letterSpacing: "0.08em" }}>LOADING...</span>
+          <span
+            className="text-sm font-display"
+            style={{ fontWeight: 600, letterSpacing: "0.08em" }}
+          >
+            LOADING...
+          </span>
         </div>
       </div>
     );
@@ -107,28 +157,31 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen" style={{ background: "#0a0e1a" }}>
-      <DashNav onAddInvoice={() => setFormOpen(true)} />
-
-      {/* ── Beta preview banner ── */}
-      <div
-        className="w-full py-2.5 px-4 text-center text-sm"
-        style={{
-          background: "rgba(255,189,46,0.08)",
-          borderBottom: "1px solid rgba(255,189,46,0.2)",
-          color: "#ffbd2e",
-        }}
-      >
-        <span className="font-display font-700 uppercase tracking-wider text-xs mr-2" style={{ fontWeight: 700 }}>
-          Preview Mode
-        </span>
-        This dashboard uses demo data stored in your browser. Real invoice storage and login are coming soon.{" "}
-        <a href="/#signup" className="underline hover:text-white transition-colors">
-          Join the beta
-        </a>{" "}
-        to be first when it launches.
-      </div>
+      <DashNav
+        onAddInvoice={() => setFormOpen(true)}
+        userEmail={userEmail}
+      />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+
+        {/* ── Global error banner ── */}
+        {error && (
+          <div
+            className="rounded-xl px-5 py-3 flex items-center justify-between text-sm"
+            style={{
+              background: "rgba(255,107,107,0.08)",
+              border: "1px solid rgba(255,107,107,0.2)",
+              color: "#ff6b6b",
+            }}
+          >
+            <span>{error}</span>
+            <button onClick={() => setError(null)} className="ml-4 opacity-60 hover:opacity-100">
+              <svg width="14" height="14" fill="none" viewBox="0 0 24 24">
+                <path d="M6 18L18 6M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
+        )}
 
         <StatsCards
           totalUnpaid={stats.totalUnpaid}
@@ -147,7 +200,10 @@ export default function DashboardPage() {
             style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}
           >
             <div>
-              <h2 className="font-display text-white" style={{ fontWeight: 800, fontSize: "1.1rem", letterSpacing: "0.04em" }}>
+              <h2
+                className="font-display text-white"
+                style={{ fontWeight: 800, fontSize: "1.1rem", letterSpacing: "0.04em" }}
+              >
                 INVOICES
               </h2>
               {stats.overdueCount > 0 && (
@@ -157,10 +213,13 @@ export default function DashboardPage() {
               )}
             </div>
 
-            <div className="flex gap-1 p-1 rounded-lg flex-shrink-0" style={{ background: "#05080f", border: "1px solid rgba(255,255,255,0.06)" }}>
+            <div
+              className="flex gap-1 p-1 rounded-lg flex-shrink-0"
+              style={{ background: "#05080f", border: "1px solid rgba(255,255,255,0.06)" }}
+            >
               {(Object.keys(TAB_LABELS) as FilterTab[]).map((tab) => {
-                const active   = filter === tab;
-                const isAlert  = tab === "overdue" && tabCounts.overdue > 0;
+                const active  = filter === tab;
+                const isAlert = tab === "overdue" && tabCounts.overdue > 0;
                 return (
                   <button
                     key={tab}
@@ -195,9 +254,36 @@ export default function DashboardPage() {
           </div>
 
           <div className="p-4 sm:p-5">
-            {filtered.length === 0 && filter !== "all" ? (
-              <div className="text-center py-10" style={{ color: "#64748b" }}>
-                <p className="text-sm">No {filter} invoices</p>
+            {filtered.length === 0 ? (
+              <div className="text-center py-12" style={{ color: "#64748b" }}>
+                {live.length === 0 ? (
+                  <>
+                    <div
+                      className="w-12 h-12 rounded-xl mx-auto mb-3 flex items-center justify-center"
+                      style={{ background: "rgba(0,200,255,0.06)", border: "1px solid rgba(0,200,255,0.12)" }}
+                    >
+                      <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
+                        <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                          stroke="#00c8ff" strokeWidth="1.5" strokeLinecap="round" />
+                      </svg>
+                    </div>
+                    <p className="font-display text-white text-base mb-1" style={{ fontWeight: 700 }}>
+                      No invoices yet
+                    </p>
+                    <p className="text-sm mb-5" style={{ color: "#475569" }}>
+                      Add your first unpaid invoice to get started
+                    </p>
+                    <button
+                      onClick={() => setFormOpen(true)}
+                      className="btn-primary"
+                      style={{ padding: "0.6rem 1.5rem", fontSize: "0.9rem" }}
+                    >
+                      Add Your First Invoice
+                    </button>
+                  </>
+                ) : (
+                  <p className="text-sm">No {filter} invoices</p>
+                )}
               </div>
             ) : (
               <InvoiceTable
@@ -210,10 +296,7 @@ export default function DashboardPage() {
         </div>
 
         <p className="text-center text-xs pb-6" style={{ color: "#1e2d4f" }}>
-          ServiceSignal Beta · Data stored in your browser ·{" "}
-          <a href="/" style={{ color: "#475569" }} className="hover:text-[#64748b] transition-colors">
-            Back to landing page
-          </a>
+          ServiceSignal · Invoices saved securely in the cloud
         </p>
       </main>
 
@@ -223,7 +306,7 @@ export default function DashboardPage() {
         onSave={handleAddInvoice}
       />
 
-      {/* Delete confirmation */}
+      {/* Delete confirmation modal */}
       {deleteId && (
         <>
           <div
@@ -237,29 +320,58 @@ export default function DashboardPage() {
           >
             <div
               className="w-full max-w-sm rounded-2xl p-6"
-              style={{ background: "#0f1628", border: "1px solid rgba(255,107,107,0.2)", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}
+              style={{
+                background: "#0f1628",
+                border: "1px solid rgba(255,107,107,0.2)",
+                boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+              }}
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-4"
-                style={{ background: "rgba(255,107,107,0.1)", border: "1px solid rgba(255,107,107,0.2)" }}>
+              <div
+                className="w-10 h-10 rounded-xl flex items-center justify-center mb-4"
+                style={{ background: "rgba(255,107,107,0.1)", border: "1px solid rgba(255,107,107,0.2)" }}
+              >
                 <svg width="18" height="18" fill="none" viewBox="0 0 24 24">
-                  <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    stroke="#ff6b6b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  <path
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                    stroke="#ff6b6b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+                  />
                 </svg>
               </div>
-              <h3 className="font-display text-white mb-1" style={{ fontWeight: 800, fontSize: "1.2rem" }}>DELETE INVOICE?</h3>
+              <h3
+                className="font-display text-white mb-1"
+                style={{ fontWeight: 800, fontSize: "1.2rem" }}
+              >
+                DELETE INVOICE?
+              </h3>
               <p className="text-sm mb-6" style={{ color: "#94a3b8" }}>
-                This will permanently remove the invoice and its reminder history. This can't be undone.
+                This will permanently remove the invoice and its reminder history. This can&apos;t be undone.
               </p>
               <div className="flex gap-3">
-                <button onClick={() => setDeleteId(null)}
+                <button
+                  onClick={() => setDeleteId(null)}
                   className="flex-1 py-2.5 rounded-lg text-sm font-display"
-                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#94a3b8", fontWeight: 600, letterSpacing: "0.06em" }}>
+                  style={{
+                    background: "rgba(255,255,255,0.04)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    color: "#94a3b8",
+                    fontWeight: 600,
+                    letterSpacing: "0.06em",
+                  }}
+                >
                   CANCEL
                 </button>
-                <button onClick={confirmDelete}
+                <button
+                  onClick={confirmDelete}
                   className="flex-1 py-2.5 rounded-lg text-sm font-display"
-                  style={{ background: "rgba(255,107,107,0.12)", border: "1px solid rgba(255,107,107,0.3)", color: "#ff6b6b", fontWeight: 700, letterSpacing: "0.06em" }}>
+                  style={{
+                    background: "rgba(255,107,107,0.12)",
+                    border: "1px solid rgba(255,107,107,0.3)",
+                    color: "#ff6b6b",
+                    fontWeight: 700,
+                    letterSpacing: "0.06em",
+                  }}
+                >
                   DELETE
                 </button>
               </div>
