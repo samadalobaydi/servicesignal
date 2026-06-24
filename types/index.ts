@@ -2,7 +2,21 @@
 
 export type InvoiceStatus = "unpaid" | "overdue" | "paid";
 export type ReminderTone = "friendly" | "firm" | "final";
-export type ReminderSchedule = "1_day" | "3_days" | "7_days";
+
+/**
+ * Explicit reminder schedule keys — describe timing relative to due_date.
+ *   before_due_3_days → 3 days BEFORE the invoice is due
+ *   due_today         → on the due date itself
+ *   overdue_3_days    → 3 days AFTER the due date
+ *   overdue_7_days    → 7 days AFTER the due date
+ *   overdue_14_days   → 14 days AFTER the due date
+ */
+export type ReminderSchedule =
+  | "before_due_3_days"
+  | "due_today"
+  | "overdue_3_days"
+  | "overdue_7_days"
+  | "overdue_14_days";
 
 export interface Invoice {
   id: string;
@@ -44,6 +58,51 @@ export interface InvoiceFormData {
   payment_link: string;
   reminder_tone: ReminderTone;
   reminder_schedules: ReminderSchedule[];
+}
+
+// ── Reminder logs ───────────────────────────────────────────────────────────
+
+export type ReminderLogStatus = "pending" | "sent" | "dismissed" | "failed";
+
+export interface ReminderLog {
+  id: string;
+  invoice_id: string;
+  user_id: string;
+  schedule: ReminderSchedule;
+  status: ReminderLogStatus;
+  email_to: string;
+  subject: string | null;
+  created_at: string;
+  sent_at: string | null;
+  error_message: string | null;
+  // Joined fields (populated when fetched with invoice details for the UI)
+  invoice?: {
+    customer_name: string;
+    amount: number;
+    due_date: string;
+  };
+}
+
+// ── Profile / settings ──────────────────────────────────────────────────────
+
+export type ReminderMode = "approval" | "auto";
+
+export interface Profile {
+  user_id: string;
+  business_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  default_tone: ReminderTone;
+  reminder_mode: ReminderMode;
+  created_at: string;
+}
+
+export interface ProfileUpdate {
+  business_name?: string;
+  contact_email?: string;
+  contact_phone?: string;
+  default_tone?: ReminderTone;
+  reminder_mode?: ReminderMode;
 }
 
 // ── Landing page / Beta signup types ──────────────────────────────────────

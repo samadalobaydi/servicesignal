@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { Invoice } from "@/types";
 import {
   formatCurrency,
@@ -8,11 +9,14 @@ import {
   SCHEDULE_LABELS,
   refreshStatuses,
 } from "@/lib/invoices";
+import { scheduleToPrepare } from "@/lib/reminder-schedule";
 
 interface InvoiceTableProps {
   invoices: Invoice[];
   onMarkPaid: (id: string) => void;
   onDelete: (id: string) => void;
+  onPrepareReminder: (invoiceId: string) => Promise<{ success: boolean; message: string }>;
+  pendingReminderInvoiceIds: Set<string>;
 }
 
 function StatusBadge({ status }: { status: Invoice["status"] }) {
@@ -24,8 +28,8 @@ function StatusBadge({ status }: { status: Invoice["status"] }) {
 
   return (
     <span
-      className="inline-flex items-center px-2 py-0.5 rounded font-display text-xs"
-      style={{ background: config.bg, border: `1px solid ${config.border}`, color: config.color, fontWeight: 700, letterSpacing: "0.06em" }}
+      className="inline-flex items-center px-2.5 py-1 rounded font-display text-xs"
+      style={{ background: config.bg, border: `1px solid ${config.border}`, color: config.color, fontWeight: 800, letterSpacing: "0.06em" }}
     >
       {status === "overdue" && (
         <span className="w-1.5 h-1.5 rounded-full mr-1.5 flex-shrink-0 animate-pulse" style={{ background: "#ff6b6b" }} />
@@ -42,7 +46,7 @@ function ToneBadge({ tone }: { tone: Invoice["reminder_tone"] }) {
     final:    { label: "Final",    color: "#ff6b6b" },
   }[tone];
   return (
-    <span className="text-xs font-display" style={{ color: config.color, fontWeight: 600 }}>
+    <span className="text-xs font-display" style={{ color: config.color, fontWeight: 700 }}>
       {config.label}
     </span>
   );
@@ -56,13 +60,14 @@ function ReminderPips({ invoice }: { invoice: Invoice }) {
         return (
           <span
             key={s}
-            className="text-xs px-1.5 py-0.5 rounded"
+            className="text-xs px-2 py-1 rounded"
             title={sent ? `${SCHEDULE_LABELS[s]} — sent` : `${SCHEDULE_LABELS[s]} — pending`}
             style={{
-              background: sent ? "rgba(0,230,118,0.1)" : "rgba(255,255,255,0.04)",
-              border: `1px solid ${sent ? "rgba(0,230,118,0.25)" : "rgba(255,255,255,0.08)"}`,
-              color: sent ? "#00e676" : "#475569",
+              background: sent ? "rgba(0,230,118,0.14)" : "rgba(255,255,255,0.09)",
+              border: `1px solid ${sent ? "rgba(0,230,118,0.32)" : "rgba(255,255,255,0.18)"}`,
+              color: sent ? "#1aff8c" : "#aab6c8",
               fontFamily: "'DM Sans', sans-serif",
+              fontWeight: 600,
             }}
           >
             {sent ? "✓" : "○"} {SCHEDULE_LABELS[s].replace(" overdue", "")}
@@ -73,18 +78,119 @@ function ReminderPips({ invoice }: { invoice: Invoice }) {
   );
 }
 
+/**
+ * Renders the right reminder action / status for an invoice row.
+ * Covers every state so the user never needs to understand cron logic:
+ *   - paid                         → nothing
+ *   - has a pending reminder       → "Reminder ready — see queue above"
+ *   - all schedules already sent   → "All reminders sent"
+ *   - something can be chased now   → "Prepare Reminder" button
+ *   - no schedules selected        → "No reminders set"
+ */
+function ReminderAction({
+  invoice,
+  hasPending,
+  onPrepare,
+}: {
+  invoice: Invoice;
+  hasPending: boolean;
+  onPrepare: (invoiceId: string) => Promise<{ success: boolean; message: string }>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  if (invoice.status === "paid") return null;
+
+  if (hasPending) {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg"
+        style={{ background: "rgba(255,189,46,0.08)", border: "1px solid rgba(255,189,46,0.25)", color: "#ffbd2e", fontFamily: "'DM Sans', sans-serif" }}
+        title="A reminder for this invoice is waiting in the approval queue above"
+      >
+        <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#ffbd2e" }} />
+        Reminder ready — see queue above
+      </span>
+    );
+  }
+
+  if (!invoice.reminder_schedules || invoice.reminder_schedules.length === 0) {
+    return (
+      <span className="text-sm" style={{ color: "#9aa7bd" }}>
+        No reminders set
+      </span>
+    );
+  }
+
+  // Is there an unsent schedule we can chase?
+  const next = scheduleToPrepare(
+    invoice.reminder_schedules,
+    invoice.reminders_sent ?? [],
+    invoice.due_date
+  );
+
+  if (!next) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-sm" style={{ color: "#00e676" }}>
+        <svg width="12" height="12" fill="none" viewBox="0 0 24 24">
+          <path d="M5 13l4 4L19 7" stroke="#00e676" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        All reminders sent
+      </span>
+    );
+  }
+
+  const handlePrepare = async () => {
+    setBusy(true);
+    setNote(null);
+    const result = await onPrepare(invoice.id);
+    if (!result.success) setNote(result.message);
+    setBusy(false);
+  };
+
+  return (
+    <div className="flex flex-col gap-1">
+      <button
+        onClick={handlePrepare}
+        disabled={busy}
+        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-display transition-colors whitespace-nowrap"
+        style={{
+          background: "rgba(0,200,255,0.1)",
+          border: "1px solid rgba(0,200,255,0.25)",
+          color: "#00c8ff",
+          fontWeight: 700,
+          letterSpacing: "0.04em",
+          opacity: busy ? 0.6 : 1,
+        }}
+        title={`Prepare a "${SCHEDULE_LABELS[next]}" reminder — it will appear in the approval queue, not send straight away`}
+      >
+        <svg width="12" height="12" fill="none" viewBox="0 0 24 24">
+          <path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+            stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        {busy ? "Preparing..." : "Prepare Reminder"}
+      </button>
+      {note && (
+        <span className="text-xs" style={{ color: "#c2ccdb" }}>{note}</span>
+      )}
+    </div>
+  );
+}
+
 // ── Mobile card ──────────────────────────────────────────────────────────────
-function InvoiceCard({ invoice, onMarkPaid, onDelete }: {
+function InvoiceCard({ invoice, onMarkPaid, onDelete, onPrepareReminder, hasPending }: {
   invoice: Invoice;
   onMarkPaid: (id: string) => void;
   onDelete: (id: string) => void;
+  onPrepareReminder: (invoiceId: string) => Promise<{ success: boolean; message: string }>;
+  hasPending: boolean;
 }) {
   return (
     <div
       className="rounded-xl p-4 space-y-3"
       style={{
-        background: "#0f1628",
-        border: `1px solid ${invoice.status === "overdue" ? "rgba(255,107,107,0.15)" : "rgba(255,255,255,0.06)"}`,
+        background: "#1c2436",
+        border: `1px solid ${invoice.status === "overdue" ? "rgba(255,107,107,0.15)" : "rgba(255,255,255,0.10)"}`,
       }}
     >
       <div className="flex items-start justify-between gap-2">
@@ -92,7 +198,7 @@ function InvoiceCard({ invoice, onMarkPaid, onDelete }: {
           <p className="font-display text-white text-base truncate" style={{ fontWeight: 700 }}>
             {invoice.customer_name}
           </p>
-          <p className="text-xs truncate" style={{ color: "#64748b" }}>{invoice.customer_email}</p>
+          <p className="text-xs truncate" style={{ color: "#a3b0c4" }}>{invoice.customer_email}</p>
         </div>
         <div className="text-right flex-shrink-0">
           <p className="font-display text-white" style={{ fontWeight: 800, fontSize: "1.1rem" }}>
@@ -102,11 +208,11 @@ function InvoiceCard({ invoice, onMarkPaid, onDelete }: {
         </div>
       </div>
 
-      <div className="flex items-center justify-between text-xs" style={{ color: "#64748b" }}>
+      <div className="flex items-center justify-between text-xs" style={{ color: "#a3b0c4" }}>
         <span>Due {formatDate(invoice.due_date)}</span>
         <span
           className="font-display"
-          style={{ fontWeight: 600, color: invoice.status === "overdue" ? "#ff6b6b" : invoice.status === "paid" ? "#00e676" : "#94a3b8" }}
+          style={{ fontWeight: 600, color: invoice.status === "overdue" ? "#ff6b6b" : invoice.status === "paid" ? "#00e676" : "#c2ccdb" }}
         >
           {daysOverdueLabel(invoice)}
         </span>
@@ -114,15 +220,18 @@ function InvoiceCard({ invoice, onMarkPaid, onDelete }: {
 
       <div className="flex items-center gap-2 flex-wrap">
         <ToneBadge tone={invoice.reminder_tone} />
-        <span style={{ color: "#1e2d4f" }}>·</span>
+        <span style={{ color: "#7d8a9e" }}>·</span>
         <ReminderPips invoice={invoice} />
       </div>
+
+      {/* Reminder action / status */}
+      <ReminderAction invoice={invoice} hasPending={hasPending} onPrepare={onPrepareReminder} />
 
       <div className="flex gap-2 pt-1">
         {invoice.status !== "paid" && (
           <button
             onClick={() => onMarkPaid(invoice.id)}
-            className="flex-1 py-2 rounded-lg text-xs font-display font-700 transition-colors"
+            className="flex-1 py-2.5 rounded-lg text-sm font-display font-700 transition-colors"
             style={{ background: "rgba(0,230,118,0.1)", border: "1px solid rgba(0,230,118,0.2)", color: "#00e676", fontWeight: 700, letterSpacing: "0.06em" }}
           >
             MARK PAID
@@ -154,7 +263,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
         </svg>
       </div>
       <p className="font-display text-white text-xl mb-2" style={{ fontWeight: 700 }}>No invoices yet</p>
-      <p className="text-sm mb-6" style={{ color: "#64748b" }}>Add your first unpaid invoice to get started</p>
+      <p className="text-sm mb-6" style={{ color: "#a3b0c4" }}>Add your first unpaid invoice to get started</p>
       <button onClick={onAdd} className="btn-primary" style={{ padding: "0.6rem 1.5rem", fontSize: "0.9rem" }}>
         Add Your First Invoice
       </button>
@@ -163,7 +272,13 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
 }
 
 // ── Main component ───────────────────────────────────────────────────────────
-export default function InvoiceTable({ invoices, onMarkPaid, onDelete }: InvoiceTableProps) {
+export default function InvoiceTable({
+  invoices,
+  onMarkPaid,
+  onDelete,
+  onPrepareReminder,
+  pendingReminderInvoiceIds,
+}: InvoiceTableProps) {
   const live = refreshStatuses(invoices);
 
   // Sort: overdue first, then unpaid, then paid; within each group newest first
@@ -180,23 +295,30 @@ export default function InvoiceTable({ invoices, onMarkPaid, onDelete }: Invoice
       {/* ── Mobile: card list ── */}
       <div className="flex flex-col gap-3 md:hidden">
         {sorted.map((inv) => (
-          <InvoiceCard key={inv.id} invoice={inv} onMarkPaid={onMarkPaid} onDelete={onDelete} />
+          <InvoiceCard
+            key={inv.id}
+            invoice={inv}
+            onMarkPaid={onMarkPaid}
+            onDelete={onDelete}
+            onPrepareReminder={onPrepareReminder}
+            hasPending={pendingReminderInvoiceIds.has(inv.id)}
+          />
         ))}
       </div>
 
       {/* ── Desktop: table ── */}
       <div
         className="hidden md:block rounded-xl overflow-hidden"
-        style={{ border: "1px solid rgba(255,255,255,0.06)" }}
+        style={{ border: "1px solid rgba(255,255,255,0.10)" }}
       >
         <table className="w-full">
           <thead>
-            <tr style={{ background: "#05080f", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+            <tr style={{ background: "#10162a", borderBottom: "1px solid rgba(255,255,255,0.10)" }}>
               {["Customer", "Amount", "Due Date", "Status", "Reminders", "Actions"].map((h) => (
                 <th
                   key={h}
-                  className="text-left px-4 py-3 font-display text-xs uppercase tracking-wider"
-                  style={{ color: "#475569", fontWeight: 600, letterSpacing: "0.1em" }}
+                  className="text-left px-5 py-3.5 font-display text-sm uppercase tracking-wide"
+                  style={{ color: "#9aa7bd", fontWeight: 600, letterSpacing: "0.1em" }}
                 >
                   {h}
                 </th>
@@ -208,35 +330,35 @@ export default function InvoiceTable({ invoices, onMarkPaid, onDelete }: Invoice
               <tr
                 key={inv.id}
                 style={{
-                  background: i % 2 === 0 ? "#0f1628" : "#0b1020",
+                  background: i % 2 === 0 ? "#1c2436" : "#1a2133",
                   borderBottom: "1px solid rgba(255,255,255,0.03)",
                   borderLeft: inv.status === "overdue" ? "2px solid rgba(255,107,107,0.4)" : "2px solid transparent",
                 }}
               >
                 {/* Customer */}
-                <td className="px-4 py-3">
-                  <p className="text-sm text-white font-medium">{inv.customer_name}</p>
-                  <p className="text-xs" style={{ color: "#475569" }}>{inv.customer_email}</p>
+                <td className="px-5 py-4">
+                  <p className="text-base text-white font-medium">{inv.customer_name}</p>
+                  <p className="text-sm" style={{ color: "#9aa7bd" }}>{inv.customer_email}</p>
                   {inv.customer_phone && (
-                    <p className="text-xs" style={{ color: "#475569" }}>{inv.customer_phone}</p>
+                    <p className="text-sm" style={{ color: "#9aa7bd" }}>{inv.customer_phone}</p>
                   )}
                 </td>
 
                 {/* Amount */}
-                <td className="px-4 py-3">
-                  <p className="font-display text-white" style={{ fontWeight: 700, fontSize: "0.95rem" }}>
+                <td className="px-5 py-4">
+                  <p className="font-display text-white" style={{ fontWeight: 700, fontSize: "1.05rem" }}>
                     {formatCurrency(inv.amount)}
                   </p>
                 </td>
 
                 {/* Due date */}
-                <td className="px-4 py-3">
-                  <p className="text-sm" style={{ color: "#94a3b8" }}>{formatDate(inv.due_date)}</p>
+                <td className="px-5 py-4">
+                  <p className="text-sm" style={{ color: "#c2ccdb" }}>{formatDate(inv.due_date)}</p>
                   <p
                     className="text-xs font-display mt-0.5"
                     style={{
                       fontWeight: 600,
-                      color: inv.status === "overdue" ? "#ff6b6b" : inv.status === "paid" ? "#00e676" : "#64748b",
+                      color: inv.status === "overdue" ? "#ff6b6b" : inv.status === "paid" ? "#00e676" : "#a3b0c4",
                     }}
                   >
                     {daysOverdueLabel(inv)}
@@ -244,25 +366,32 @@ export default function InvoiceTable({ invoices, onMarkPaid, onDelete }: Invoice
                 </td>
 
                 {/* Status */}
-                <td className="px-4 py-3">
+                <td className="px-5 py-4">
                   <StatusBadge status={inv.status} />
                 </td>
 
                 {/* Reminders */}
-                <td className="px-4 py-3">
+                <td className="px-5 py-4">
                   <div className="flex items-center gap-1.5 mb-1">
                     <ToneBadge tone={inv.reminder_tone} />
                   </div>
                   <ReminderPips invoice={inv} />
+                  <div className="mt-2">
+                    <ReminderAction
+                      invoice={inv}
+                      hasPending={pendingReminderInvoiceIds.has(inv.id)}
+                      onPrepare={onPrepareReminder}
+                    />
+                  </div>
                 </td>
 
                 {/* Actions */}
-                <td className="px-4 py-3">
+                <td className="px-5 py-4">
                   <div className="flex items-center gap-2">
                     {inv.status !== "paid" && (
                       <button
                         onClick={() => onMarkPaid(inv.id)}
-                        className="px-3 py-1.5 rounded-lg text-xs font-display transition-colors whitespace-nowrap"
+                        className="px-3.5 py-2 rounded-lg text-sm font-display transition-colors whitespace-nowrap"
                         style={{
                           background: "rgba(0,230,118,0.08)",
                           border: "1px solid rgba(0,230,118,0.2)",
@@ -275,17 +404,17 @@ export default function InvoiceTable({ invoices, onMarkPaid, onDelete }: Invoice
                       </button>
                     )}
                     {inv.status === "paid" && (
-                      <span className="text-xs" style={{ color: "#475569" }}>
+                      <span className="text-xs" style={{ color: "#9aa7bd" }}>
                         {inv.paid_at ? `Paid ${formatDate(inv.paid_at)}` : "Paid"}
                       </span>
                     )}
                     <button
                       onClick={() => onDelete(inv.id)}
                       className="p-1.5 rounded-lg transition-colors"
-                      style={{ color: "#475569" }}
+                      style={{ color: "#9aa7bd" }}
                       title="Delete invoice"
                       onMouseEnter={(e) => (e.currentTarget.style.color = "#ff6b6b")}
-                      onMouseLeave={(e) => (e.currentTarget.style.color = "#475569")}
+                      onMouseLeave={(e) => (e.currentTarget.style.color = "#9aa7bd")}
                     >
                       <svg width="15" height="15" fill="none" viewBox="0 0 24 24">
                         <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
@@ -300,7 +429,7 @@ export default function InvoiceTable({ invoices, onMarkPaid, onDelete }: Invoice
         </table>
       </div>
 
-      <p className="text-xs text-center mt-4" style={{ color: "#1e2d4f" }}>
+      <p className="text-sm text-center mt-5" style={{ color: "#7d8a9e" }}>
         {sorted.length} invoice{sorted.length !== 1 ? "s" : ""} total
       </p>
     </div>

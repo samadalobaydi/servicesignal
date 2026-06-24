@@ -27,7 +27,7 @@ export default function DashNav({ onAddInvoice, userEmail }: DashNavProps) {
         borderColor: "rgba(0,200,255,0.08)",
       }}
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
+      <div className="max-w-[1440px] mx-auto px-4 sm:px-8 lg:px-12 h-14 flex items-center justify-between gap-4">
         {/* Logo */}
         <div className="flex items-center gap-2 flex-shrink-0">
           <div
@@ -35,7 +35,7 @@ export default function DashNav({ onAddInvoice, userEmail }: DashNavProps) {
             style={{ background: "#00c8ff" }}
           >
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-              <path d="M8 1L14 13H2L8 1Z" fill="#0a0e1a" />
+              <path d="M8 1L14 13H2L8 1Z" fill="#141a2b" />
               <circle cx="8" cy="10" r="1.5" fill="#00c8ff" />
             </svg>
           </div>
@@ -61,7 +61,7 @@ export default function DashNav({ onAddInvoice, userEmail }: DashNavProps) {
           {userEmail && (
             <span
               className="text-xs hidden sm:block truncate max-w-[160px]"
-              style={{ color: "#475569" }}
+              style={{ color: "#9aa7bd" }}
               title={userEmail}
             >
               {userEmail}
@@ -72,9 +72,9 @@ export default function DashNav({ onAddInvoice, userEmail }: DashNavProps) {
           <a
             href="/"
             className="text-xs flex items-center gap-1.5 transition-colors"
-            style={{ color: "#64748b" }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = "#94a3b8")}
-            onMouseLeave={(e) => (e.currentTarget.style.color = "#64748b")}
+            style={{ color: "#a3b0c4" }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "#c2ccdb")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "#a3b0c4")}
           >
             <svg width="13" height="13" fill="none" viewBox="0 0 24 24">
               <path d="M10 19l-7-7m0 0l7-7m-7 7h18" stroke="currentColor"
@@ -102,14 +102,14 @@ export default function DashNav({ onAddInvoice, userEmail }: DashNavProps) {
             style={{
               background: "rgba(255,255,255,0.04)",
               border: "1px solid rgba(255,255,255,0.08)",
-              color: "#64748b",
+              color: "#a3b0c4",
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.color = "#ff6b6b";
               e.currentTarget.style.borderColor = "rgba(255,107,107,0.2)";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.color = "#64748b";
+              e.currentTarget.style.color = "#a3b0c4";
               e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)";
             }}
             title="Sign out"

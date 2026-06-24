@@ -74,10 +74,21 @@ export function daysOverdueLabel(invoice: Invoice): string {
 }
 
 export const SCHEDULE_LABELS: Record<ReminderSchedule, string> = {
-  "1_day": "1 day overdue",
-  "3_days": "3 days overdue",
-  "7_days": "7 days overdue",
+  before_due_3_days: "3 days before due",
+  due_today:         "On the due date",
+  overdue_3_days:    "3 days overdue",
+  overdue_7_days:    "7 days overdue",
+  overdue_14_days:   "14 days overdue",
 };
+
+/** Display order for schedule checkboxes — chronological */
+export const SCHEDULE_ORDER: ReminderSchedule[] = [
+  "before_due_3_days",
+  "due_today",
+  "overdue_3_days",
+  "overdue_7_days",
+  "overdue_14_days",
+];
 
 // ── Supabase CRUD helpers ─────────────────────────────────────────────────
 // These accept a Supabase browser client and return typed results.

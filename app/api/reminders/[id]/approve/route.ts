@@ -1,0 +1,150 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getSupabaseServer } from "@/lib/supabase-server";
+import { getResendClient, REMINDER_FROM } from "@/lib/resend";
+import { buildReminderEmail } from "@/lib/email-templates";
+import type { ReminderLog, ReminderSchedule } from "@/types";
+
+/**
+ * POST /api/reminders/[id]/approve
+ *
+ * Sends a pending reminder email and marks it 'sent'.
+ *
+ * Security: uses lib/supabase-server.ts — the AUTHENTICATED USER's session
+ * (anon key + cookies), NOT the service role key. RLS policies on
+ * reminder_logs (select_own_reminder_logs, update_own_reminder_logs) mean:
+ *  - .select() returns null if this reminder doesn't belong to the caller
+ *  - .update() silently affects 0 rows if the caller doesn't own it
+ * This makes cross-user approval impossible at the database level —
+ * no manual user_id comparison needed, RLS is the enforcement.
+ */
+export async function POST(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const supabase = getSupabaseServer();
+
+  // Confirm a valid session exists at all
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ success: false, message: "Not authenticated." }, { status: 401 });
+  }
+
+  // Fetch the reminder log — RLS ensures this is null if not owned by `user`
+  const { data: log, error: fetchError } = await supabase
+    .from("reminder_logs")
+    .select("*, invoice:invoices(customer_name, amount, due_date, customer_email, payment_link, reminder_tone)")
+    .eq("id", params.id)
+    .single();
+
+  if (fetchError || !log) {
+    return NextResponse.json({ success: false, message: "Reminder not found." }, { status: 404 });
+  }
+
+  const reminder = log as ReminderLog & {
+    invoice: { customer_email: string };
+  };
+
+  if (reminder.status !== "pending") {
+    return NextResponse.json(
+      { success: false, message: `Reminder is already ${reminder.status}.` },
+      { status: 409 }
+    );
+  }
+
+  const resend = getResendClient();
+
+  if (!resend) {
+    await supabase
+      .from("reminder_logs")
+      .update({ status: "failed", error_message: "RESEND_API_KEY not configured" })
+      .eq("id", params.id);
+
+    return NextResponse.json(
+      { success: false, message: "Email sending is not configured yet." },
+      { status: 500 }
+    );
+  }
+
+  // Regenerate the full email body (html/text) using the same builder the
+  // cron job uses — only the subject and recipient are stored on the log
+  // row, so the full content is rebuilt here from the joined invoice data.
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("business_name")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const businessName = profile?.business_name?.trim() || user.email || "ServiceSignal";
+
+  const invoiceData = reminder.invoice as unknown as {
+    customer_name: string;
+    amount: number;
+    due_date: string;
+    payment_link: string | null;
+    reminder_tone: "friendly" | "firm" | "final";
+  };
+
+  const { subject, html, text } = buildReminderEmail({
+    tone: invoiceData.reminder_tone,
+    schedule: reminder.schedule,
+    customerName: invoiceData.customer_name,
+    businessName,
+    amount: invoiceData.amount,
+    dueDate: invoiceData.due_date,
+    paymentLink: invoiceData.payment_link || undefined,
+  });
+
+  try {
+    const { error: sendError } = await resend.emails.send({
+      from: REMINDER_FROM,
+      to: reminder.email_to,
+      replyTo: user.email,
+      subject,
+      html,
+      text,
+    });
+
+    if (sendError) {
+      await supabase
+        .from("reminder_logs")
+        .update({ status: "failed", error_message: sendError.message })
+        .eq("id", params.id);
+
+      return NextResponse.json(
+        { success: false, message: "Failed to send email." },
+        { status: 500 }
+      );
+    }
+
+    // Mark sent — RLS update_own_reminder_logs allows this since user owns the row
+    await supabase
+      .from("reminder_logs")
+      .update({ status: "sent", sent_at: new Date().toISOString() })
+      .eq("id", params.id);
+
+    // Update invoices.reminders_sent — RLS update_own_invoices enforces ownership
+    const { data: invoiceRow } = await supabase
+      .from("invoices")
+      .select("reminders_sent")
+      .eq("id", reminder.invoice_id)
+      .single();
+
+    const currentSent: ReminderSchedule[] = invoiceRow?.reminders_sent ?? [];
+    if (!currentSent.includes(reminder.schedule)) {
+      await supabase
+        .from("invoices")
+        .update({ reminders_sent: [...currentSent, reminder.schedule] })
+        .eq("id", reminder.invoice_id);
+    }
+
+    return NextResponse.json({ success: true, message: "Reminder sent." });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    await supabase
+      .from("reminder_logs")
+      .update({ status: "failed", error_message: message })
+      .eq("id", params.id);
+
+    return NextResponse.json({ success: false, message: "Failed to send email." }, { status: 500 });
+  }
+}

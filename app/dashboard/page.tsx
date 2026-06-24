@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import type { Invoice, InvoiceFormData } from "@/types";
+import type { Invoice, InvoiceFormData, Profile, ReminderLog } from "@/types";
 import {
   refreshStatuses,
   calcStats,
@@ -12,10 +12,14 @@ import {
   deleteInvoice,
 } from "@/lib/invoices";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
+import { fetchProfile } from "@/lib/profile";
+import { fetchPendingReminders, prepareReminder } from "@/lib/reminders";
 import DashNav from "@/components/dashboard/DashNav";
 import StatsCards from "@/components/dashboard/StatsCards";
 import AddInvoiceForm from "@/components/dashboard/AddInvoiceForm";
 import InvoiceTable from "@/components/dashboard/InvoiceTable";
+import ReminderQueue from "@/components/dashboard/ReminderQueue";
+import SettingsCard from "@/components/dashboard/SettingsCard";
 
 type FilterTab = "all" | "overdue" | "unpaid" | "paid";
 
@@ -31,13 +35,15 @@ export default function DashboardPage() {
 
   const [invoices, setInvoices]   = useState<Invoice[]>([]);
   const [userEmail, setUserEmail] = useState<string>("");
+  const [profile, setProfile]     = useState<Profile | null>(null);
+  const [reminders, setReminders] = useState<ReminderLog[]>([]);
   const [formOpen, setFormOpen]   = useState(false);
   const [filter, setFilter]       = useState<FilterTab>("all");
   const [deleteId, setDeleteId]   = useState<string | null>(null);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string | null>(null);
 
-  // ── Auth check + load invoices on mount ──────────────────────────────────
+  // ── Auth check + load invoices, profile, reminders on mount ───────────────
   useEffect(() => {
     const init = async () => {
       const supabase = getSupabaseBrowser();
@@ -52,13 +58,33 @@ export default function DashboardPage() {
       setUserEmail(user.email ?? "");
 
       // Load this user's invoices (RLS ensures they only get their own)
-      const data = await fetchInvoices(supabase);
-      setInvoices(refreshStatuses(data));
+      const [invoiceData, profileData, reminderData] = await Promise.all([
+        fetchInvoices(supabase),
+        fetchProfile(),
+        fetchPendingReminders(supabase),
+      ]);
+
+      setInvoices(refreshStatuses(invoiceData));
+      setProfile(profileData);
+      setReminders(reminderData);
       setLoading(false);
     };
 
     init();
   }, [router]);
+
+  // ── Refetch reminders + invoices (after approve/dismiss) ──────────────────
+  // Both are refetched: approving a reminder updates invoices.reminders_sent
+  // server-side, so the invoice chip needs the fresh invoice data too.
+  const refetchAfterReminderAction = useCallback(async () => {
+    const supabase = getSupabaseBrowser();
+    const [reminderData, invoiceData] = await Promise.all([
+      fetchPendingReminders(supabase),
+      fetchInvoices(supabase),
+    ]);
+    setReminders(reminderData);
+    setInvoices(refreshStatuses(invoiceData));
+  }, []);
 
   // ── Mutations ─────────────────────────────────────────────────────────────
   const handleAddInvoice = useCallback(async (data: InvoiceFormData) => {
@@ -105,6 +131,22 @@ export default function DashboardPage() {
     setDeleteId(id);
   }, []);
 
+  // ── Prepare a reminder manually for an invoice (chase now) ─────────────────
+  const handlePrepareReminder = useCallback(async (invoiceId: string): Promise<{ success: boolean; message: string }> => {
+    const result = await prepareReminder(invoiceId);
+    if (result.success) {
+      // Refresh queue + invoices so the new pending reminder shows immediately
+      const supabase = getSupabaseBrowser();
+      const [reminderData, invoiceData] = await Promise.all([
+        fetchPendingReminders(supabase),
+        fetchInvoices(supabase),
+      ]);
+      setReminders(reminderData);
+      setInvoices(refreshStatuses(invoiceData));
+    }
+    return { success: result.success, message: result.message };
+  }, []);
+
   const confirmDelete = useCallback(async () => {
     if (!deleteId) return;
     const supabase = getSupabaseBrowser();
@@ -125,6 +167,9 @@ export default function DashboardPage() {
   const filtered = live.filter(
     (inv) => filter === "all" || inv.status === filter
   );
+  // Invoice IDs that currently have a pending reminder in the approval queue —
+  // used to show "Reminder ready" instead of a Prepare button on those rows.
+  const pendingReminderInvoiceIds = new Set(reminders.map((r) => r.invoice_id));
   const tabCounts: Record<FilterTab, number> = {
     all:     live.length,
     overdue: live.filter((i) => i.status === "overdue").length,
@@ -137,9 +182,9 @@ export default function DashboardPage() {
     return (
       <div
         className="min-h-screen flex items-center justify-center"
-        style={{ background: "#0a0e1a" }}
+        style={{ background: "#141a2b" }}
       >
-        <div className="flex items-center gap-3" style={{ color: "#64748b" }}>
+        <div className="flex items-center gap-3" style={{ color: "#a3b0c4" }}>
           <svg className="animate-spin" width="18" height="18" fill="none" viewBox="0 0 24 24">
             <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.3" />
             <path d="M12 2a10 10 0 0110 10" stroke="#00c8ff" strokeWidth="3" strokeLinecap="round" />
@@ -156,13 +201,13 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen" style={{ background: "#0a0e1a" }}>
+    <div className="min-h-screen" style={{ background: "#141a2b" }}>
       <DashNav
         onAddInvoice={() => setFormOpen(true)}
         userEmail={userEmail}
       />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <main className="max-w-[1440px] mx-auto px-4 sm:px-8 lg:px-12 py-10 space-y-10">
 
         {/* ── Global error banner ── */}
         {error && (
@@ -190,14 +235,22 @@ export default function DashboardPage() {
           paidThisMonth={stats.paidThisMonth}
         />
 
+        {profile && (
+          <ReminderQueue
+            reminders={reminders}
+            reminderMode={profile.reminder_mode}
+            onChanged={refetchAfterReminderAction}
+          />
+        )}
+
         <div
           className="rounded-xl overflow-hidden"
-          style={{ border: "1px solid rgba(255,255,255,0.06)", background: "#0a0e1a" }}
+          style={{ border: "1px solid rgba(255,255,255,0.10)", background: "#141a2b" }}
         >
           {/* Panel header + filter tabs */}
           <div
-            className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-5 py-4"
-            style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}
+            className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-6 py-5"
+            style={{ borderBottom: "1px solid rgba(255,255,255,0.10)" }}
           >
             <div>
               <h2
@@ -208,14 +261,14 @@ export default function DashboardPage() {
               </h2>
               {stats.overdueCount > 0 && (
                 <p className="text-xs mt-0.5" style={{ color: "#ff6b6b" }}>
-                  {stats.overdueCount} overdue — reminders will fire automatically once email/SMS is connected
+                  {stats.overdueCount} overdue — reminders are detected automatically and appear above for approval
                 </p>
               )}
             </div>
 
             <div
               className="flex gap-1 p-1 rounded-lg flex-shrink-0"
-              style={{ background: "#05080f", border: "1px solid rgba(255,255,255,0.06)" }}
+              style={{ background: "#10162a", border: "1px solid rgba(255,255,255,0.10)" }}
             >
               {(Object.keys(TAB_LABELS) as FilterTab[]).map((tab) => {
                 const active  = filter === tab;
@@ -226,9 +279,9 @@ export default function DashboardPage() {
                     onClick={() => setFilter(tab)}
                     className="px-3 py-1.5 rounded-md text-xs font-display transition-all flex items-center gap-1.5"
                     style={{
-                      background: active ? "#0f1628" : "transparent",
+                      background: active ? "#1c2436" : "transparent",
                       border: active ? "1px solid rgba(255,255,255,0.08)" : "1px solid transparent",
-                      color: active ? "#ffffff" : "#64748b",
+                      color: active ? "#ffffff" : "#a3b0c4",
                       fontWeight: 700,
                       letterSpacing: "0.06em",
                     }}
@@ -239,7 +292,7 @@ export default function DashboardPage() {
                         className="inline-flex items-center justify-center rounded px-1 min-w-[18px] h-[18px]"
                         style={{
                           background: isAlert ? "rgba(255,107,107,0.15)" : active ? "rgba(0,200,255,0.1)" : "rgba(255,255,255,0.05)",
-                          color: isAlert ? "#ff6b6b" : active ? "#00c8ff" : "#475569",
+                          color: isAlert ? "#ff6b6b" : active ? "#00c8ff" : "#9aa7bd",
                           fontSize: "0.65rem",
                           fontWeight: 700,
                         }}
@@ -253,9 +306,9 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="p-4 sm:p-5">
+          <div className="p-6 sm:p-7">
             {filtered.length === 0 ? (
-              <div className="text-center py-12" style={{ color: "#64748b" }}>
+              <div className="text-center py-12" style={{ color: "#a3b0c4" }}>
                 {live.length === 0 ? (
                   <>
                     <div
@@ -270,7 +323,7 @@ export default function DashboardPage() {
                     <p className="font-display text-white text-base mb-1" style={{ fontWeight: 700 }}>
                       No invoices yet
                     </p>
-                    <p className="text-sm mb-5" style={{ color: "#475569" }}>
+                    <p className="text-sm mb-5" style={{ color: "#9aa7bd" }}>
                       Add your first unpaid invoice to get started
                     </p>
                     <button
@@ -290,12 +343,22 @@ export default function DashboardPage() {
                 invoices={filtered}
                 onMarkPaid={handleMarkPaid}
                 onDelete={handleDelete}
+                onPrepareReminder={handlePrepareReminder}
+                pendingReminderInvoiceIds={pendingReminderInvoiceIds}
               />
             )}
           </div>
         </div>
 
-        <p className="text-center text-xs pb-6" style={{ color: "#1e2d4f" }}>
+        {profile && (
+          <SettingsCard
+            profile={profile}
+            userEmail={userEmail}
+            onUpdated={setProfile}
+          />
+        )}
+
+        <p className="text-center text-xs pb-6" style={{ color: "#7d8a9e" }}>
           ServiceSignal · Invoices saved securely in the cloud
         </p>
       </main>
@@ -321,7 +384,7 @@ export default function DashboardPage() {
             <div
               className="w-full max-w-sm rounded-2xl p-6"
               style={{
-                background: "#0f1628",
+                background: "#1c2436",
                 border: "1px solid rgba(255,107,107,0.2)",
                 boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
               }}
@@ -344,7 +407,7 @@ export default function DashboardPage() {
               >
                 DELETE INVOICE?
               </h3>
-              <p className="text-sm mb-6" style={{ color: "#94a3b8" }}>
+              <p className="text-sm mb-6" style={{ color: "#c2ccdb" }}>
                 This will permanently remove the invoice and its reminder history. This can&apos;t be undone.
               </p>
               <div className="flex gap-3">
@@ -354,7 +417,7 @@ export default function DashboardPage() {
                   style={{
                     background: "rgba(255,255,255,0.04)",
                     border: "1px solid rgba(255,255,255,0.08)",
-                    color: "#94a3b8",
+                    color: "#c2ccdb",
                     fontWeight: 600,
                     letterSpacing: "0.06em",
                   }}

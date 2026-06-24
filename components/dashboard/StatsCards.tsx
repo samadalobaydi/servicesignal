@@ -19,10 +19,10 @@ interface StatCardProps {
 function StatCard({ label, value, sub, accentColor, icon, alert }: StatCardProps) {
   return (
     <div
-      className="rounded-xl p-5 flex flex-col gap-3 relative overflow-hidden"
+      className="rounded-xl p-6 flex flex-col gap-3.5 relative overflow-hidden"
       style={{
-        background: "#0f1628",
-        border: `1px solid ${alert ? "rgba(255,107,107,0.2)" : "rgba(255,255,255,0.06)"}`,
+        background: "#1c2436",
+        border: `1px solid ${alert ? "rgba(255,107,107,0.2)" : "rgba(255,255,255,0.10)"}`,
       }}
     >
       {/* Subtle top accent line */}
@@ -32,7 +32,7 @@ function StatCard({ label, value, sub, accentColor, icon, alert }: StatCardProps
       />
 
       <div className="flex items-start justify-between">
-        <p className="text-xs font-display uppercase tracking-wider" style={{ color: "#64748b", fontWeight: 600, letterSpacing: "0.1em" }}>
+        <p className="text-sm font-display uppercase tracking-wide" style={{ color: "#a3b0c4", fontWeight: 600, letterSpacing: "0.08em" }}>
           {label}
         </p>
         <div
@@ -46,12 +46,12 @@ function StatCard({ label, value, sub, accentColor, icon, alert }: StatCardProps
       <div>
         <p
           className="font-display leading-none"
-          style={{ fontSize: "1.9rem", fontWeight: 800, color: alert ? "#ff6b6b" : "#ffffff" }}
+          style={{ fontSize: "2.15rem", fontWeight: 800, color: alert ? "#ff6b6b" : "#ffffff" }}
         >
           {value}
         </p>
         {sub && (
-          <p className="text-xs mt-1" style={{ color: "#475569" }}>
+          <p className="text-sm mt-1.5" style={{ color: "#9aa7bd" }}>
             {sub}
           </p>
         )}
@@ -62,7 +62,7 @@ function StatCard({ label, value, sub, accentColor, icon, alert }: StatCardProps
 
 export default function StatsCards({ totalUnpaid, overdueCount, remindersScheduled, paidThisMonth }: StatsCardsProps) {
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
       <StatCard
         label="Total Unpaid"
         value={formatCurrency(totalUnpaid)}

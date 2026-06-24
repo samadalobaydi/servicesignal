@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import type { InvoiceFormData, ReminderSchedule, ReminderTone } from "@/types";
-import { SCHEDULE_LABELS } from "@/lib/invoices";
+import { SCHEDULE_LABELS, SCHEDULE_ORDER } from "@/lib/invoices";
 
 const EMPTY_FORM: InvoiceFormData = {
   customer_name: "",
@@ -12,7 +12,7 @@ const EMPTY_FORM: InvoiceFormData = {
   due_date: "",
   payment_link: "",
   reminder_tone: "firm",
-  reminder_schedules: ["1_day", "3_days"],
+  reminder_schedules: ["due_today", "overdue_3_days", "overdue_7_days"],
 };
 
 const TONE_OPTIONS: { value: ReminderTone; label: string; desc: string; color: string }[] = [
@@ -21,7 +21,7 @@ const TONE_OPTIONS: { value: ReminderTone; label: string; desc: string; color: s
   { value: "final",    label: "Final",    desc: "Urgent, last reminder",    color: "#ff6b6b" },
 ];
 
-const SCHEDULE_OPTIONS: ReminderSchedule[] = ["1_day", "3_days", "7_days"];
+const SCHEDULE_OPTIONS = SCHEDULE_ORDER;
 
 interface AddInvoiceFormProps {
   open: boolean;
@@ -88,7 +88,7 @@ export default function AddInvoiceForm({ open, onClose, onSave }: AddInvoiceForm
       <div
         className="fixed right-0 top-0 bottom-0 z-50 flex flex-col overflow-hidden w-full sm:w-[480px]"
         style={{
-          background: "#0a0e1a",
+          background: "#141a2b",
           borderLeft: "1px solid rgba(0,200,255,0.12)",
           boxShadow: "-20px 0 60px rgba(0,0,0,0.5)",
         }}
@@ -96,13 +96,13 @@ export default function AddInvoiceForm({ open, onClose, onSave }: AddInvoiceForm
         {/* Header */}
         <div
           className="flex items-center justify-between px-6 py-4 flex-shrink-0"
-          style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}
+          style={{ borderBottom: "1px solid rgba(255,255,255,0.10)" }}
         >
           <div>
             <h2 className="font-display text-white" style={{ fontWeight: 800, fontSize: "1.3rem" }}>
               ADD INVOICE
             </h2>
-            <p className="text-xs" style={{ color: "#64748b" }}>Fill in the details below</p>
+            <p className="text-xs" style={{ color: "#a3b0c4" }}>Fill in the details below</p>
           </div>
           <button
             onClick={onClose}
@@ -110,7 +110,7 @@ export default function AddInvoiceForm({ open, onClose, onSave }: AddInvoiceForm
             style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
           >
             <svg width="14" height="14" fill="none" viewBox="0 0 24 24">
-              <path d="M6 18L18 6M6 6l12 12" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" />
+              <path d="M6 18L18 6M6 6l12 12" stroke="#c2ccdb" strokeWidth="2" strokeLinecap="round" />
             </svg>
           </button>
         </div>
@@ -185,10 +185,10 @@ export default function AddInvoiceForm({ open, onClose, onSave }: AddInvoiceForm
                         borderColor: form.reminder_tone === opt.value ? opt.color : "rgba(255,255,255,0.08)",
                       }}
                     >
-                      <p className="font-display text-sm" style={{ fontWeight: 700, color: form.reminder_tone === opt.value ? opt.color : "#94a3b8" }}>
+                      <p className="font-display text-sm" style={{ fontWeight: 700, color: form.reminder_tone === opt.value ? opt.color : "#c2ccdb" }}>
                         {opt.label}
                       </p>
-                      <p className="text-xs mt-0.5" style={{ color: "#475569", lineHeight: 1.3 }}>{opt.desc}</p>
+                      <p className="text-xs mt-0.5" style={{ color: "#9aa7bd", lineHeight: 1.3 }}>{opt.desc}</p>
                     </button>
                   ))}
                 </div>
@@ -196,7 +196,7 @@ export default function AddInvoiceForm({ open, onClose, onSave }: AddInvoiceForm
 
               {/* Schedule */}
               <div>
-                <label className="field-label">Send Reminders When Overdue By...</label>
+                <label className="field-label">Send Reminders At These Points</label>
                 <div className="space-y-2">
                   {SCHEDULE_OPTIONS.map((s) => {
                     const checked = form.reminder_schedules.includes(s);
@@ -204,7 +204,7 @@ export default function AddInvoiceForm({ open, onClose, onSave }: AddInvoiceForm
                       <label key={s} className="flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all"
                         style={{
                           background: checked ? "rgba(0,200,255,0.06)" : "rgba(255,255,255,0.02)",
-                          border: `1px solid ${checked ? "rgba(0,200,255,0.2)" : "rgba(255,255,255,0.06)"}`,
+                          border: `1px solid ${checked ? "rgba(0,200,255,0.2)" : "rgba(255,255,255,0.10)"}`,
                         }}
                       >
                         <div className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0"
@@ -215,11 +215,11 @@ export default function AddInvoiceForm({ open, onClose, onSave }: AddInvoiceForm
                         >
                           {checked && (
                             <svg width="9" height="9" fill="none" viewBox="0 0 24 24">
-                              <path d="M5 13l4 4L19 7" stroke="#0a0e1a" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+                              <path d="M5 13l4 4L19 7" stroke="#141a2b" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
                             </svg>
                           )}
                         </div>
-                        <span className="text-sm" style={{ color: checked ? "#ffffff" : "#94a3b8" }}>
+                        <span className="text-sm" style={{ color: checked ? "#ffffff" : "#c2ccdb" }}>
                           {SCHEDULE_LABELS[s]}
                         </span>
                         <input type="checkbox" className="sr-only" checked={checked} onChange={() => toggleSchedule(s)} />
@@ -235,10 +235,10 @@ export default function AddInvoiceForm({ open, onClose, onSave }: AddInvoiceForm
 
         {/* Footer */}
         <div className="flex gap-3 px-6 py-4 flex-shrink-0"
-          style={{ borderTop: "1px solid rgba(255,255,255,0.06)", background: "#0a0e1a" }}>
+          style={{ borderTop: "1px solid rgba(255,255,255,0.10)", background: "#141a2b" }}>
           <button type="button" onClick={onClose}
             className="flex-1 py-2.5 rounded-lg text-sm font-display transition-colors"
-            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#94a3b8", fontWeight: 600, letterSpacing: "0.06em" }}>
+            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#c2ccdb", fontWeight: 600, letterSpacing: "0.06em" }}>
             CANCEL
           </button>
           <button type="submit" form="add-invoice-form" className="flex-1 btn-primary"
@@ -267,7 +267,7 @@ export default function AddInvoiceForm({ open, onClose, onSave }: AddInvoiceForm
           font-weight: 600;
           text-transform: uppercase;
           letter-spacing: 0.08em;
-          color: #64748b;
+          color: #a3b0c4;
           margin-bottom: 0.35rem;
         }
         .opt {
@@ -275,7 +275,7 @@ export default function AddInvoiceForm({ open, onClose, onSave }: AddInvoiceForm
           text-transform: none;
           letter-spacing: 0;
           font-weight: 400;
-          color: #475569;
+          color: #9aa7bd;
         }
         .field-err {
           font-size: 0.72rem;
