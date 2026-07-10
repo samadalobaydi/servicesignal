@@ -1,14 +1,13 @@
 import type { Invoice, InvoiceStatus, InvoiceInsert, ReminderSchedule } from "@/types";
+import { getDaysFromDue, getDueStatusLabelShort } from "./date-status";
 
 // ── Pure utility functions (no data fetching) ─────────────────────────────
 
 export function deriveStatus(invoice: Invoice): InvoiceStatus {
   if (invoice.status === "paid") return "paid";
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const due = new Date(invoice.due_date);
-  due.setHours(0, 0, 0, 0);
-  return due < today ? "overdue" : "unpaid";
+  // Overdue once past the due date, using the shared London-aware calc.
+  // Due-today counts as unpaid (not yet overdue).
+  return getDaysFromDue(invoice.due_date) > 0 ? "overdue" : "unpaid";
 }
 
 export function refreshStatuses(invoices: Invoice[]): Invoice[] {
@@ -61,16 +60,8 @@ export function formatDate(iso: string): string {
 
 export function daysOverdueLabel(invoice: Invoice): string {
   if (invoice.status === "paid") return "Paid";
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const due = new Date(invoice.due_date);
-  due.setHours(0, 0, 0, 0);
-  const diff = Math.floor(
-    (today.getTime() - due.getTime()) / (1000 * 60 * 60 * 24)
-  );
-  if (diff < 0) return `Due in ${Math.abs(diff)}d`;
-  if (diff === 0) return "Due today";
-  return `${diff}d overdue`;
+  // Single source of truth — computed live from due_date vs today (London).
+  return getDueStatusLabelShort(invoice.due_date);
 }
 
 export const SCHEDULE_LABELS: Record<ReminderSchedule, string> = {
@@ -145,6 +136,23 @@ export async function markInvoicePaid(
     console.error("markInvoicePaid error:", error.message);
     return false;
   }
+
+  // ── Kill switch: stop future chasing for this invoice ─────────────────────
+  // Dismiss any reminders still awaiting approval so they leave the queue and
+  // can never be sent. Historical logs (sent/failed) are left untouched.
+  // RLS (update_own_reminder_logs) scopes this to the caller's own rows.
+  const { error: dismissError } = await supabase
+    .from("reminder_logs")
+    .update({ status: "dismissed" })
+    .eq("invoice_id", id)
+    .eq("status", "pending");
+
+  if (dismissError) {
+    // Non-fatal: the invoice IS paid, and the queue also filters paid
+    // invoices defensively, plus Send Now blocks paid invoices server-side.
+    console.error("markInvoicePaid: failed to dismiss pending reminders:", dismissError.message);
+  }
+
   return true;
 }
 

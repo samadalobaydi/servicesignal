@@ -2,8 +2,8 @@ export default function Footer() {
   return (
     <footer
       style={{
-        background: "#05080f",
-        borderTop: "1px solid rgba(255,255,255,0.06)",
+        background: "#f6f8fb",
+        borderTop: "1px solid #e5e7eb",
       }}
     >
       <div className="max-w-6xl mx-auto px-6 py-12">
@@ -11,29 +11,29 @@ export default function Footer() {
           {/* Brand */}
           <div>
             <div className="flex items-center gap-2 mb-4">
-              <div className="w-6 h-6 rounded bg-[#00c8ff] flex items-center justify-center flex-shrink-0">
+              <div className="w-6 h-6 rounded bg-[#0ea5c4] flex items-center justify-center flex-shrink-0">
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                  <path d="M8 1L14 13H2L8 1Z" fill="#0a0e1a" />
-                  <circle cx="8" cy="10" r="1.5" fill="#00c8ff" />
+                  <path d="M8 1L14 13H2L8 1Z" fill="#ffffff" />
+                  <circle cx="8" cy="10" r="1.5" fill="#0ea5c4" />
                 </svg>
               </div>
               <span
-                className="font-display font-800 text-base text-white"
+                className="font-display font-800 text-base text-[#0f172a]"
                 style={{ fontWeight: 800, letterSpacing: "0.04em" }}
               >
-                SERVICE<span className="text-[#00c8ff]">SIGNAL</span>
+                SERVICE<span className="text-[#0ea5c4]">SIGNAL</span>
               </span>
             </div>
-            <p className="text-[#64748b] text-sm leading-relaxed max-w-xs">
-              Stop chasing late payments manually. ServiceSignal automatically
-              follows up with customers who have unpaid invoices.
+            <p className="text-[#94a3b8] text-sm leading-relaxed max-w-xs">
+              ServiceSignal helps you follow up with customers who have unpaid
+              invoices — professionally, and on your terms.
             </p>
           </div>
 
           {/* Links */}
           <div>
             <p
-              className="font-display font-600 text-white text-sm mb-4 uppercase tracking-wider"
+              className="font-display font-600 text-[#0f172a] text-sm mb-4 uppercase tracking-wider"
               style={{ fontWeight: 600, letterSpacing: "0.1em" }}
             >
               Product
@@ -49,7 +49,7 @@ export default function Footer() {
                 <li key={link.label}>
                   <a
                     href={link.href}
-                    className="text-[#64748b] hover:text-white text-sm transition-colors"
+                    className="text-[#94a3b8] hover:text-[#0f172a] text-sm transition-colors"
                   >
                     {link.label}
                   </a>
@@ -61,7 +61,7 @@ export default function Footer() {
           {/* Contact */}
           <div>
             <p
-              className="font-display font-600 text-white text-sm mb-4 uppercase tracking-wider"
+              className="font-display font-600 text-[#0f172a] text-sm mb-4 uppercase tracking-wider"
               style={{ fontWeight: 600, letterSpacing: "0.1em" }}
             >
               Contact
@@ -70,14 +70,14 @@ export default function Footer() {
               <li>
                 <a
                   href="mailto:hello@servicesignal.co.uk"
-                  className="text-[#64748b] hover:text-[#00c8ff] text-sm transition-colors"
+                  className="text-[#94a3b8] hover:text-[#0ea5c4] text-sm transition-colors"
                 >
                   hello@servicesignal.co.uk
                 </a>
               </li>
             </ul>
             <div className="mt-6">
-              <a href="#signup" className="btn-primary" style={{ padding: "0.6rem 1.5rem", fontSize: "0.85rem" }}>
+              <a href="#signup" className="lp-btn" style={{ padding: "0.6rem 1.5rem", fontSize: "0.85rem" }}>
                 Join Beta →
               </a>
             </div>
@@ -86,19 +86,14 @@ export default function Footer() {
 
         {/* Bottom bar */}
         <div
-          className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#475569]"
-          style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}
+          className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#94a3b8]"
+          style={{ borderTop: "1px solid #e5e7eb" }}
         >
           <p>
             &copy; {new Date().getFullYear()} ServiceSignal. All rights reserved.
           </p>
           <div className="flex items-center gap-4">
-            <a href="#" className="hover:text-[#94a3b8] transition-colors">
-              Privacy Policy
-            </a>
-            <a href="#" className="hover:text-[#94a3b8] transition-colors">
-              Terms of Service
-            </a>
+            <span>Privacy Policy &amp; Terms will be published before launch</span>
           </div>
         </div>
       </div>

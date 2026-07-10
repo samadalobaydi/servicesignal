@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { ReminderLog, ReminderMode } from "@/types";
 import { formatCurrency, formatDate, SCHEDULE_LABELS } from "@/lib/invoices";
+import { getDueStatusLabel } from "@/lib/date-status";
 import { approveReminder, dismissReminder } from "@/lib/reminders";
 
 interface ReminderQueueProps {
@@ -49,42 +50,37 @@ export default function ReminderQueue({ reminders, reminderMode, onChanged }: Re
   };
 
   return (
-    <div
-      className="rounded-xl overflow-hidden"
-      style={{ border: "1px solid rgba(255,189,46,0.2)", background: "#141a2b" }}
-    >
+    <div className="dash-card overflow-hidden">
       {/* Header */}
       <div
         className="flex items-center justify-between px-6 py-5"
-        style={{ borderBottom: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,189,46,0.04)" }}
+        style={{ borderBottom: "1px solid var(--dash-border)", background: "var(--dash-amber-soft)" }}
       >
         <div className="flex items-center gap-3">
           <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-            style={{ background: "rgba(255,189,46,0.1)", border: "1px solid rgba(255,189,46,0.25)" }}
+            className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+            style={{ background: "#fef3c7", color: "var(--dash-amber)" }}
           >
-            <svg width="15" height="15" fill="none" viewBox="0 0 24 24">
-              <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke="#ffbd2e" strokeWidth="2" strokeLinecap="round" />
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24">
+              <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
             </svg>
           </div>
           <div>
-            <h2 className="font-display text-white" style={{ fontWeight: 800, fontSize: "1rem", letterSpacing: "0.04em" }}>
-              REMINDERS AWAITING APPROVAL
+            <h2 style={{ fontWeight: 650, fontSize: "1.02rem", color: "var(--dash-text)" }}>
+              Reminders Awaiting Approval
             </h2>
-            <p className="text-xs" style={{ color: "#c2ccdb" }}>
+            <p className="text-sm" style={{ color: "var(--dash-text-muted)" }}>
               {visibleReminders.length} reminder{visibleReminders.length !== 1 ? "s" : ""} ready to send
               {reminderMode === "approval" && " — review and approve below"}
             </p>
           </div>
         </div>
         <span
-          className="text-xs px-2.5 py-1 rounded font-display uppercase tracking-wide flex-shrink-0"
+          className="text-xs px-2.5 py-1 rounded-md flex-shrink-0"
           style={{
-            background: "rgba(255,189,46,0.1)",
-            border: "1px solid rgba(255,189,46,0.25)",
-            color: "#ffbd2e",
-            fontWeight: 700,
-            letterSpacing: "0.08em",
+            background: "#fef3c7",
+            color: "var(--dash-amber)",
+            fontWeight: 600,
           }}
         >
           {reminderMode === "auto" ? "Auto Mode" : "Approval Mode"}
@@ -93,15 +89,15 @@ export default function ReminderQueue({ reminders, reminderMode, onChanged }: Re
 
       {error && (
         <div
-          className="px-5 py-2 text-xs"
-          style={{ background: "rgba(255,107,107,0.08)", color: "#ff6b6b" }}
+          className="px-6 py-2.5 text-sm"
+          style={{ background: "var(--dash-red-soft)", color: "var(--dash-red)" }}
         >
           {error}
         </div>
       )}
 
       {/* Reminder rows */}
-      <div className="divide-y" style={{ borderColor: "rgba(255,255,255,0.04)" }}>
+      <div>
         {visibleReminders.map((r) => {
           const inv = r.invoice;
           const busy = busyId === r.id;
@@ -109,19 +105,19 @@ export default function ReminderQueue({ reminders, reminderMode, onChanged }: Re
             <div
               key={r.id}
               className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-6 py-4"
-              style={{ borderColor: "rgba(255,255,255,0.04)" }}
+              style={{ borderTop: "1px solid var(--dash-border)" }}
             >
               <div className="min-w-0">
-                <p className="text-base text-white font-medium">
+                <p className="text-base font-medium" style={{ color: "var(--dash-text)" }}>
                   {inv?.customer_name ?? "Customer"}
                   {inv && (
-                    <span className="ml-2" style={{ color: "#a3b0c4" }}>
+                    <span className="ml-2" style={{ color: "var(--dash-text-muted)" }}>
                       {formatCurrency(inv.amount)}
                     </span>
                   )}
                 </p>
-                <p className="text-sm mt-1" style={{ color: "#a3b0c4" }}>
-                  {SCHEDULE_LABELS[r.schedule]}
+                <p className="text-sm mt-1" style={{ color: "var(--dash-text-muted)" }}>
+                  {inv ? getDueStatusLabel(inv.due_date) : SCHEDULE_LABELS[r.schedule]}
                   {inv && ` · Due ${formatDate(inv.due_date)}`}
                   {" · To "}{r.email_to}
                 </p>
@@ -131,30 +127,16 @@ export default function ReminderQueue({ reminders, reminderMode, onChanged }: Re
                 <button
                   onClick={() => handleDismiss(r.id)}
                   disabled={busy}
-                  className="px-3.5 py-2 rounded-lg text-sm font-display transition-colors"
-                  style={{
-                    background: "rgba(255,255,255,0.04)",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    color: "#c2ccdb",
-                    fontWeight: 600,
-                    letterSpacing: "0.04em",
-                    opacity: busy ? 0.5 : 1,
-                  }}
+                  className="dash-btn-ghost"
+                  style={{ opacity: busy ? 0.5 : 1, padding: "0.5rem 0.9rem" }}
                 >
                   Dismiss
                 </button>
                 <button
                   onClick={() => handleApprove(r.id)}
                   disabled={busy}
-                  className="px-3.5 py-2 rounded-lg text-sm font-display transition-colors"
-                  style={{
-                    background: "rgba(0,200,255,0.1)",
-                    border: "1px solid rgba(0,200,255,0.25)",
-                    color: "#00c8ff",
-                    fontWeight: 700,
-                    letterSpacing: "0.04em",
-                    opacity: busy ? 0.5 : 1,
-                  }}
+                  className="dash-btn"
+                  style={{ opacity: busy ? 0.5 : 1, padding: "0.5rem 0.9rem" }}
                 >
                   {busy ? "..." : "Send Now"}
                 </button>

@@ -17,20 +17,20 @@ export default function WhoItsFor() {
   return (
     <section
       className="section bg-grid"
-      style={{ background: "#0a0e1a" }}
+      style={{ background: "#ffffff" }}
     >
       <div className="max-w-6xl mx-auto px-6">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
           {/* Left: text */}
           <div>
             <p
-              className="font-display font-600 text-[#00c8ff] mb-3 tracking-widest text-sm uppercase"
+              className="font-display font-600 text-[#0ea5c4] mb-3 tracking-widest text-sm uppercase"
               style={{ fontWeight: 600, letterSpacing: "0.15em" }}
             >
               Who It's For
             </p>
             <h2
-              className="font-display text-white mb-6"
+              className="font-display text-[#0f172a] mb-6"
               style={{
                 fontSize: "clamp(2rem, 5vw, 3.2rem)",
                 fontWeight: 800,
@@ -38,8 +38,8 @@ export default function WhoItsFor() {
                 letterSpacing: "-0.01em",
               }}
             >
-              BUILT FOR PEOPLE WHO DO THE{" "}
-              <span className="text-[#00c8ff]">ACTUAL WORK.</span>
+              Built for people who do the{" "}
+              <span className="text-[#0ea5c4]">actual work</span>
             </h2>
             <p className="text-[#94a3b8] leading-relaxed mb-6">
               ServiceSignal is for tradesmen and local service businesses who
@@ -56,11 +56,11 @@ export default function WhoItsFor() {
             <div
               className="rounded-xl p-5"
               style={{
-                background: "rgba(0,230,118,0.05)",
-                border: "1px solid rgba(0,230,118,0.15)",
+                background: "#ecfeff",
+                border: "1px solid #a5f0fa",
               }}
             >
-              <p className="text-[#00e676] font-display font-700 text-lg mb-1" style={{fontWeight:700}}>
+              <p className="text-[#0891b2] font-display font-700 text-lg mb-1" style={{fontWeight:700}}>
                 You don't need to be "techy"
               </p>
               <p className="text-[#94a3b8] text-sm">
@@ -78,7 +78,7 @@ export default function WhoItsFor() {
               {trades.map((trade, i) => (
                 <div
                   key={i}
-                  className="card p-4 flex flex-col items-center gap-2 hover:border-[rgba(0,200,255,0.2)] transition-colors text-center"
+                  className="lp-card p-4 flex flex-col items-center gap-2 hover:border-[#a5f0fa] transition-colors text-center"
                 >
                   <span className="text-2xl">{trade.icon}</span>
                   <span className="text-[#94a3b8] text-xs font-500">
@@ -87,7 +87,7 @@ export default function WhoItsFor() {
                 </div>
               ))}
             </div>
-            <p className="text-center text-[#475569] text-xs mt-4">
+            <p className="text-center text-[#94a3b8] text-xs mt-4">
               + any other local service business that sends invoices
             </p>
           </div>

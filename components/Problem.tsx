@@ -4,32 +4,32 @@ const problems = [
       <svg width="28" height="28" fill="none" viewBox="0 0 24 24">
         <path
           d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-          stroke="#ff6b6b"
+          stroke="#dc2626"
           strokeWidth="2"
           strokeLinecap="round"
         />
       </svg>
     ),
-    stat: "£8,000+",
-    label: "Average unpaid at any one time",
+    stat: "Thousands",
+    label: "Often tied up in unpaid invoices",
     description:
-      "Most tradesmen are sitting on thousands in overdue invoices they're too busy — or too awkward — to chase.",
+      "Many tradespeople are sitting on significant sums in overdue invoices they're too busy — or too awkward — to chase.",
   },
   {
     icon: (
       <svg width="28" height="28" fill="none" viewBox="0 0 24 24">
         <path
           d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-          stroke="#ffbd2e"
+          stroke="#d97706"
           strokeWidth="2"
           strokeLinecap="round"
         />
       </svg>
     ),
-    stat: "47 days",
-    label: "Average time to get paid",
+    stat: "Weeks",
+    label: "Often spent waiting to get paid",
     description:
-      "Late payment is the UK's biggest small business killer. While you wait, you're still paying for materials, fuel, and wages.",
+      "Late payment is one of the biggest pressures on UK small businesses. While you wait, you're still paying for materials, fuel, and wages.",
   },
   {
     icon: (
@@ -42,7 +42,7 @@ const problems = [
         />
       </svg>
     ),
-    stat: "3–5 hrs/week",
+    stat: "Hours",
     label: "Lost to manual chasing",
     description:
       "Sending reminders manually, logging calls, writing emails — it's time you could spend on jobs that actually pay.",
@@ -53,27 +53,27 @@ export default function Problem() {
   return (
     <section
       className="section"
-      style={{ background: "#05080f", borderTop: "1px solid rgba(255,255,255,0.04)" }}
+      style={{ background: "#f6f8fb", borderTop: "1px solid #e5e7eb" }}
     >
       <div className="max-w-6xl mx-auto px-6">
         {/* Section label */}
         <div className="text-center mb-14">
           <p
-            className="font-display font-600 text-[#00c8ff] mb-3 tracking-widest text-sm uppercase"
+            className="font-display font-600 text-[#0ea5c4] mb-3 tracking-widest text-sm uppercase"
             style={{ fontWeight: 600, letterSpacing: "0.15em" }}
           >
             The Problem
           </p>
           <h2
-            className="font-display text-white mb-4"
+            className="font-display text-[#0f172a] mb-4"
             style={{
               fontSize: "clamp(2rem, 5vw, 3.5rem)",
               fontWeight: 800,
               letterSpacing: "-0.01em",
             }}
           >
-            GETTING PAID SHOULDN'T BE{" "}
-            <span className="text-[#ff6b6b]">THIS HARD.</span>
+            Getting paid shouldn't be{" "}
+            <span className="text-[#dc2626]">this hard</span>
           </h2>
           <p className="text-[#94a3b8] max-w-xl mx-auto leading-relaxed">
             You did the work. You sent the invoice. And now you're waiting —
@@ -87,18 +87,18 @@ export default function Problem() {
           {problems.map((p, i) => (
             <div
               key={i}
-              className="card p-6 hover:border-[rgba(0,200,255,0.2)] transition-colors"
+              className="lp-card p-6 hover:border-[#a5f0fa] transition-colors"
             >
               <div className="mb-4">{p.icon}</div>
               <div
-                className="font-display text-white mb-1"
-                style={{ fontSize: "2.2rem", fontWeight: 800, lineHeight: 1 }}
+                className="font-display text-[#0f172a] mb-1"
+                style={{ fontSize: "2.2rem", fontWeight: 600, lineHeight: 1 }}
               >
                 {p.stat}
               </div>
               <div className="text-[#94a3b8] text-sm font-500 mb-3">{p.label}</div>
               <div className="signal-line mb-3" />
-              <p className="text-[#64748b] text-sm leading-relaxed">{p.description}</p>
+              <p className="text-[#94a3b8] text-sm leading-relaxed">{p.description}</p>
             </div>
           ))}
         </div>
@@ -107,19 +107,19 @@ export default function Problem() {
         <div
           className="max-w-3xl mx-auto rounded-xl p-8 text-center"
           style={{
-            background: "rgba(255, 107, 107, 0.05)",
-            border: "1px solid rgba(255, 107, 107, 0.15)",
+            background: "#fef2f2",
+            border: "1px solid #fecaca",
           }}
         >
           <p
-            className="font-display text-white mb-4"
-            style={{ fontSize: "clamp(1.2rem, 3vw, 1.8rem)", fontWeight: 700 }}
+            className="font-display text-[#0f172a] mb-4"
+            style={{ fontSize: "clamp(1.2rem, 3vw, 1.7rem)", fontWeight: 700 }}
           >
-            "I was owed £12,000 at one point. I'd done the work, I'd sent
-            the invoices — I just kept forgetting to follow up."
+            It&apos;s a familiar story: the work is done, the invoices are sent —
+            and following up keeps slipping to the bottom of the list.
           </p>
           <p className="text-[#64748b] text-sm">
-            — Builder with 15 years experience, Essex
+            ServiceSignal is built to take that follow-up off your plate.
           </p>
         </div>
       </div>

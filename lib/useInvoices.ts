@@ -74,6 +74,7 @@ export function useInvoices() {
         created_at: now,
         paid_at: null,
         reminders_sent: [],
+        escalation_status: "active",
       };
       // Compute correct status on creation
       newInvoice.status = computeStatus(newInvoice);

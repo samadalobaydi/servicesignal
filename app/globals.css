@@ -17,6 +17,246 @@
   --text-muted: #64748b;
   --text-soft: #94a3b8;
   --border: rgba(0, 200, 255, 0.12);
+
+  /* ── Light dashboard design system (v8.4.1) — scoped to .dash-root ── */
+  --dash-bg: #f6f8fb;
+  --dash-sidebar: #0f172a;
+  --dash-sidebar-hover: rgba(255, 255, 255, 0.06);
+  --dash-sidebar-active: rgba(56, 189, 248, 0.14);
+  --dash-card: #ffffff;
+  --dash-card-muted: #f8fafc;
+  --dash-border: #e5e7eb;
+  --dash-border-strong: #cbd5e1;
+  --dash-text: #0f172a;
+  --dash-text-muted: #64748b;
+  --dash-text-soft: #94a3b8;
+  --dash-accent: #0ea5c4;        /* cyan tuned for white bg contrast */
+  --dash-accent-strong: #0891b2;
+  --dash-accent-soft: #ecfeff;
+  --dash-green: #059669;
+  --dash-green-soft: #ecfdf5;
+  --dash-amber: #d97706;
+  --dash-amber-soft: #fffbeb;
+  --dash-red: #dc2626;
+  --dash-red-soft: #fef2f2;
+  --dash-shadow: 0 1px 3px rgba(16, 24, 40, 0.06), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --dash-shadow-md: 0 4px 12px rgba(16, 24, 40, 0.08), 0 2px 4px rgba(16, 24, 40, 0.04);
+  --dash-shadow-lg: 0 12px 32px rgba(16, 24, 40, 0.12);
+}
+
+/* Dashboard uses a light theme; this overrides the dark body bg for /dashboard */
+.dash-root {
+  background: var(--dash-bg);
+  color: var(--dash-text);
+  min-height: 100vh;
+}
+
+/* ── Light landing-page design system (v8.4.5) — scoped to .lp-root ──────────
+   Matches the dashboard: navy/cyan brand, light surface, white cards, soft
+   shadows. Kept separate from dashboard (.dash-*) and legacy dark landing
+   classes (.btn-primary/.form-input) so nothing else is affected. */
+.lp-root {
+  background: #f6f8fb;
+  color: #0f172a;
+  min-height: 100vh;
+  font-family: "DM Sans", sans-serif;
+}
+.lp-root ::selection {
+  background: rgba(14, 165, 196, 0.18);
+}
+
+/* Section container */
+.lp-section {
+  width: 100%;
+  max-width: 1160px;
+  margin: 0 auto;
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+}
+
+/* White card */
+.lp-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06), 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+
+/* Primary button (cyan, matches dashboard .dash-btn) */
+.lp-btn {
+  background: #0ea5c4;
+  color: #ffffff;
+  font-family: "DM Sans", sans-serif;
+  font-weight: 600;
+  font-size: 1rem;
+  padding: 0.8rem 1.5rem;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  text-decoration: none;
+}
+.lp-btn:hover {
+  background: #0891b2;
+  box-shadow: 0 6px 18px rgba(8, 145, 178, 0.28);
+  transform: translateY(-1px);
+}
+.lp-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+  box-shadow: none;
+  transform: none;
+}
+
+/* Ghost / secondary button */
+.lp-btn-ghost {
+  background: #ffffff;
+  color: #0f172a;
+  font-family: "DM Sans", sans-serif;
+  font-weight: 600;
+  font-size: 1rem;
+  padding: 0.8rem 1.5rem;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  text-decoration: none;
+}
+.lp-btn-ghost:hover {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+/* Light input for the landing (beta signup) */
+.lp-input {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  color: #0f172a;
+  padding: 0.8rem 1rem;
+  width: 100%;
+  font-family: "DM Sans", sans-serif;
+  font-size: 1rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  outline: none;
+}
+.lp-input:focus {
+  border-color: #0ea5c4;
+  box-shadow: 0 0 0 3px rgba(14, 165, 196, 0.12);
+}
+.lp-input::placeholder {
+  color: #94a3b8;
+}
+.lp-input option {
+  background: #ffffff;
+  color: #0f172a;
+}
+
+/* Small eyebrow / pill label */
+.lp-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: #ecfeff;
+  color: #0891b2;
+  border: 1px solid #a5f0fa;
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+
+/* Light card */
+.dash-card {
+  background: var(--dash-card);
+  border: 1px solid var(--dash-border);
+  border-radius: 14px;
+  box-shadow: var(--dash-shadow);
+}
+
+/* Modern light input */
+.dash-input {
+  background: #ffffff;
+  border: 1px solid var(--dash-border-strong);
+  border-radius: 9px;
+  color: var(--dash-text);
+  padding: 0.7rem 0.9rem;
+  width: 100%;
+  font-family: "DM Sans", sans-serif;
+  font-size: 0.95rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  outline: none;
+}
+.dash-input:focus {
+  border-color: var(--dash-accent);
+  box-shadow: 0 0 0 3px rgba(14, 165, 196, 0.12);
+}
+.dash-input::placeholder {
+  color: var(--dash-text-soft);
+}
+.dash-input option {
+  background: #ffffff;
+  color: var(--dash-text);
+}
+
+/* Primary dashboard button (light theme, sentence case) */
+.dash-btn {
+  background: var(--dash-accent);
+  color: #ffffff;
+  font-family: "DM Sans", sans-serif;
+  font-weight: 600;
+  font-size: 0.9rem;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 0.6rem 1.1rem;
+  border-radius: 9px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  text-decoration: none;
+}
+.dash-btn:hover {
+  background: var(--dash-accent-strong);
+  box-shadow: 0 4px 14px rgba(8, 145, 178, 0.25);
+}
+.dash-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+  box-shadow: none;
+}
+
+/* Secondary / ghost dashboard button */
+.dash-btn-ghost {
+  background: #ffffff;
+  color: var(--dash-text-muted);
+  font-family: "DM Sans", sans-serif;
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 0.6rem 1.1rem;
+  border-radius: 9px;
+  border: 1px solid var(--dash-border-strong);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.dash-btn-ghost:hover {
+  background: var(--dash-card-muted);
+  border-color: var(--dash-text-soft);
 }
 
 * {

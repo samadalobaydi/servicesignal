@@ -10,7 +10,7 @@ export async function fetchPendingReminders(
 ): Promise<ReminderLog[]> {
   const { data, error } = await supabase
     .from("reminder_logs")
-    .select("*, invoice:invoices(customer_name, amount, due_date)")
+    .select("*, invoice:invoices(customer_name, amount, due_date, status)")
     .eq("status", "pending")
     .order("created_at", { ascending: true });
 
@@ -18,7 +18,10 @@ export async function fetchPendingReminders(
     console.error("fetchPendingReminders error:", error.message);
     return [];
   }
-  return (data ?? []) as ReminderLog[];
+  // Defensive: never surface reminders for invoices that have been paid.
+  // (Mark Paid also dismisses these, but this guards any that slip through.)
+  const logs = (data ?? []) as ReminderLog[];
+  return logs.filter((r) => r.invoice?.status !== "paid");
 }
 
 /**
@@ -80,4 +83,34 @@ export async function prepareReminder(
   } catch {
     return { success: false, message: "Network error. Please try again." };
   }
+}
+
+/**
+ * Returns a map of invoice_id → ISO timestamp of that invoice's most recent
+ * SENT reminder. Used to drive the "action needed after 48h" escalation rule.
+ * RLS scopes this to the current user's reminders only.
+ */
+export async function fetchLatestSentMap(
+  supabase: SupabaseClient
+): Promise<Record<string, string>> {
+  const { data, error } = await supabase
+    .from("reminder_logs")
+    .select("invoice_id, sent_at")
+    .eq("status", "sent")
+    .not("sent_at", "is", null)
+    .order("sent_at", { ascending: false });
+
+  if (error) {
+    console.error("fetchLatestSentMap error:", error.message);
+    return {};
+  }
+
+  const map: Record<string, string> = {};
+  for (const row of data ?? []) {
+    // rows are newest-first, so the first time we see an invoice_id is its latest
+    if (row.invoice_id && row.sent_at && !map[row.invoice_id]) {
+      map[row.invoice_id] = row.sent_at as string;
+    }
+  }
+  return map;
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Invoice } from "@/types";
+import type { Invoice, EscalationStatus } from "@/types";
 import {
   formatCurrency,
   formatDate,
@@ -10,6 +10,14 @@ import {
   refreshStatuses,
 } from "@/lib/invoices";
 import { scheduleToPrepare } from "@/lib/reminder-schedule";
+import {
+  computeLifecycleState,
+  escalationStatusLabel,
+  latestActionRowSummary,
+  actionTypeColor,
+  type InvoiceLifecycleState,
+} from "@/lib/escalation";
+import type { InvoiceAction } from "@/types";
 
 interface InvoiceTableProps {
   invoices: Invoice[];
@@ -17,6 +25,9 @@ interface InvoiceTableProps {
   onDelete: (id: string) => void;
   onPrepareReminder: (invoiceId: string) => Promise<{ success: boolean; message: string }>;
   pendingReminderInvoiceIds: Set<string>;
+  latestSentMap: Record<string, string>;
+  latestActionMap: Record<string, InvoiceAction>;
+  onNextStep: (invoice: Invoice) => void;
 }
 
 function StatusBadge({ status }: { status: Invoice["status"] }) {
@@ -79,111 +90,216 @@ function ReminderPips({ invoice }: { invoice: Invoice }) {
 }
 
 /**
- * Renders the right reminder action / status for an invoice row.
- * Covers every state so the user never needs to understand cron logic:
- *   - paid                         → nothing
- *   - has a pending reminder       → "Reminder ready — see queue above"
- *   - all schedules already sent   → "All reminders sent"
- *   - something can be chased now   → "Prepare Reminder" button
- *   - no schedules selected        → "No reminders set"
+ * A small summary chip shown on the row when the invoice has a recorded
+ * latest action (Call logged, Promised to pay, Disputed, etc.).
+ */
+function LatestActionChip({ action }: { action: InvoiceAction }) {
+  const color = actionTypeColor(action.action_type);
+  const summary = latestActionRowSummary(action.action_type);
+  const when = new Date(action.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  return (
+    <div className="flex flex-col gap-0.5 items-start">
+      <span
+        className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg"
+        style={{ background: `${color}14`, border: `1px solid ${color}40`, color, fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}
+      >
+        <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+        {summary}
+      </span>
+      {action.note && (
+        <span className="text-sm" style={{ color: "#9aa7bd" }}>“{action.note}”</span>
+      )}
+      <span className="text-xs" style={{ color: "#7d8a9e" }}>{when}</span>
+    </div>
+  );
+}
+
+/**
+ * Renders the right reminder/escalation action or status for an invoice row.
+ * Covers every state so the user never hits a dead end. When a latest action
+ * exists it is summarised directly on the row, with a secondary button to
+ * view full history / add an update.
  */
 function ReminderAction({
   invoice,
   hasPending,
+  finalReminderSentAt,
+  latestAction,
   onPrepare,
+  onNextStep,
 }: {
   invoice: Invoice;
   hasPending: boolean;
+  finalReminderSentAt: string | null;
+  latestAction: InvoiceAction | null;
   onPrepare: (invoiceId: string) => Promise<{ success: boolean; message: string }>;
+  onNextStep: (invoice: Invoice) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
   if (invoice.status === "paid") return null;
 
-  if (hasPending) {
-    return (
-      <span
-        className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg"
-        style={{ background: "rgba(255,189,46,0.08)", border: "1px solid rgba(255,189,46,0.25)", color: "#ffbd2e", fontFamily: "'DM Sans', sans-serif" }}
-        title="A reminder for this invoice is waiting in the approval queue above"
-      >
-        <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#ffbd2e" }} />
-        Reminder ready — see queue above
-      </span>
-    );
-  }
-
-  if (!invoice.reminder_schedules || invoice.reminder_schedules.length === 0) {
-    return (
-      <span className="text-sm" style={{ color: "#9aa7bd" }}>
-        No reminders set
-      </span>
-    );
-  }
-
-  // Is there an unsent schedule we can chase?
-  const next = scheduleToPrepare(
-    invoice.reminder_schedules,
+  const canPrepare = !!scheduleToPrepare(
+    invoice.reminder_schedules ?? [],
     invoice.reminders_sent ?? [],
     invoice.due_date
   );
 
-  if (!next) {
+  const state: InvoiceLifecycleState = computeLifecycleState({
+    invoice,
+    hasPending,
+    canPrepare,
+    finalReminderSentAt,
+  });
+
+  const secondaryLabel = latestAction ? "Add Update" : "View History";
+
+  // ── Explicit escalation states (user-set: promised/disputed/paused/written off) ──
+  if (state === "promised" || state === "disputed" || state === "paused" || state === "written_off") {
     return (
-      <span className="inline-flex items-center gap-1.5 text-sm" style={{ color: "#00e676" }}>
-        <svg width="12" height="12" fill="none" viewBox="0 0 24 24">
-          <path d="M5 13l4 4L19 7" stroke="#00e676" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        All reminders sent
-      </span>
+      <div className="flex flex-col gap-1.5 items-start">
+        {latestAction ? (
+          <LatestActionChip action={latestAction} />
+        ) : (
+          <span
+            className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg"
+            style={(() => {
+              const c: Record<EscalationStatus, string> = { active: "#9aa7bd", promised: "#00e676", disputed: "#ffbd2e", paused: "#9aa7bd", written_off: "#ff6b6b" };
+              const color = c[invoice.escalation_status];
+              return { background: `${color}14`, border: `1px solid ${color}40`, color, fontFamily: "'DM Sans', sans-serif", fontWeight: 600 };
+            })()}
+          >
+            {escalationStatusLabel(invoice.escalation_status)}
+          </span>
+        )}
+        <button
+          onClick={() => onNextStep(invoice)}
+          className="text-sm font-display transition-colors"
+          style={{ color: "#9aa7bd", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "2px" }}
+        >
+          {secondaryLabel}
+        </button>
+      </div>
     );
   }
 
-  const handlePrepare = async () => {
-    setBusy(true);
-    setNote(null);
-    const result = await onPrepare(invoice.id);
-    if (!result.success) setNote(result.message);
-    setBusy(false);
-  };
+  if (state === "has_pending") {
+    return (
+      <div className="flex flex-col gap-1.5 items-start">
+        <span
+          className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg"
+          style={{ background: "rgba(255,189,46,0.08)", border: "1px solid rgba(255,189,46,0.25)", color: "#ffbd2e", fontFamily: "'DM Sans', sans-serif" }}
+          title="A reminder for this invoice is waiting in the approval queue above"
+        >
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#ffbd2e" }} />
+          Reminder ready — see queue above
+        </span>
+        {latestAction && <LatestActionChip action={latestAction} />}
+      </div>
+    );
+  }
 
+  if (state === "no_reminders_set") {
+    return (
+      <div className="flex flex-col gap-1.5 items-start">
+        <span className="text-sm" style={{ color: "#9aa7bd" }}>No reminders set</span>
+        {latestAction && <LatestActionChip action={latestAction} />}
+      </div>
+    );
+  }
+
+  if (state === "can_prepare") {
+    const next = scheduleToPrepare(invoice.reminder_schedules, invoice.reminders_sent ?? [], invoice.due_date)!;
+    const handlePrepare = async () => {
+      setBusy(true);
+      setNote(null);
+      const result = await onPrepare(invoice.id);
+      if (!result.success) setNote(result.message);
+      setBusy(false);
+    };
+    return (
+      <div className="flex flex-col gap-1.5 items-start">
+        <button
+          onClick={handlePrepare}
+          disabled={busy}
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-display transition-colors whitespace-nowrap"
+          style={{ background: "rgba(0,200,255,0.1)", border: "1px solid rgba(0,200,255,0.25)", color: "#00c8ff", fontWeight: 700, letterSpacing: "0.04em", opacity: busy ? 0.6 : 1 }}
+          title={`Prepare a "${SCHEDULE_LABELS[next]}" reminder — it will appear in the approval queue, not send straight away`}
+        >
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24">
+            <path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          {busy ? "Preparing..." : "Prepare Reminder"}
+        </button>
+        {note && <span className="text-sm" style={{ color: "#c2ccdb" }}>{note}</span>}
+        {latestAction && <LatestActionChip action={latestAction} />}
+      </div>
+    );
+  }
+
+  if (state === "waiting_after_final") {
+    return (
+      <div className="flex flex-col gap-1.5 items-start">
+        {latestAction ? (
+          <LatestActionChip action={latestAction} />
+        ) : (
+          <span className="inline-flex items-center gap-1.5 text-sm" style={{ color: "#00e676" }}>
+            <svg width="12" height="12" fill="none" viewBox="0 0 24 24">
+              <path d="M5 13l4 4L19 7" stroke="#00e676" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Final reminder sent — waiting for payment
+          </span>
+        )}
+        <button
+          onClick={() => onNextStep(invoice)}
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-display transition-colors whitespace-nowrap"
+          style={{ background: "rgba(0,200,255,0.1)", border: "1px solid rgba(0,200,255,0.25)", color: "#00c8ff", fontWeight: 700, letterSpacing: "0.04em" }}
+        >
+          {latestAction ? secondaryLabel : "Choose Action"}
+        </button>
+      </div>
+    );
+  }
+
+  // state === "action_needed"
   return (
-    <div className="flex flex-col gap-1">
-      <button
-        onClick={handlePrepare}
-        disabled={busy}
-        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-display transition-colors whitespace-nowrap"
-        style={{
-          background: "rgba(0,200,255,0.1)",
-          border: "1px solid rgba(0,200,255,0.25)",
-          color: "#00c8ff",
-          fontWeight: 700,
-          letterSpacing: "0.04em",
-          opacity: busy ? 0.6 : 1,
-        }}
-        title={`Prepare a "${SCHEDULE_LABELS[next]}" reminder — it will appear in the approval queue, not send straight away`}
-      >
-        <svg width="12" height="12" fill="none" viewBox="0 0 24 24">
-          <path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-            stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        {busy ? "Preparing..." : "Prepare Reminder"}
-      </button>
-      {note && (
-        <span className="text-xs" style={{ color: "#c2ccdb" }}>{note}</span>
+    <div className="flex flex-col gap-1.5 items-start">
+      {latestAction ? (
+        <LatestActionChip action={latestAction} />
+      ) : (
+        <span
+          className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg"
+          style={{ background: "rgba(255,107,107,0.1)", border: "1px solid rgba(255,107,107,0.3)", color: "#ff6b6b", fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}
+        >
+          <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "#ff6b6b" }} />
+          No payment after final reminder
+        </span>
       )}
+      <button
+        onClick={() => onNextStep(invoice)}
+        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-display transition-colors whitespace-nowrap"
+        style={{ background: "rgba(255,189,46,0.12)", border: "1px solid rgba(255,189,46,0.35)", color: "#ffbd2e", fontWeight: 700, letterSpacing: "0.04em" }}
+      >
+        <svg width="13" height="13" fill="none" viewBox="0 0 24 24">
+          <path d="M13 7l5 5m0 0l-5 5m5-5H6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        {latestAction ? secondaryLabel : "Choose Action"}
+      </button>
     </div>
   );
 }
 
 // ── Mobile card ──────────────────────────────────────────────────────────────
-function InvoiceCard({ invoice, onMarkPaid, onDelete, onPrepareReminder, hasPending }: {
+function InvoiceCard({ invoice, onMarkPaid, onDelete, onPrepareReminder, hasPending, finalReminderSentAt, latestAction, onNextStep }: {
   invoice: Invoice;
   onMarkPaid: (id: string) => void;
   onDelete: (id: string) => void;
   onPrepareReminder: (invoiceId: string) => Promise<{ success: boolean; message: string }>;
   hasPending: boolean;
+  finalReminderSentAt: string | null;
+  latestAction: InvoiceAction | null;
+  onNextStep: (invoice: Invoice) => void;
 }) {
   return (
     <div
@@ -225,7 +341,7 @@ function InvoiceCard({ invoice, onMarkPaid, onDelete, onPrepareReminder, hasPend
       </div>
 
       {/* Reminder action / status */}
-      <ReminderAction invoice={invoice} hasPending={hasPending} onPrepare={onPrepareReminder} />
+      <ReminderAction invoice={invoice} hasPending={hasPending} finalReminderSentAt={finalReminderSentAt} latestAction={latestAction} onPrepare={onPrepareReminder} onNextStep={onNextStep} />
 
       <div className="flex gap-2 pt-1">
         {invoice.status !== "paid" && (
@@ -278,6 +394,9 @@ export default function InvoiceTable({
   onDelete,
   onPrepareReminder,
   pendingReminderInvoiceIds,
+  latestSentMap,
+  latestActionMap,
+  onNextStep,
 }: InvoiceTableProps) {
   const live = refreshStatuses(invoices);
 
@@ -302,6 +421,9 @@ export default function InvoiceTable({
             onDelete={onDelete}
             onPrepareReminder={onPrepareReminder}
             hasPending={pendingReminderInvoiceIds.has(inv.id)}
+            finalReminderSentAt={latestSentMap[inv.id] ?? null}
+            latestAction={latestActionMap[inv.id] ?? null}
+            onNextStep={onNextStep}
           />
         ))}
       </div>
@@ -380,7 +502,10 @@ export default function InvoiceTable({
                     <ReminderAction
                       invoice={inv}
                       hasPending={pendingReminderInvoiceIds.has(inv.id)}
+                      finalReminderSentAt={latestSentMap[inv.id] ?? null}
+                      latestAction={latestActionMap[inv.id] ?? null}
                       onPrepare={onPrepareReminder}
+                      onNextStep={onNextStep}
                     />
                   </div>
                 </td>

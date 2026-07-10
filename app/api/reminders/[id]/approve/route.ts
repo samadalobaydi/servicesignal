@@ -32,7 +32,7 @@ export async function POST(
   // Fetch the reminder log — RLS ensures this is null if not owned by `user`
   const { data: log, error: fetchError } = await supabase
     .from("reminder_logs")
-    .select("*, invoice:invoices(customer_name, amount, due_date, customer_email, payment_link, reminder_tone)")
+    .select("*, invoice:invoices(customer_name, amount, due_date, customer_email, payment_link, reminder_tone, status)")
     .eq("id", params.id)
     .single();
 
@@ -44,9 +44,29 @@ export async function POST(
     invoice: { customer_email: string };
   };
 
-  if (reminder.status !== "pending") {
+  // Sent and dismissed reminders can never be re-sent. A 'failed' reminder
+  // IS retryable — the user can click Send Now again after a transient
+  // failure without having to prepare a fresh reminder.
+  if (reminder.status === "sent" || reminder.status === "dismissed") {
     return NextResponse.json(
       { success: false, message: `Reminder is already ${reminder.status}.` },
+      { status: 409 }
+    );
+  }
+
+  // ── Kill switch: never send reminders for a paid invoice ──────────────────
+  // If the invoice was marked paid after this reminder was queued, block the
+  // send, dismiss the stale reminder (so it leaves the queue without a
+  // misleading "sent" log), and tell the user chasing has stopped.
+  const invoiceStatus = (reminder.invoice as unknown as { status?: string })?.status;
+  if (invoiceStatus === "paid") {
+    await supabase
+      .from("reminder_logs")
+      .update({ status: "dismissed" })
+      .eq("id", params.id);
+
+    return NextResponse.json(
+      { success: false, message: "This invoice has already been marked paid. Reminders are stopped." },
       { status: 409 }
     );
   }
@@ -54,14 +74,15 @@ export async function POST(
   const resend = getResendClient();
 
   if (!resend) {
+    console.error("[send-reminder] RESEND_API_KEY is missing — cannot send. Add it to .env.local (and Vercel).");
     await supabase
       .from("reminder_logs")
       .update({ status: "failed", error_message: "RESEND_API_KEY not configured" })
       .eq("id", params.id);
 
     return NextResponse.json(
-      { success: false, message: "Email sending is not configured yet." },
-      { status: 500 }
+      { success: false, message: "Email service is not configured." },
+      { status: 503 }
     );
   }
 
@@ -105,13 +126,26 @@ export async function POST(
     });
 
     if (sendError) {
+      // Safe to log: Resend error names/messages describe the problem
+      // (e.g. domain not verified, invalid recipient) and contain no secrets.
+      console.error(
+        `[send-reminder] Resend rejected the send for reminder ${params.id}:`,
+        sendError.name ?? "unknown_error",
+        "-", sendError.message
+      );
+
       await supabase
         .from("reminder_logs")
         .update({ status: "failed", error_message: sendError.message })
         .eq("id", params.id);
 
       return NextResponse.json(
-        { success: false, message: "Failed to send email." },
+        {
+          success: false,
+          message: sendError.message
+            ? `Failed to send email: ${sendError.message}`
+            : "Failed to send email.",
+        },
         { status: 500 }
       );
     }
@@ -140,11 +174,12 @@ export async function POST(
     return NextResponse.json({ success: true, message: "Reminder sent." });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
+    console.error(`[send-reminder] Unexpected error sending reminder ${params.id}:`, message);
     await supabase
       .from("reminder_logs")
       .update({ status: "failed", error_message: message })
       .eq("id", params.id);
 
-    return NextResponse.json({ success: false, message: "Failed to send email." }, { status: 500 });
+    return NextResponse.json({ success: false, message: `Failed to send email: ${message}` }, { status: 500 });
   }
 }

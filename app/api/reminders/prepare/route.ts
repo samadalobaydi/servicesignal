@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
 
   if (invoice.status === "paid") {
     return NextResponse.json(
-      { success: false, message: "This invoice is already paid." },
+      { success: false, message: "This invoice has already been marked paid. Reminders are stopped." },
       { status: 409 }
     );
   }
@@ -105,8 +105,38 @@ export async function POST(request: NextRequest) {
         { status: 200 }
       );
     }
+
+    // Dismissed and failed reminders must never block a fresh prepare.
+    // reminder_logs has UNIQUE(invoice_id, schedule), so instead of inserting
+    // a duplicate we revive the existing row back to 'pending' — same
+    // approval flow, no schema change, and history stays intact because the
+    // dismissal/failure already appeared in the activity feed at the time.
+    if (existing.status === "dismissed" || existing.status === "failed") {
+      const { error: reviveError } = await supabase
+        .from("reminder_logs")
+        .update({
+          status: "pending",
+          error_message: null,
+          sent_at: null,
+          email_to: invoice.customer_email,
+        })
+        .eq("id", existing.id);
+
+      if (reviveError) {
+        console.error("[prepare-reminder] Failed to revive reminder:", reviveError.message);
+        return NextResponse.json(
+          { success: false, message: "Failed to prepare reminder." },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({ success: true, message: "Reminder prepared and added to the approval queue." });
+    }
+
+    // status === "sent" — the genuine business rule: this exact scheduled
+    // reminder already went to the customer and shouldn't be duplicated.
     return NextResponse.json(
-      { success: false, message: `This reminder was already ${existing.status}.` },
+      { success: false, message: "This reminder has already been sent." },
       { status: 409 }
     );
   }

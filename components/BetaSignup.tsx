@@ -33,7 +33,7 @@ const TRUST_POINTS = [
   {
     icon: (
       <svg width="16" height="16" fill="none" viewBox="0 0 24 24">
-        <path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" stroke="#00c8ff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" stroke="#0ea5c4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
       </svg>
     ),
     text: "You approve the reminder wording before anything sends",
@@ -41,7 +41,7 @@ const TRUST_POINTS = [
   {
     icon: (
       <svg width="16" height="16" fill="none" viewBox="0 0 24 24">
-        <path d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" stroke="#00c8ff" strokeWidth="2" strokeLinecap="round"/>
+        <path d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" stroke="#0ea5c4" strokeWidth="2" strokeLinecap="round"/>
       </svg>
     ),
     text: "No spammy or aggressive messages — professional tone only",
@@ -49,7 +49,7 @@ const TRUST_POINTS = [
   {
     icon: (
       <svg width="16" height="16" fill="none" viewBox="0 0 24 24">
-        <path d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" stroke="#00c8ff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" stroke="#0ea5c4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
       </svg>
     ),
     text: "Built specifically for UK trades and local service businesses",
@@ -57,7 +57,7 @@ const TRUST_POINTS = [
   {
     icon: (
       <svg width="16" height="16" fill="none" viewBox="0 0 24 24">
-        <path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" stroke="#00c8ff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" stroke="#0ea5c4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
       </svg>
     ),
     text: "Your customer details are private and never shared or sold",
@@ -65,7 +65,7 @@ const TRUST_POINTS = [
   {
     icon: (
       <svg width="16" height="16" fill="none" viewBox="0 0 24 24">
-        <path d="M6 18L18 6M6 6l12 12" stroke="#00c8ff" strokeWidth="2" strokeLinecap="round"/>
+        <path d="M6 18L18 6M6 6l12 12" stroke="#0ea5c4" strokeWidth="2" strokeLinecap="round"/>
       </svg>
     ),
     text: "Cancel anytime — no lock-in when paid plans launch",
@@ -144,8 +144,8 @@ export default function BetaSignup() {
       id="signup"
       className="section"
       style={{
-        background: "#05080f",
-        borderTop: "1px solid rgba(255,255,255,0.04)",
+        background: "#ffffff",
+        borderTop: "1px solid #e5e7eb",
       }}
     >
       <div className="max-w-6xl mx-auto px-6">
@@ -153,25 +153,25 @@ export default function BetaSignup() {
           {/* Left: copy + trust */}
           <div className="lg:sticky lg:top-28">
             <p
-              className="font-display font-600 text-[#00c8ff] mb-3 tracking-widest text-sm uppercase"
+              className="font-display font-600 text-[#0ea5c4] mb-3 tracking-widest text-sm uppercase"
               style={{ fontWeight: 600, letterSpacing: "0.15em" }}
             >
               Join the Beta
             </p>
             <h2
-              className="font-display text-white mb-6"
+              className="font-display text-[#0f172a] mb-6"
               style={{
-                fontSize: "clamp(2rem, 4vw, 3rem)",
-                fontWeight: 800,
-                letterSpacing: "-0.01em",
-                lineHeight: 1.05,
+                fontSize: "clamp(2rem, 4vw, 2.8rem)",
+                fontWeight: 700,
+                letterSpacing: "-0.02em",
+                lineHeight: 1.1,
               }}
             >
-              GET EARLY ACCESS.{" "}
-              <span className="text-[#00c8ff]">LOCK IN YOUR RATE.</span>
+              Get early access.{" "}
+              <span className="text-[#0ea5c4]">Lock in your rate.</span>
             </h2>
-            <p className="text-[#94a3b8] leading-relaxed mb-8">
-              We're building ServiceSignal with a small group of tradesmen and
+            <p className="text-[#64748b] leading-relaxed mb-8">
+              We&apos;re building ServiceSignal with a small group of tradespeople and
               local service businesses who are fed up with chasing payments.
             </p>
 
@@ -184,10 +184,10 @@ export default function BetaSignup() {
               <div key={i} className="flex items-start gap-4 mb-5">
                 <span className="text-xl flex-shrink-0">{perk.icon}</span>
                 <div>
-                  <p className="text-white font-display font-700 text-sm" style={{ fontWeight: 700 }}>
+                  <p className="text-[#0f172a] font-display font-700 text-sm" style={{ fontWeight: 700 }}>
                     {perk.title}
                   </p>
-                  <p className="text-[#64748b] text-sm">{perk.desc}</p>
+                  <p className="text-[#94a3b8] text-sm">{perk.desc}</p>
                 </div>
               </div>
             ))}
@@ -196,12 +196,12 @@ export default function BetaSignup() {
             <div
               className="rounded-xl p-5 mt-8"
               style={{
-                background: "rgba(0,200,255,0.04)",
-                border: "1px solid rgba(0,200,255,0.12)",
+                background: "#ecfeff",
+                border: "1px solid #a5f0fa",
               }}
             >
               <p
-                className="font-display font-700 text-white text-sm mb-4 uppercase tracking-wider"
+                className="font-display font-700 text-[#0f172a] text-sm mb-4 uppercase tracking-wider"
                 style={{ fontWeight: 700, letterSpacing: "0.1em" }}
               >
                 You're in control
@@ -221,8 +221,8 @@ export default function BetaSignup() {
           <div
             className="rounded-2xl p-6 sm:p-8"
             style={{
-              background: "#0f1628",
-              border: "1px solid rgba(0,200,255,0.12)",
+              background: "#ffffff",
+              border: "1px solid #a5f0fa",
             }}
           >
             {/* ── Success state ── */}
@@ -230,32 +230,32 @@ export default function BetaSignup() {
               <div className="flex flex-col items-center text-center py-8">
                 <div
                   className="w-16 h-16 rounded-full flex items-center justify-center mb-5"
-                  style={{ background: "rgba(0,230,118,0.1)", border: "2px solid #00e676" }}
+                  style={{ background: "#ecfdf5", border: "2px solid #059669" }}
                 >
                   <svg width="30" height="30" fill="none" viewBox="0 0 24 24">
-                    <path d="M5 13l4 4L19 7" stroke="#00e676" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M5 13l4 4L19 7" stroke="#059669" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 </div>
                 <h3
-                  className="font-display text-white mb-2"
-                  style={{ fontSize: "1.8rem", fontWeight: 800 }}
+                  className="font-display text-[#0f172a] mb-2"
+                  style={{ fontSize: "1.7rem", fontWeight: 700 }}
                 >
-                  YOU'RE ON THE LIST.
+                  You&apos;re on the list.
                 </h3>
                 <p className="text-[#94a3b8] text-sm leading-relaxed mb-1 max-w-xs">
                   We'll be in touch as soon as beta access opens — usually within a few days.
                 </p>
-                <p className="text-[#64748b] text-xs mt-4">
+                <p className="text-[#94a3b8] text-xs mt-4">
                   Questions?{" "}
-                  <a href="mailto:hello@servicesignal.co.uk" className="text-[#00c8ff] hover:underline">
+                  <a href="mailto:hello@servicesignal.co.uk" className="text-[#0ea5c4] hover:underline">
                     hello@servicesignal.co.uk
                   </a>
                 </p>
                 <div
                   className="mt-6 w-full rounded-lg p-4 text-left"
-                  style={{ background: "rgba(0,230,118,0.05)", border: "1px solid rgba(0,230,118,0.15)" }}
+                  style={{ background: "#ecfdf5", border: "1px solid #a7f3d0" }}
                 >
-                  <p className="text-xs text-[#00e676] font-display font-700 uppercase tracking-wider mb-2" style={{ fontWeight: 700 }}>
+                  <p className="text-xs text-[#059669] font-display font-700 uppercase tracking-wider mb-2" style={{ fontWeight: 700 }}>
                     What happens next
                   </p>
                   <ul className="space-y-1.5">
@@ -264,9 +264,9 @@ export default function BetaSignup() {
                       "We'll reach out when your beta access is ready",
                       "Your pricing is locked in from day one",
                     ].map((step, i) => (
-                      <li key={i} className="flex items-start gap-2 text-xs text-[#64748b]">
+                      <li key={i} className="flex items-start gap-2 text-xs text-[#94a3b8]">
                         <svg width="12" height="12" fill="none" viewBox="0 0 24 24" className="mt-0.5 flex-shrink-0">
-                          <path d="M5 13l4 4L19 7" stroke="#00e676" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                          <path d="M5 13l4 4L19 7" stroke="#059669" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
                         {step}
                       </li>
@@ -279,7 +279,7 @@ export default function BetaSignup() {
               /* ── Form ── */
               <>
                 <h3
-                  className="font-display text-white mb-6"
+                  className="font-display text-[#0f172a] mb-6"
                   style={{ fontSize: "1.4rem", fontWeight: 700 }}
                 >
                   Request Beta Access
@@ -289,69 +289,69 @@ export default function BetaSignup() {
                   {/* Name + Business Name */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs text-[#64748b] mb-1.5 font-display font-600 uppercase tracking-wider" style={{ fontWeight: 600 }}>
+                      <label className="block text-xs text-[#94a3b8] mb-1.5 font-display font-600 uppercase tracking-wider" style={{ fontWeight: 600 }}>
                         Your Name *
                       </label>
                       <input
                         type="text"
                         name="name"
-                        className="form-input"
+                        className="lp-input"
                         placeholder="Dave Morrison"
                         value={form.name}
                         onChange={handleChange}
                         aria-invalid={!!errors.name}
                       />
                       {errors.name && (
-                        <p className="mt-1 text-xs" style={{ color: "#ff6b6b" }}>{errors.name}</p>
+                        <p className="mt-1 text-xs" style={{ color: "#dc2626" }}>{errors.name}</p>
                       )}
                     </div>
                     <div>
-                      <label className="block text-xs text-[#64748b] mb-1.5 font-display font-600 uppercase tracking-wider" style={{ fontWeight: 600 }}>
+                      <label className="block text-xs text-[#94a3b8] mb-1.5 font-display font-600 uppercase tracking-wider" style={{ fontWeight: 600 }}>
                         Business Name *
                       </label>
                       <input
                         type="text"
                         name="business_name"
-                        className="form-input"
+                        className="lp-input"
                         placeholder="Morrison Electrical Ltd"
                         value={form.business_name}
                         onChange={handleChange}
                         aria-invalid={!!errors.business_name}
                       />
                       {errors.business_name && (
-                        <p className="mt-1 text-xs" style={{ color: "#ff6b6b" }}>{errors.business_name}</p>
+                        <p className="mt-1 text-xs" style={{ color: "#dc2626" }}>{errors.business_name}</p>
                       )}
                     </div>
                   </div>
 
                   {/* Email */}
                   <div>
-                    <label className="block text-xs text-[#64748b] mb-1.5 font-display font-600 uppercase tracking-wider" style={{ fontWeight: 600 }}>
+                    <label className="block text-xs text-[#94a3b8] mb-1.5 font-display font-600 uppercase tracking-wider" style={{ fontWeight: 600 }}>
                       Email Address *
                     </label>
                     <input
                       type="email"
                       name="email"
-                      className="form-input"
+                      className="lp-input"
                       placeholder="dave@morrisonelectrical.co.uk"
                       value={form.email}
                       onChange={handleChange}
                       aria-invalid={!!errors.email}
                     />
                     {errors.email && (
-                      <p className="mt-1 text-xs" style={{ color: "#ff6b6b" }}>{errors.email}</p>
+                      <p className="mt-1 text-xs" style={{ color: "#dc2626" }}>{errors.email}</p>
                     )}
                   </div>
 
                   {/* Phone */}
                   <div>
-                    <label className="block text-xs text-[#64748b] mb-1.5 font-display font-600 uppercase tracking-wider" style={{ fontWeight: 600 }}>
-                      Phone Number
+                    <label className="block text-xs text-[#94a3b8] mb-1.5 font-display font-600 uppercase tracking-wider" style={{ fontWeight: 600 }}>
+                      Phone Number (optional — for SMS beta updates later)
                     </label>
                     <input
                       type="tel"
                       name="phone"
-                      className="form-input"
+                      className="lp-input"
                       placeholder="07700 900000"
                       value={form.phone}
                       onChange={handleChange}
@@ -360,12 +360,12 @@ export default function BetaSignup() {
 
                   {/* Business Type */}
                   <div>
-                    <label className="block text-xs text-[#64748b] mb-1.5 font-display font-600 uppercase tracking-wider" style={{ fontWeight: 600 }}>
+                    <label className="block text-xs text-[#94a3b8] mb-1.5 font-display font-600 uppercase tracking-wider" style={{ fontWeight: 600 }}>
                       Type of Business
                     </label>
                     <select
                       name="business_type"
-                      className="form-input"
+                      className="lp-input"
                       value={form.business_type}
                       onChange={handleChange}
                     >
@@ -378,12 +378,12 @@ export default function BetaSignup() {
 
                   {/* Unpaid range */}
                   <div>
-                    <label className="block text-xs text-[#64748b] mb-1.5 font-display font-600 uppercase tracking-wider" style={{ fontWeight: 600 }}>
+                    <label className="block text-xs text-[#94a3b8] mb-1.5 font-display font-600 uppercase tracking-wider" style={{ fontWeight: 600 }}>
                       How much are you usually waiting on?
                     </label>
                     <select
                       name="unpaid_range"
-                      className="form-input"
+                      className="lp-input"
                       value={form.unpaid_range}
                       onChange={handleChange}
                     >
@@ -396,8 +396,8 @@ export default function BetaSignup() {
 
                   {/* Willingness to pay */}
                   <div>
-                    <label className="block text-xs text-[#64748b] mb-2 font-display font-600 uppercase tracking-wider" style={{ fontWeight: 600 }}>
-                      Would you pay £20–£50/month if this helped you get paid faster?
+                    <label className="block text-xs text-[#94a3b8] mb-2 font-display font-600 uppercase tracking-wider" style={{ fontWeight: 600 }}>
+                      After beta, would you consider paying £20–£50/month if this helped you get paid faster?
                     </label>
                     <div className="grid grid-cols-3 gap-3">
                       {["Yes, definitely", "Probably", "Not sure"].map((opt) => (
@@ -413,9 +413,9 @@ export default function BetaSignup() {
                           <div
                             className="text-center py-2.5 px-2 rounded-lg border text-xs transition-all"
                             style={{
-                              background:   form.willingness_to_pay === opt ? "rgba(0,200,255,0.1)"      : "rgba(255,255,255,0.02)",
-                              borderColor:  form.willingness_to_pay === opt ? "#00c8ff"                  : "rgba(255,255,255,0.08)",
-                              color:        form.willingness_to_pay === opt ? "#00c8ff"                  : "#64748b",
+                              background:   form.willingness_to_pay === opt ? "#ecfeff"      : "#ffffff",
+                              borderColor:  form.willingness_to_pay === opt ? "#0ea5c4"                  : "#cbd5e1",
+                              color:        form.willingness_to_pay === opt ? "#0ea5c4"                  : "#94a3b8",
                               fontFamily: "'DM Sans', sans-serif",
                             }}
                           >
@@ -431,9 +431,9 @@ export default function BetaSignup() {
                     <div
                       className="rounded-lg p-3 text-sm"
                       style={{
-                        background: "rgba(255,100,100,0.08)",
-                        border: "1px solid rgba(255,100,100,0.2)",
-                        color: "#ff6b6b",
+                        background: "#fef2f2",
+                        border: "1px solid #fecaca",
+                        color: "#dc2626",
                       }}
                     >
                       {result.message}
@@ -443,13 +443,13 @@ export default function BetaSignup() {
                   <button
                     type="submit"
                     disabled={loading}
-                    className="btn-primary w-full mt-2"
+                    className="lp-btn w-full mt-2"
                     style={{ opacity: loading ? 0.7 : 1, cursor: loading ? "not-allowed" : "pointer" }}
                   >
                     {loading ? "Submitting..." : "Join the Beta — It's Free"}
                   </button>
 
-                  <p className="text-[#475569] text-xs text-center">
+                  <p className="text-[#94a3b8] text-xs text-center">
                     No spam. No credit card. Just early access.
                   </p>
                 </form>

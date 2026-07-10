@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { DashboardProvider } from "@/components/dashboard/DashboardProvider";
+import DashboardChrome from "@/components/dashboard/DashboardChrome";
 
 export const metadata: Metadata = {
   title: "Dashboard — ServiceSignal",
@@ -10,7 +12,9 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // The DashboardShell component handles the full-page layout.
-  // This layout wrapper just provides metadata.
-  return <>{children}</>;
+  return (
+    <DashboardProvider>
+      <DashboardChrome>{children}</DashboardChrome>
+    </DashboardProvider>
+  );
 }

@@ -1,5 +1,5 @@
 import type { ReminderTone, ReminderSchedule } from "@/types";
-import { scheduleTimingPhrase } from "./reminder-schedule";
+import { getInvoiceDueStatus, type InvoiceDueStatus } from "./date-status";
 import { formatCurrency, formatDate } from "./invoices";
 
 export interface ReminderEmailContent {
@@ -18,7 +18,18 @@ interface BuildReminderEmailParams {
   paymentLink?: string;
 }
 
-// ── Tone-specific copy ──────────────────────────────────────────────────────
+/**
+ * The due-status of an invoice, computed live from due_date vs today's
+ * Europe/London date via the canonical source of truth (lib/date-status.ts).
+ * This — not the schedule name — drives all wording.
+ */
+type DueStatus = InvoiceDueStatus;
+
+function resolveDueStatus(dueDate: string): DueStatus {
+  return getInvoiceDueStatus(dueDate);
+}
+
+// ── Tone-specific greeting / closing (unchanged) ────────────────────────────
 
 function toneOpening(tone: ReminderTone, customerName: string): string {
   switch (tone) {
@@ -28,17 +39,6 @@ function toneOpening(tone: ReminderTone, customerName: string): string {
       return `Hi ${customerName},`;
     case "final":
       return `Dear ${customerName},`;
-  }
-}
-
-function toneBody(tone: ReminderTone, timingPhrase: string, amountStr: string, dueStr: string): string {
-  switch (tone) {
-    case "friendly":
-      return `Just a quick heads up that your invoice for ${amountStr} ${timingPhrase} (due ${dueStr}). No stress if it's already on its way — this is just a gentle reminder in case it slipped through.`;
-    case "firm":
-      return `This is a reminder that your invoice for ${amountStr} ${timingPhrase} (due ${dueStr}). Please arrange payment at your earliest convenience.`;
-    case "final":
-      return `This is a final notice. Your invoice for ${amountStr} ${timingPhrase} (originally due ${dueStr}) remains unpaid. Please settle this invoice as soon as possible to avoid further action.`;
   }
 }
 
@@ -53,43 +53,109 @@ function toneClosing(tone: ReminderTone, businessName: string): string {
   }
 }
 
-function subjectLine(tone: ReminderTone, schedule: ReminderSchedule, businessName: string): string {
-  if (schedule === "before_due_3_days") {
-    return `Upcoming invoice from ${businessName}`;
-  }
-  if (schedule === "due_today") {
-    return `Invoice due today — ${businessName}`;
-  }
-  if (tone === "final") {
+// ── Subject & body computed from live due-status ────────────────────────────
+
+function subjectLine(
+  tone: ReminderTone,
+  status: DueStatus,
+  businessName: string
+): string {
+  // Final reminders always use the final-notice subject when overdue.
+  if (tone === "final" && status.kind === "overdue") {
     return `Final reminder: overdue invoice from ${businessName}`;
   }
-  return `Reminder: invoice overdue — ${businessName}`;
+  switch (status.kind) {
+    case "upcoming":
+      return `Upcoming invoice from ${businessName}`;
+    case "due_today":
+      return `Invoice due today — ${businessName}`;
+    case "overdue":
+      return `Overdue invoice reminder from ${businessName}`;
+  }
+}
+
+/**
+ * The core sentence describing the invoice's status. Always derived from the
+ * live due-status and the actual due date — never from the schedule name.
+ */
+function statusSentence(
+  tone: ReminderTone,
+  status: DueStatus,
+  amountStr: string,
+  dueStr: string
+): string {
+  // Final reminder, overdue: spell out the exact days overdue.
+  if (tone === "final" && status.kind === "overdue") {
+    return `This is a final notice. Your invoice for ${amountStr} is now ${status.days} ${status.days === 1 ? "day" : "days"} overdue. It was originally due on ${dueStr} and remains unpaid.`;
+  }
+
+  switch (status.kind) {
+    case "upcoming":
+      return `Your invoice for ${amountStr} is due in ${status.days} ${status.days === 1 ? "day" : "days"} (${dueStr}).`;
+    case "due_today":
+      return `Your invoice for ${amountStr} is due today (${dueStr}).`;
+    case "overdue":
+      return `Your invoice for ${amountStr} is now ${status.days} ${status.days === 1 ? "day" : "days"} overdue. It was due on ${dueStr} and remains unpaid. Please arrange payment as soon as possible.`;
+  }
+}
+
+/** Wraps the status sentence with light tone-specific framing. */
+function toneBody(
+  tone: ReminderTone,
+  status: DueStatus,
+  amountStr: string,
+  dueStr: string
+): string {
+  const core = statusSentence(tone, status, amountStr, dueStr);
+
+  // Final tone already reads as a complete notice.
+  if (tone === "final") return core;
+
+  // The overdue sentence already ends with a payment request, so don't
+  // append a second one — just add a light friendly softener if applicable.
+  if (status.kind === "overdue") {
+    return tone === "friendly"
+      ? `${core} If it's already on its way, please ignore this note.`
+      : core;
+  }
+
+  switch (tone) {
+    case "friendly":
+      return `${core} No stress if it's already on its way — this is just a gentle reminder in case it slipped through.`;
+    case "firm":
+      return `${core} Please arrange payment at your earliest convenience.`;
+  }
 }
 
 // ── Main builder ──────────────────────────────────────────────────────────
 
 export function buildReminderEmail(params: BuildReminderEmailParams): ReminderEmailContent {
-  const { tone, schedule, customerName, businessName, amount, dueDate, paymentLink } = params;
+  const { tone, customerName, businessName, amount, dueDate, paymentLink } = params;
 
   const amountStr = formatCurrency(amount);
   const dueStr = formatDate(dueDate);
-  const timingPhrase = scheduleTimingPhrase(schedule);
+
+  // Status is computed live from the due date vs today (Europe/London),
+  // NOT from params.schedule — that only reflects when the reminder was queued.
+  const status = resolveDueStatus(dueDate);
 
   const opening = toneOpening(tone, customerName);
-  const body = toneBody(tone, timingPhrase, amountStr, dueStr);
+  const body = toneBody(tone, status, amountStr, dueStr);
   const closing = toneClosing(tone, businessName);
-  const subject = subjectLine(tone, schedule, businessName);
+  const subject = subjectLine(tone, status, businessName);
 
   const fromLine = `This is a reminder from ${businessName}.`;
 
   const paymentLine = paymentLink
-    ? `\n\nYou can pay here: ${paymentLink}`
+    ? `\n\nYou can pay securely using this link: ${paymentLink}`
     : "";
 
   const text = `${opening}\n\n${fromLine}\n\n${body}${paymentLine}\n\n${closing}`;
 
   const paymentHtml = paymentLink
-    ? `<p style="margin:24px 0;"><a href="${escapeHtml(paymentLink)}" style="display:inline-block;background:#00c8ff;color:#05080f;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:700;">Pay Now</a></p>`
+    ? `<p style="margin:20px 0 12px 0;font-size:15px;color:#1a1a1a;line-height:1.6;">You can pay securely using the button below.</p>
+                <p style="margin:0 0 12px 0;"><a href="${escapeHtml(paymentLink)}" style="display:inline-block;background:#0ea5c4;color:#ffffff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:700;">Pay Now</a></p>
+                <p style="margin:0 0 8px 0;font-size:12px;color:#666666;line-height:1.5;">If the button doesn&#39;t work, copy and paste this link: ${escapeHtml(paymentLink)}</p>`
     : "";
 
   const html = `

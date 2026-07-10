@@ -4,6 +4,45 @@ export type InvoiceStatus = "unpaid" | "overdue" | "paid";
 export type ReminderTone = "friendly" | "firm" | "final";
 
 /**
+ * Current escalation state of an invoice. Matches the DB CHECK constraint
+ * invoices_escalation_status_check exactly.
+ *   active       — normal, chasing as usual
+ *   promised     — customer promised to pay
+ *   disputed     — invoice disputed
+ *   paused       — chasing paused by the user
+ *   written_off  — given up / written off
+ * (paid is tracked separately by invoices.status = 'paid')
+ */
+export type EscalationStatus =
+  | "active"
+  | "promised"
+  | "disputed"
+  | "paused"
+  | "written_off";
+
+/**
+ * Action types recorded in invoice_actions. Matches the DB CHECK constraint
+ * invoice_actions_action_type_check exactly.
+ */
+export type InvoiceActionType =
+  | "call_logged"
+  | "promised_to_pay"
+  | "disputed"
+  | "paused"
+  | "final_notice"
+  | "written_off"
+  | "marked_paid";
+
+export interface InvoiceAction {
+  id: string;
+  user_id: string;
+  invoice_id: string;
+  action_type: InvoiceActionType;
+  note: string | null;
+  created_at: string;
+}
+
+/**
  * Explicit reminder schedule keys — describe timing relative to due_date.
  *   before_due_3_days → 3 days BEFORE the invoice is due
  *   due_today         → on the due date itself
@@ -33,6 +72,7 @@ export interface Invoice {
   created_at: string;         // ISO timestamp
   paid_at: string | null;
   reminders_sent: ReminderSchedule[];
+  escalation_status: EscalationStatus; // current escalation state, DB default 'active'
 }
 
 /** Shape sent to Supabase on INSERT — user_id omitted (DB sets via DEFAULT auth.uid()) */
@@ -80,6 +120,7 @@ export interface ReminderLog {
     customer_name: string;
     amount: number;
     due_date: string;
+    status?: InvoiceStatus;
   };
 }
 

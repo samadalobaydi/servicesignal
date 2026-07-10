@@ -1,14 +1,20 @@
 import type { ReminderSchedule } from "@/types";
+import { getTodayLondonDate, getDaysFromDue, getDaysOverdue } from "./date-status";
+
+/**
+ * Returns "today" as a Europe/London calendar date at midnight UTC.
+ * Delegates to the canonical source of truth in lib/date-status.ts.
+ */
+export function londonToday(now: Date = new Date()): Date {
+  return getTodayLondonDate(now);
+}
 
 /**
  * Calculates the number of days between today and the invoice's due date.
  * Positive = overdue by that many days. Negative = due in that many days.
- * Zero = due today.
- *
- * Both dates are normalised to midnight UTC to avoid timezone drift —
- * "today" for reminder purposes is a calendar date, not a timestamp.
+ * Zero = due today. Delegates to the canonical source of truth.
  */
-export function daysFromDue(dueDateISO: string, today: Date = new Date()): number {
+export function daysFromDue(dueDateISO: string, today: Date = getTodayLondonDate()): number {
   const due = new Date(dueDateISO);
   due.setUTCHours(0, 0, 0, 0);
 
@@ -17,6 +23,15 @@ export function daysFromDue(dueDateISO: string, today: Date = new Date()): numbe
 
   const msPerDay = 1000 * 60 * 60 * 24;
   return Math.round((t.getTime() - due.getTime()) / msPerDay);
+}
+
+/**
+ * Days a given invoice is overdue, computed live from its due_date against
+ * today's Europe/London date. 0 or negative means not yet overdue.
+ * Delegates to the canonical source of truth in lib/date-status.ts.
+ */
+export function daysOverdue(dueDateISO: string, now: Date = new Date()): number {
+  return getDaysOverdue(dueDateISO, now);
 }
 
 /**
