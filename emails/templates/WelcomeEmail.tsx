@@ -1,5 +1,6 @@
 import { Img, Section } from "@react-email/components";
-import { EmailLayout, EmailFooter, PrimaryButton, ContentSection, CalloutBox, HelperText, emailBanner, appUrl } from "../components";
+import { EmailLayout, EmailFooter, PrimaryButton, ContentSection, CalloutBox, HelperText, emailBanner } from "../components";
+import { getDashboardUrl } from "@/lib/app-urls";
 
 interface WelcomeEmailProps {
   businessName: string | null;
@@ -21,11 +22,10 @@ export function WelcomeEmail({ businessName }: WelcomeEmailProps) {
   const name = businessName?.trim();
   const heading = name ? `Welcome, ${name}!` : "Welcome to ServiceSignal";
 
-  // v8.9.2 — environment-aware, NOT the same rule as the banner image
-  // below. Resolves to NEXT_PUBLIC_APP_URL (localhost while testing
-  // locally, the real domain in production) with the production origin
-  // as a safe fallback if that variable is ever unset.
-  const dashboardUrl = `${appUrl}/dashboard`;
+  // Environment-aware, NOT the same rule as the banner image below —
+  // now sourced from the one central lib/app-urls.ts, the same helper
+  // signup confirmation and password recovery both use.
+  const dashboardUrl = getDashboardUrl();
 
   return (
     <EmailLayout

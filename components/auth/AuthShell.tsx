@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { getAuthCallbackUrl } from "@/lib/app-urls";
 
 /**
  * v8.6.0 — shared shell + primitives for the authentication pages
@@ -221,7 +222,7 @@ export function SocialButtons({ next = "/dashboard" }: { next?: string }) {
 
     // PKCE: the provider returns a ?code= to /auth/callback, which exchanges
     // it for a session cookie and then forwards to `next`.
-    const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
+    const redirectTo = getAuthCallbackUrl(next);
 
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider,

@@ -29,4 +29,4 @@ export { Divider } from "./Divider";
 export { ContentSection } from "./ContentSection";
 export { CalloutBox, type CalloutTone } from "./CalloutBox";
 export { HelperText } from "./HelperText";
-export { emailTheme, emailBanner, appUrl } from "../theme";
+export { emailTheme, emailBanner } from "../theme";

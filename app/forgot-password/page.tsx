@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
+import { getResetPasswordRedirectUrl } from "@/lib/app-urls";
 import { AuthShell, AuthHeading, AuthError, AuthInput, SubmitButton, BRAND_BLUE } from "@/components/auth/AuthShell";
 
 export default function ForgotPasswordPage() {
@@ -24,7 +25,7 @@ export default function ForgotPasswordPage() {
       // (built for OAuth) so it does that exchange, then forwards on to
       // /reset-password. Without this hop, a fresh link fails with a
       // misleading "expired" error because no session was ever established.
-      redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent("/reset-password")}`,
+      redirectTo: getResetPasswordRedirectUrl(),
     });
 
     if (resetError) {

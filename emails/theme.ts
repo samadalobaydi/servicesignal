@@ -54,24 +54,12 @@ export const emailTheme = {
     "https://servicesignal.app",
 } as const;
 
-/**
- * LINKS ONLY (e.g. the dashboard CTA) — the opposite rule from
- * assetsBaseUrl above. A person testing locally wants "Go to your
- * dashboard" to open their local dev server, where their test session
- * actually lives — not production, where that account doesn't exist.
- *
- * Reads NEXT_PUBLIC_APP_URL (checked against the existing env var
- * architecture first — no such variable existed anywhere in this
- * codebase, so this introduces it, matching the naming already
- * suggested alongside NEXT_PUBLIC_SUPABASE_URL's own convention).
- * Falls back to the production origin if unset, so an email correctly
- * still points at production even if the variable is never configured.
- * Trailing slash is stripped so `${appUrl}/dashboard` can never become
- * malformed regardless of how the variable was set.
- */
-export const appUrl = (
-  process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/+$/, "") || "https://servicesignal.app"
-);
+// The Welcome email's dashboard CTA link now lives in lib/app-urls.ts
+// (getDashboardUrl) — the ONE central source of truth for every in-app
+// link this app generates, not duplicated here. This file keeps only
+// assetsBaseUrl, which deliberately never varies by environment and is
+// therefore NOT part of that shared system — see lib/app-urls.ts's own
+// doc comment for why the two must stay separate.
 
 /**
  * The approved email banner logo (v8.9.0) — a single central config value

@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
+import { getAuthCallbackUrl } from "@/lib/app-urls";
 import { updateProfile } from "@/lib/profile";
 import {
   AuthShell, AuthHeading, AuthError, AuthInput, PasswordInput,
@@ -79,7 +80,7 @@ function SignupForm() {
       email: email.trim().toLowerCase(),
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: getAuthCallbackUrl(),
         data: { terms_accepted: true },
       },
     });
