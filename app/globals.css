@@ -21,6 +21,10 @@
   /* ── Light dashboard design system (v8.4.1) — scoped to .dash-root ── */
   --dash-bg: #f6f8fb;
   --dash-sidebar: #0f172a;
+  /* Desktop sidebar: deep navy to match the mobile bar (--dash-sidebar) and
+     the live dashboard. Strong contrast with white content and the
+     white/blue logo. Replaces the earlier #284F78 blue. */
+  --dash-sidebar-desktop: #0f172a;
   --dash-sidebar-hover: rgba(255, 255, 255, 0.06);
   --dash-sidebar-active: rgba(56, 189, 248, 0.14);
   --dash-card: #ffffff;
@@ -461,4 +465,47 @@ body {
   animation: pulse-dot 2s ease-in-out infinite;
   display: inline-block;
   margin-right: 8px;
+}
+
+/* ── Legal page prose (v8.9.0) — scoped to .legal-prose within /terms and
+   /privacy only. Matches the .lp-* landing typography (navy headings,
+   DM Sans, cyan links) so these read as part of the same product. */
+.legal-prose h2 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin-top: 2rem;
+  margin-bottom: 0.6rem;
+  letter-spacing: -0.01em;
+}
+.legal-prose h2:first-child {
+  margin-top: 0;
+}
+.legal-prose h3 {
+  font-size: 1rem;
+  font-weight: 650;
+  color: #0f172a;
+  margin-top: 1.25rem;
+  margin-bottom: 0.4rem;
+}
+.legal-prose p {
+  margin: 0 0 0.9rem 0;
+}
+.legal-prose ul {
+  margin: 0 0 0.9rem 0;
+  padding-left: 1.25rem;
+}
+.legal-prose li {
+  margin-bottom: 0.4rem;
+}
+.legal-prose a {
+  color: #0891b2;
+  text-decoration: underline;
+}
+.legal-prose a:hover {
+  color: #0e7490;
+}
+.legal-prose strong {
+  color: #0f172a;
+  font-weight: 650;
 }

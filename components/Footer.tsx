@@ -11,17 +11,17 @@ export default function Footer() {
           {/* Brand */}
           <div>
             <div className="flex items-center gap-2 mb-4">
-              <div className="w-6 h-6 rounded bg-[#0ea5c4] flex items-center justify-center flex-shrink-0">
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                  <path d="M8 1L14 13H2L8 1Z" fill="#ffffff" />
-                  <circle cx="8" cy="10" r="1.5" fill="#0ea5c4" />
-                </svg>
-              </div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/branding/servicesignal-mark.png"
+                alt="ServiceSignal"
+                style={{ height: "30px", width: "auto", display: "block", flexShrink: 0 }}
+              />
               <span
                 className="font-display font-800 text-base text-[#0f172a]"
                 style={{ fontWeight: 800, letterSpacing: "0.04em" }}
               >
-                SERVICE<span className="text-[#0ea5c4]">SIGNAL</span>
+                SERVICE<span className="text-[#2A5FE3]">SIGNAL</span>
               </span>
             </div>
             <p className="text-[#94a3b8] text-sm leading-relaxed max-w-xs">
@@ -93,7 +93,8 @@ export default function Footer() {
             &copy; {new Date().getFullYear()} ServiceSignal. All rights reserved.
           </p>
           <div className="flex items-center gap-4">
-            <span>Privacy Policy &amp; Terms will be published before launch</span>
+            <a href="/terms" className="hover:text-[#0f172a] transition-colors">Terms</a>
+            <a href="/privacy" className="hover:text-[#0f172a] transition-colors">Privacy</a>
           </div>
         </div>
       </div>

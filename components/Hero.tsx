@@ -21,10 +21,10 @@ export default function Hero() {
             <span style={{ color: "#0ea5c4" }}>Let ServiceSignal do the heavy lifting.</span>
           </h1>
 
-          {/* Subheadline — accurate to current product (email live, SMS coming soon) */}
+          {/* Subheadline — SMS primary, email supporting (approval-first) */}
           <p className="mt-6 max-w-2xl mx-auto" style={{ fontSize: "clamp(1.05rem, 2vw, 1.2rem)", lineHeight: 1.6, color: "#64748b" }}>
-            Add unpaid invoices, review reminders, and let ServiceSignal help you follow up professionally by{" "}
-            <strong style={{ color: "#0f172a", fontWeight: 600 }}>email</strong>. SMS reminders are coming soon.
+            Add unpaid invoices, review each reminder, and let ServiceSignal follow up professionally by{" "}
+            <strong style={{ color: "#0f172a", fontWeight: 600 }}>SMS and email</strong> — so you stay in control without chasing customers yourself.
           </p>
 
           {/* CTA group */}

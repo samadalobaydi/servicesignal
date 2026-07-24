@@ -25,14 +25,14 @@ export default function Nav() {
       <div className="max-w-6xl mx-auto px-6 py-3.5 flex items-center justify-between">
         {/* Logo */}
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "#0ea5c4" }}>
-            <svg width="17" height="17" viewBox="0 0 16 16" fill="none">
-              <path d="M8 1L14 13H2L8 1Z" fill="#ffffff" />
-              <circle cx="8" cy="10" r="1.5" fill="#0ea5c4" />
-            </svg>
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/branding/servicesignal-mark.png"
+            alt="ServiceSignal"
+            style={{ height: "38px", width: "auto", display: "block", flexShrink: 0 }}
+          />
           <span style={{ fontWeight: 700, fontSize: "1.25rem", color: "#0f172a", letterSpacing: "-0.01em" }}>
-            Service<span style={{ color: "#0ea5c4" }}>Signal</span>
+            Service<span style={{ color: "#2A5FE3" }}>Signal</span>
           </span>
         </div>
 
