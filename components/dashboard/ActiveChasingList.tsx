@@ -7,6 +7,7 @@ import { getDueStatusLabel } from "@/lib/date-status";
 import { scheduleToPrepare } from "@/lib/reminder-schedule";
 import InvoiceActivityLog, { HistoryToggle } from "./InvoiceActivityLog";
 import { useDashboard } from "./DashboardProvider";
+import ChannelPickerModal from "./ChannelPickerModal";
 import { approveReminder, dismissReminder } from "@/lib/reminders";
 
 function reminderStateLabel(invoice: Invoice, hasPending: boolean): { text: string; color: string; pill?: boolean } {
@@ -41,11 +42,11 @@ interface ActiveChasingListProps {
   onMarkPaid: (id: string) => void;
 }
 
-function ChaseRowAction({ invoice, hasPending, pendingReminder, onPrepareReminder, onMarkPaid, onAfterAction }: {
+function ChaseRowAction({ invoice, hasPending, pendingReminder, onRequestPrepare, onMarkPaid, onAfterAction }: {
   invoice: Invoice;
   hasPending: boolean;
   pendingReminder: ReminderLog | null;
-  onPrepareReminder: (invoiceId: string) => Promise<{ success: boolean; message: string }>;
+  onRequestPrepare: () => void;
   onMarkPaid: (id: string) => void;
   onAfterAction: () => Promise<void> | void;
 }) {
@@ -65,13 +66,6 @@ function ChaseRowAction({ invoice, hasPending, pendingReminder, onPrepareReminde
   // Final gate: technical stale-state messages are never user-facing.
   const STALE_TEXT = /already\s+(dismissed|failed|sent)/i;
   const noteVisible = note && !STALE_TEXT.test(note.title) && !STALE_TEXT.test(note.detail ?? "");
-
-  const prepare = async () => {
-    setBusy(true); setNote(null);
-    const r = await onPrepareReminder(invoice.id);
-    if (!r.success) setNote({ title: r.message });
-    setBusy(false);
-  };
 
   /**
    * A 409 "already sent/dismissed" reply means our row state is stale (the
@@ -119,8 +113,8 @@ function ChaseRowAction({ invoice, hasPending, pendingReminder, onPrepareReminde
     <div className="flex flex-col items-end gap-1.5">
       <div className="flex items-center gap-2 justify-end">
         {!hasPending && canPrepare && (
-          <button onClick={prepare} disabled={busy} className="dash-btn whitespace-nowrap" style={{ padding: "0.5rem 0.9rem", opacity: busy ? 0.6 : 1 }}>
-            {busy ? "Preparing..." : "Prepare Reminder"}
+          <button onClick={onRequestPrepare} disabled={busy} className="dash-btn whitespace-nowrap" style={{ padding: "0.5rem 0.9rem", opacity: busy ? 0.6 : 1 }}>
+            Prepare Reminder
           </button>
         )}
         {hasPending && pendingReminder && (
@@ -154,6 +148,7 @@ export default function ActiveChasingList({ invoices, pendingReminderInvoiceIds,
   const [openLogId, setOpenLogId] = useState<string | null>(null);
   const toggleLog = (id: string) => setOpenLogId((cur) => (cur === id ? null : id));
   const { reminders, refetchAfterReminderAction } = useDashboard();
+  const [pickerInvoice, setPickerInvoice] = useState<Invoice | null>(null);
   // Only a genuinely pending reminder controls the row's Send Now/Dismiss
   // state. Dismissed/failed/sent logs live in Invoice History only.
   const pendingFor = (invoiceId: string): ReminderLog | null =>
@@ -207,7 +202,7 @@ export default function ActiveChasingList({ invoices, pendingReminderInvoiceIds,
               ) : (
                 <p className="text-sm" style={{ color: rs.color, fontWeight: 600 }}>{rs.text}</p>
               )}
-              <ChaseRowAction invoice={inv} hasPending={pendingReminderInvoiceIds.has(inv.id)} pendingReminder={pendingFor(inv.id)} onPrepareReminder={onPrepareReminder} onMarkPaid={onMarkPaid} onAfterAction={refetchAfterReminderAction} />
+              <ChaseRowAction invoice={inv} hasPending={pendingReminderInvoiceIds.has(inv.id)} pendingReminder={pendingFor(inv.id)} onRequestPrepare={() => setPickerInvoice(inv)} onMarkPaid={onMarkPaid} onAfterAction={refetchAfterReminderAction} />
               <HistoryToggle open={openLogId === inv.id} onClick={() => toggleLog(inv.id)} />
               {openLogId === inv.id && <InvoiceActivityLog invoiceId={inv.id} />}
             </div>
@@ -255,7 +250,7 @@ export default function ActiveChasingList({ invoices, pendingReminderInvoiceIds,
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2 justify-end flex-nowrap">
-                      <ChaseRowAction invoice={inv} hasPending={pendingReminderInvoiceIds.has(inv.id)} pendingReminder={pendingFor(inv.id)} onPrepareReminder={onPrepareReminder} onMarkPaid={onMarkPaid} onAfterAction={refetchAfterReminderAction} />
+                      <ChaseRowAction invoice={inv} hasPending={pendingReminderInvoiceIds.has(inv.id)} pendingReminder={pendingFor(inv.id)} onRequestPrepare={() => setPickerInvoice(inv)} onMarkPaid={onMarkPaid} onAfterAction={refetchAfterReminderAction} />
                       <HistoryToggle open={openLogId === inv.id} onClick={() => toggleLog(inv.id)} />
                     </div>
                   </td>
@@ -273,6 +268,15 @@ export default function ActiveChasingList({ invoices, pendingReminderInvoiceIds,
           </tbody>
         </table>
       </div>
+
+      {/* Channel picker — email uses the existing prepare flow; SMS is preview-only */}
+      {pickerInvoice && (
+        <ChannelPickerModal
+          invoice={pickerInvoice}
+          onClose={() => setPickerInvoice(null)}
+          onPrepareEmail={onPrepareReminder}
+        />
+      )}
     </div>
   );
 }

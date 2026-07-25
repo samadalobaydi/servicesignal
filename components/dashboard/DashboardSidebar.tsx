@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
@@ -111,19 +112,20 @@ export default function DashboardSidebar() {
       {/* ── Desktop: left sidebar ── */}
       <aside
         className="hidden md:flex md:flex-col md:w-[248px] md:flex-shrink-0 md:fixed md:inset-y-0 md:left-0 z-30"
-        style={{ background: "var(--dash-sidebar)" }}
+        style={{ background: "var(--dash-sidebar-desktop)" }}
       >
-        {/* Logo */}
-        <div className="h-[68px] flex items-center gap-2.5 px-6" style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: "var(--dash-accent)" }}>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M8 1L14 13H2L8 1Z" fill="#0f172a" />
-              <circle cx="8" cy="10" r="1.5" fill="#0f172a" />
-            </svg>
-          </div>
-          <span className="text-white" style={{ fontWeight: 700, fontSize: "1.1rem", letterSpacing: "-0.01em" }}>
-            Service<span style={{ color: "#38bdf8" }}>Signal</span>
-          </span>
+        {/* Logo — approved transparent PNG (v8.5.4). Fills the sidebar width
+            with ~18px side padding, aspect preserved, vertically centred;
+            transparency lets the sidebar colour show through. */}
+        <div className="flex items-center justify-center px-[18px] py-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+          <Image
+            src="/branding/servicesignal.png"
+            alt="ServiceSignal"
+            width={7500}
+            height={3025}
+            priority
+            style={{ width: "100%", height: "auto" }}
+          />
         </div>
 
         {/* Nav groups */}

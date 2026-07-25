@@ -135,6 +135,9 @@ export interface Profile {
   contact_phone: string | null;
   default_tone: ReminderTone;
   reminder_mode: ReminderMode;
+  terms_accepted_at: string | null;
+  terms_version: string | null;
+  privacy_version: string | null;
   created_at: string;
 }
 

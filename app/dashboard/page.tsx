@@ -3,14 +3,14 @@
 import Link from "next/link";
 import { useDashboard } from "@/components/dashboard/DashboardProvider";
 import StatsCards from "@/components/dashboard/StatsCards";
-import ReminderQueue from "@/components/dashboard/ReminderQueue";
+import InvoiceStatusChart from "@/components/dashboard/InvoiceStatusChart";
 import { formatCurrency } from "@/lib/invoices";
 import { actionTypeLabel, actionTypeColor } from "@/lib/escalation";
 
 export default function OverviewPage() {
   const {
-    stats, needsActionCount, reminders, reminderHistory, profile, buckets,
-    latestActionMap, liveInvoices, refetchAfterReminderAction,
+    stats, needsActionCount, reminders, reminderHistory, buckets,
+    latestActionMap, liveInvoices,
   } = useDashboard();
 
   const invoiceName = (invoiceId: string) =>
@@ -92,7 +92,7 @@ export default function OverviewPage() {
   // "What needs attention" priorities
   const priorities: { text: string; href: string; tone: string }[] = [];
   if (needsActionCount > 0) priorities.push({ text: `${needsActionCount} ${needsActionCount === 1 ? "invoice needs" : "invoices need"} a decision`, href: "/dashboard/needs-action", tone: "var(--dash-red)" });
-  if (reminders.length > 0) priorities.push({ text: `${reminders.length} ${reminders.length === 1 ? "reminder" : "reminders"} awaiting your approval`, href: "#approval", tone: "var(--dash-amber)" });
+  if (reminders.length > 0) priorities.push({ text: `${reminders.length} ${reminders.length === 1 ? "reminder" : "reminders"} awaiting your approval`, href: "/dashboard/chasing", tone: "var(--dash-amber)" });
   if (stats.overdueCount > 0) priorities.push({ text: `${stats.overdueCount} overdue ${stats.overdueCount === 1 ? "invoice" : "invoices"} to chase`, href: "/dashboard/chasing", tone: "var(--dash-amber)" });
 
   return (
@@ -145,24 +145,9 @@ export default function OverviewPage() {
         ))}
       </div>
 
-      {/* Awaiting approval + recent activity */}
+      {/* Invoice status chart + recent activity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div id="approval">
-          {reminders.length > 0 ? (
-            <ReminderQueue
-              reminders={reminders}
-              reminderMode={profile?.reminder_mode ?? "approval"}
-              onChanged={refetchAfterReminderAction}
-            />
-          ) : (
-            <div className="dash-card p-6 h-full flex flex-col justify-center">
-              <p style={{ fontSize: "1.05rem", fontWeight: 650, color: "var(--dash-text)" }}>Awaiting Approval</p>
-              <p className="text-sm mt-1.5" style={{ color: "var(--dash-text-muted)" }}>
-                No reminders waiting right now. When the system prepares one, it&apos;ll appear here for you to review and send.
-              </p>
-            </div>
-          )}
-        </div>
+        <InvoiceStatusChart />
 
         <div className="dash-card p-6">
           <div className="flex items-center justify-between mb-4">
