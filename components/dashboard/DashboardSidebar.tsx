@@ -182,12 +182,8 @@ export default function DashboardSidebar() {
       <div className="md:hidden sticky top-0 z-30" style={{ background: "var(--dash-sidebar)" }}>
         <div className="h-14 flex items-center justify-between px-4">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "var(--dash-accent)" }}>
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                <path d="M8 1L14 13H2L8 1Z" fill="#0f172a" />
-                <circle cx="8" cy="10" r="1.5" fill="#0f172a" />
-              </svg>
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/branding/servicesignal-mark.png" alt="ServiceSignal" style={{ height: "26px", width: "auto", display: "block", flexShrink: 0 }} />
             <span className="text-white" style={{ fontWeight: 700, fontSize: "1rem" }}>
               Service<span style={{ color: "#38bdf8" }}>Signal</span>
             </span>

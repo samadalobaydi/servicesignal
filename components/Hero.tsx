@@ -62,9 +62,8 @@ export default function Hero() {
               {/* Sidebar */}
               <div className="hidden sm:flex flex-col w-44 flex-shrink-0 py-4 px-3 gap-1" style={{ background: "#0f172a" }}>
                 <div className="flex items-center gap-2 px-2 pb-4 mb-2" style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-                  <div className="w-6 h-6 rounded flex items-center justify-center" style={{ background: "#0ea5c4" }}>
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 1L14 13H2L8 1Z" fill="#0f172a" /></svg>
-                  </div>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/branding/servicesignal-mark.png" alt="ServiceSignal" style={{ height: "20px", width: "auto", display: "block", flexShrink: 0 }} />
                   <span className="text-white text-sm" style={{ fontWeight: 700 }}>Service<span style={{ color: "#38bdf8" }}>Signal</span></span>
                 </div>
                 {[["Overview", true], ["Active Chasing", false], ["Needs Action", false], ["Paid Invoices", false], ["Settings", false]].map(([label, active], i) => (

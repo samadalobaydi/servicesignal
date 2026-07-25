@@ -30,15 +30,8 @@ export default function DashNav({ onAddInvoice, userEmail }: DashNavProps) {
       <div className="max-w-[1440px] mx-auto px-4 sm:px-8 lg:px-12 h-14 flex items-center justify-between gap-4">
         {/* Logo */}
         <div className="flex items-center gap-2 flex-shrink-0">
-          <div
-            className="w-6 h-6 rounded flex items-center justify-center"
-            style={{ background: "#00c8ff" }}
-          >
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-              <path d="M8 1L14 13H2L8 1Z" fill="#141a2b" />
-              <circle cx="8" cy="10" r="1.5" fill="#00c8ff" />
-            </svg>
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/branding/servicesignal-mark.png" alt="ServiceSignal" style={{ height: "22px", width: "auto", display: "block", flexShrink: 0 }} />
           <span
             className="font-display text-white hidden sm:block"
             style={{ fontWeight: 800, fontSize: "1rem", letterSpacing: "0.04em" }}
