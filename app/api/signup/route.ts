@@ -128,13 +128,13 @@ export async function POST(request: NextRequest) {
     // Postgres unique violation — duplicate email
     if (error.code === "23505") {
       return NextResponse.json<ApiResponse>(
-        { success: false, message: "That email is already on the list — we'll be in touch!" },
+        { success: false, message: "This email has already been registered for the ServiceSignal beta." },
         { status: 409 }
       );
     }
     console.error("\x1b[31m✗ Supabase beta_signups insert error:\x1b[0m", error);
     return NextResponse.json<ApiResponse>(
-      { success: false, message: "Something went wrong. Please try again." },
+      { success: false, message: "We couldn't submit your details. Please try again." },
       { status: 500 }
     );
   }
@@ -143,6 +143,6 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json<ApiResponse>({
     success: true,
-    message: "You're on the beta list! We'll be in touch soon.",
+    message: "Thanks — we've received your details. We'll be in touch about the founding beta.",
   });
 }
