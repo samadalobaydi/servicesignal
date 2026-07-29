@@ -171,4 +171,6 @@ export interface ApiResponse {
   success: boolean;
   message: string;
   error?: string;
+  /** Field-level validation errors, keyed by form field name. */
+  fieldErrors?: Record<string, string>;
 }
