@@ -62,12 +62,16 @@ export async function POST(request: NextRequest) {
   const supabase = getServerSupabase();
 
   if (!supabase) {
-    // No env vars yet — log to terminal so leads aren't lost during dev
-    logSignup(data, "console");
-    return NextResponse.json<ApiResponse>({
-      success: true,
-      message: "You're on the list! We'll be in touch soon.",
-    });
+    // Supabase is not configured. The record CANNOT be saved, so we must not
+    // report success — doing so would silently lose the lead while telling the
+    // visitor they were registered. Fail honestly instead.
+    console.error(
+      "\x1b[31m\u2717 Beta signup rejected: Supabase is not configured (missing URL and/or key).\x1b[0m"
+    );
+    return NextResponse.json<ApiResponse>(
+      { success: false, message: "We couldn't submit your details. Please try again." },
+      { status: 503 }
+    );
   }
 
   const { error } = await supabase.from("beta_signups").insert({
