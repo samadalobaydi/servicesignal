@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { TourShell, ActiveChasingScene, ChannelScene, PreviewScene, ApprovalScene } from "./TourScenes";
+import { TourShell, ActiveChasingScene, PreparedScene, EmailReviewScene, ApprovalScene } from "./TourScenes";
 
 /**
  * Interactive product tour — the hero's dominant visual.
@@ -16,16 +16,16 @@ import { TourShell, ActiveChasingScene, ChannelScene, PreviewScene, ApprovalScen
 
 const STEPS = [
   { n: "01", label: "Find invoices", blurb: "See overdue invoices and reminders that are ready for attention." },
-  { n: "02", label: "Choose channels", blurb: "Select SMS first, with email as the supporting reminder." },
-  { n: "03", label: "Review message", blurb: "Check exactly what your customer will receive before anything is sent." },
-  { n: "04", label: "Approve and send", blurb: "You make the final decision. ServiceSignal sends only after your approval." },
+  { n: "02", label: "Reminder prepared", blurb: "ServiceSignal prepares a professional email reminder and holds it for your review." },
+  { n: "03", label: "Review email", blurb: "Read the subject and message exactly as your customer will receive them." },
+  { n: "04", label: "Approve and send", blurb: "You make the final decision. The email sends only after your approval." },
 ] as const;
 
 const A11Y = [
-  "ServiceSignal Active Chasing workspace. Invoice INV-1042 for Alex Turner, £1,240, 12 days overdue, marked Overdue with a reminder Ready to send and a Send now action awaiting your approval.",
-  "Choose reminder channels for INV-1042: SMS selected as the primary channel, email selected as supporting. Nothing has been sent.",
-  "Review the message for INV-1042. The SMS reminder from Oakfield Plumbing is shown, with the supporting email subject beneath. Nothing has been sent.",
-  "Approve and send INV-1042: Alex Turner, £1,240, by SMS and email, awaiting your approval. Once approved, the reminder is sent.",
+  "ServiceSignal Active Chasing workspace. Invoice INV-1042 for Alex Turner, £1,240, 12 days overdue, marked Overdue with a reminder Ready for review and a Send now action awaiting your approval.",
+  "Reminder prepared for INV-1042: Alex Turner, £1,240, 12 days overdue. An email reminder is ready for review. Nothing has been sent.",
+  "Review the email for INV-1042. From ServiceSignal at reminders@servicesignal.app, subject Overdue invoice reminder from Oakfield Plumbing, signed off by Oakfield Plumbing. Nothing has been sent.",
+  "Approve and send INV-1042: Alex Turner, £1,240, email reminder awaiting your approval. Once approved, the email is sent.",
 ];
 
 export default function ProductTour() {
@@ -113,10 +113,10 @@ export default function ProductTour() {
 
             {/* Modal layers */}
             <div className={`v2-tour-layer${active === 1 ? " is-on" : ""}`} aria-hidden={active !== 1}>
-              <ChannelScene />
+              <PreparedScene />
             </div>
             <div className={`v2-tour-layer${active === 2 ? " is-on" : ""}`} aria-hidden={active !== 2}>
-              <PreviewScene />
+              <EmailReviewScene onContinue={() => selectStep(3)} interactive={active === 2} />
             </div>
             <div className={`v2-tour-layer${active === 3 ? " is-on" : ""}`} aria-hidden={active !== 3}>
               <ApprovalScene

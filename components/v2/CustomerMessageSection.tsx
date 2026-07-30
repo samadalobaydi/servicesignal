@@ -4,31 +4,35 @@ import { DEMO } from "./demo";
  * Section 2 — What your customer actually gets.
  *
  * The perspective shifts from the owner's workspace (hero) to the customer's
- * side: the actual reminder, shown at readable size, with plain commentary
- * beside it.
+ * side: the actual reminder email, shown at readable size, with plain
+ * commentary beside it.
  *
  * Renders one fixed state. It reads nothing from the hero tour and requires
  * no interaction — INV-1042 provides continuity, not a dependency.
  *
  * Static by design: no motion, no observers, no hover behaviour.
  *
- * Product truth: no delivery, open, read, reply or click tracking; no
- * business-owned sender identity; no payment domain; no checkout. The
- * payment link is presentational text, never a live anchor.
+ * Product truth. The email shown here mirrors lib/email-templates.ts:
+ *  - ServiceSignal is the sender, shown honestly. The business name appears
+ *    in the subject, the body and the sign-off — it is not the From address.
+ *  - No delivery, open, read, reply or click tracking is depicted.
+ *  - No Pay Now button, because this invoice has no payment link. That is
+ *    what the real product renders in the same situation.
+ *  - No phone hardware, no browser chrome, no invented email client.
  */
 
 const COMMENTARY = [
   {
-    title: "Your business stays front and centre",
-    line: `The reminder clearly identifies ${DEMO.businessName}, so your customer knows who it relates to.`,
+    title: "Clearly connected to your business",
+    line: `${DEMO.businessName} appears in the subject, message and sign-off, while ServiceSignal is shown honestly as the sender.`,
   },
   {
-    title: "Everything is specific",
-    line: `Invoice ${DEMO.reference}, the ${DEMO.amount} amount and its overdue status are clear at a glance.`,
+    title: "Clear about what's owed",
+    line: "The amount, due date and how overdue the invoice is are stated plainly.",
   },
   {
-    title: "A clear route to pay",
-    line: `The link takes the customer to ${DEMO.businessName}'s chosen payment destination.`,
+    title: "Replies come back to you",
+    line: "Customer replies go to the email address connected to your ServiceSignal account.",
   },
 ];
 
@@ -49,20 +53,40 @@ export default function CustomerMessageSection() {
           </p>
         </div>
 
-        {/* ── Message, commentary, supporting email ── */}
+        {/* ── The real reminder email, then commentary ── */}
         <div className="v2-cms-right">
-          {/* SMS surface — the dominant object, full width of this column */}
           <figure
-            className="v2-cms-sms"
-            aria-label={`Example reminder sent by SMS. It reads: ${DEMO.sms} A payment link is shown beneath the message. This is a demonstration — the link is not active.`}
+            className="v2-cms-mail"
+            aria-label={`Example reminder email. From ${DEMO.emailFromName}, ${DEMO.emailFromAddress}. Subject: ${DEMO.emailSubject}. It reads: ${DEMO.emailOpening} ${DEMO.emailFromLine} ${DEMO.emailBody} ${DEMO.emailClosingLine} ${DEMO.emailSignOff}. ${DEMO.emailFooter}. This is a demonstration.`}
           >
-            <figcaption className="v2-cms-sms-head">SMS · Primary</figcaption>
-            <p className="v2-cms-sms-body">{DEMO.sms}</p>
-            {/* Presentational only: brand-blue text, not an anchor, not
-                focusable, no hover or pointer, because there is no destination. */}
-            <p className="v2-cms-sms-link" aria-hidden="true">
-              {DEMO.paymentLinkLabel}
-            </p>
+            <figcaption className="v2-cms-mail-label">Email reminder</figcaption>
+
+            <div className="v2-cms-mail-head">
+              <span className="v2-cms-mail-line">
+                <span className="v2-cms-mail-k">From</span>
+                <span className="v2-cms-mail-v">
+                  {DEMO.emailFromName}{" "}
+                  <span className="v2-cms-mail-addr">&lt;{DEMO.emailFromAddress}&gt;</span>
+                </span>
+              </span>
+              <span className="v2-cms-mail-line">
+                <span className="v2-cms-mail-k">Subject</span>
+                <span className="v2-cms-mail-v v2-cms-mail-subj">{DEMO.emailSubject}</span>
+              </span>
+            </div>
+
+            <div className="v2-cms-mail-body">
+              <p>{DEMO.emailOpening}</p>
+              <p className="v2-cms-mail-fromline">{DEMO.emailFromLine}</p>
+              <p>{DEMO.emailBody}</p>
+              <p className="v2-cms-mail-sign">
+                {DEMO.emailClosingLine}
+                <br />
+                {DEMO.emailSignOff}
+              </p>
+            </div>
+
+            <p className="v2-cms-mail-foot">{DEMO.emailFooter}</p>
           </figure>
 
           {/* Commentary — three plain text columns, no cards */}
@@ -75,14 +99,12 @@ export default function CustomerMessageSection() {
             ))}
           </div>
 
-          {/* Supporting email — contained but clearly secondary */}
-          <div className="v2-cms-email">
-            <p className="v2-cms-email-label">Email · supporting</p>
-            <p className="v2-cms-email-subj">{DEMO.emailSubject}</p>
-            <p className="v2-cms-email-line">
-              The same invoice detail and payment route, with more room for context.
-            </p>
-          </div>
+          {/* Conditional, deliberately quiet — this invoice has no payment
+              link, so no button appears above. */}
+          <p className="v2-cms-paynote">
+            When you add a payment link, the email includes a Pay Now button pointing
+            to your chosen payment page. ServiceSignal never handles the money.
+          </p>
         </div>
       </div>
     </section>

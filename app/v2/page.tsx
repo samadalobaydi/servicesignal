@@ -7,13 +7,13 @@ import FoundingBetaSection from "@/components/v2/FoundingBetaSection";
 export const metadata: Metadata = {
   title: "ServiceSignal — Unpaid invoices, followed up without you chasing",
   description:
-    "ServiceSignal prepares professional SMS and email reminders for overdue invoices. You review them, send them and stay in control.",
+    "ServiceSignal prepares professional email reminders for overdue invoices. You review each one before it sends and stay in control.",
 };
 
 /**
  * Landing Page 2.0 — preview route.
  *
- * Navigation and the hero product tour only. Later sections are not built.
+ * Navigation, hero product tour, customer view and founding beta access.
  */
 export default function LandingV2() {
   return (

@@ -5,12 +5,21 @@
  * Every component on the page must read from here. Never hard-code a second
  * invoice, amount, name or reference anywhere in the v2 landing page.
  *
- * Product-truth notes carried from the documentation:
- *  - Reminders are approval-first. The owner reviews and approves each send.
+ * Product-truth notes carried from the documentation and verified against the
+ * running product:
+ *  - Email is the only reminder channel. SMS is not implemented anywhere in
+ *    the codebase and must never be shown as live or available.
+ *  - Reminders are approval-only. The owner reviews and approves every send;
+ *    Auto Mode is disabled at the UI, API and cron layers.
  *  - ServiceSignal provides the route to pay. It does not process, hold,
  *    confirm or reconcile payment.
  *  - Paid is reached by the owner marking the invoice paid, not by automatic
  *    detection. No delivery/open/read/click tracking is claimed.
+ *
+ * The email fields below mirror the real output of lib/email-templates.ts
+ * (buildReminderEmail) for this invoice at the "firm" tone with an overdue
+ * due-status. They are not marketing copy — if the template changes, these
+ * must change with it.
  */
 export const DEMO = {
   businessName: "Oakfield Plumbing",
@@ -25,32 +34,37 @@ export const DEMO = {
   overdueBy: "12 days overdue",
 
   /**
-   * Current reminder state — approval-first.
+   * Current reminder state — approval-only.
    * The reminder has been prepared and is waiting for the owner's decision.
-   * It has NOT been sent. `reminderSentDate` stays empty until the approval
-   * stage (Section 3), where the owner approves and the send event occurs.
+   * It has NOT been sent. `reminderSentDate` stays empty until the owner
+   * activates "Approve and send" in step 4 of the tour.
    */
-  reminderStage: "Ready to send — awaiting owner approval",
+  reminderStage: "Ready for review — awaiting your approval",
   reminderPrepared: "26 June 2026",
   reminderSentDate: "",
 
   paidDate: "27 June 2026",
 
-  /** SMS — the primary channel. Concise, professional, one clear action. */
-  sms: `Hi Alex, this is a reminder from Oakfield Plumbing regarding invoice INV-1042 for £1,240, which is now overdue. You can pay securely using the link below. Please disregard this message if payment has already been made.`,
-  /**
-   * Display label only. There is no approved destination URL, and no
-   * business-owned payment domain has been confirmed — so the demonstration
-   * never shows a URL-shaped value and never renders a live link.
-   */
-  paymentLinkLabel: "Open payment link",
-
-  /** Email — the richer supporting channel. Same invoice, same route. */
-  emailSubject: "Payment reminder for invoice INV-1042",
-  emailFrom: "Oakfield Plumbing",
-  emailVia: "reminders@servicesignal.app",
-  emailGreeting: "Hi Alex,",
+  /* ── The reminder email, exactly as the product composes it ─────────────
+     Sender identity is fixed in lib/resend.ts as
+     `ServiceSignal <reminders@servicesignal.app>`. The business name appears
+     in the subject, the body and the sign-off — it is not the sender.       */
+  emailFromName: "ServiceSignal",
+  emailFromAddress: "reminders@servicesignal.app",
+  emailSubject: "Overdue invoice reminder from Oakfield Plumbing",
+  emailOpening: "Hi Alex,",
+  emailFromLine: "This is a reminder from Oakfield Plumbing.",
   emailBody:
-    "This is a reminder that invoice INV-1042 for £1,240 is now overdue. You can pay securely using the button below.",
-  emailClosing: "If you've already paid, please disregard this message.",
+    "Your invoice for £1,240.00 is now 12 days overdue. It was due on 14 June 2026 and remains unpaid. Please arrange payment as soon as possible.",
+  emailClosingLine: "Thank you,",
+  emailSignOff: "Oakfield Plumbing",
+  emailFooter: "Sent via ServiceSignal on behalf of Oakfield Plumbing",
+
+  /**
+   * No payment link is set on this demonstration invoice, so the reminder
+   * shows no Pay Now button — which is exactly what the real product does
+   * when `invoice.payment_link` is empty. No payment URL or domain is
+   * invented anywhere on this page.
+   */
+  hasPaymentLink: false,
 } as const;

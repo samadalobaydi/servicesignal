@@ -29,7 +29,7 @@ export default function Hero() {
             style={{ background: "var(--v2-blue-soft)", border: "1px solid var(--v2-blue-border)", color: "var(--v2-blue)", fontSize: "0.78rem", fontWeight: 600 }}
           >
             <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--v2-blue)" }} aria-hidden="true" />
-            Founding beta — limited places
+            Founding beta — now open
           </span>
 
           <h1 className="v2-reveal v2-d1 v2-hero-h1">
@@ -38,8 +38,8 @@ export default function Hero() {
           </h1>
 
           <p className="v2-reveal v2-d2 v2-hero-sub">
-            ServiceSignal prepares professional SMS and email reminders for overdue
-            invoices. You review them, send them and stay in control.
+            ServiceSignal prepares professional email reminders for overdue invoices.
+            You review each one before it sends and stay in control.
           </p>
 
           <div className="v2-reveal v2-d3 v2-hero-cta">

@@ -31,11 +31,11 @@ const ROWS: RowSpec[] = [
     amount: DEMO.amount,
     due: DEMO.dueDate,
     overdue: DEMO.overdueBy,
-    state: "Ready to send",
+    state: "Ready for review",
     focus: true,
   },
   { name: "Sarah & Paul Clarke", reference: "INV-1043", amount: "£680", due: "17 June 2026", overdue: "7 days overdue", state: "Reminder sent" },
-  { name: "J. Whitfield", reference: "INV-1044", amount: "£480", due: "21 June 2026", overdue: "3 days overdue", state: "Ready to send" },
+  { name: "J. Whitfield", reference: "INV-1044", amount: "£480", due: "21 June 2026", overdue: "3 days overdue", state: "Ready for review" },
 ];
 
 /** Persistent application shell. Stays mounted across every step. */
@@ -115,8 +115,9 @@ export function ActiveChasingScene({ dimmed = false, sentState = false }: { dimm
                 </span>
               </span>
               <span className="v2-tour-acts">
-                {isHero && !heroSent ? <span className="v2-act-primary">Send now</span> : null}
-                {isHero && heroSent ? <span className="v2-act-quiet">Awaiting payment</span> : null}
+                {/* Once sent, the action cell is empty. Nothing replaces it:
+                    the product cannot observe delivery, opening or payment. */}
+                {isHero && !heroSent ? <span className="v2-act-primary">Review email</span> : null}
               </span>
             </div>
           );
@@ -142,46 +143,77 @@ function Modal({ title, sub, children, footer }: { title: string; sub?: string; 
   );
 }
 
-/** Step 2 — channel selection. SMS primary, email supporting. */
-export function ChannelScene() {
+/**
+ * Step 2 — the reminder has been prepared and is being held.
+ *
+ * There is no channel choice: email is the only reminder channel the product
+ * has. Nothing has been sent at this point.
+ */
+export function PreparedScene() {
   return (
-    <Modal title="Choose reminder channels" sub={`${DEMO.customerName} · ${DEMO.reference} · ${DEMO.amount}`}
-      footer={<><span className="v2-mbtn ghost">Cancel</span><span className="v2-mbtn primary">Preview reminder</span></>}>
-      <div className="v2-chan is-primary">
-        <span className="v2-check is-on" aria-hidden="true">✓</span>
-        <span>
-          <span className="v2-chan-t">SMS <span className="v2-chan-tag">Primary</span></span>
-          <span className="v2-chan-d">Short, direct reminder straight to their phone.</span>
-        </span>
+    <Modal title="Reminder prepared" sub={`${DEMO.customerName} · ${DEMO.reference} · ${DEMO.amount}`}
+      footer={<><span className="v2-mbtn ghost">Cancel</span><span className="v2-mbtn primary">Review email</span></>}>
+      <div className="v2-sum">
+        <div className="v2-sum-row"><span>Customer</span><strong>{DEMO.customerName}</strong></div>
+        <div className="v2-sum-row"><span>Invoice</span><strong>{DEMO.reference}</strong></div>
+        <div className="v2-sum-row"><span>Amount</span><strong>{DEMO.amount}</strong></div>
+        <div className="v2-sum-row"><span>Status</span><strong className="t-amber">{DEMO.overdueBy}</strong></div>
+        <div className="v2-sum-row"><span>Reminder</span><strong>Email reminder</strong></div>
+        <div className="v2-sum-row"><span>State</span><strong className="t-amber">Ready for review</strong></div>
       </div>
-      <div className="v2-chan">
-        <span className="v2-check is-on" aria-hidden="true">✓</span>
-        <span>
-          <span className="v2-chan-t">Email <span className="v2-chan-tag quiet">Supporting</span></span>
-          <span className="v2-chan-d">The fuller reminder, with the invoice detail.</span>
-        </span>
-      </div>
-      <p className="v2-tour-note">Nothing sends yet — you&rsquo;ll review the message next.</p>
+      <p className="v2-tour-note">Nothing sent yet — it&rsquo;s waiting for you to read it.</p>
     </Modal>
   );
 }
 
-/** Step 3 — message preview. SMS given priority, email secondary. */
-export function PreviewScene() {
+/**
+ * Step 3 — the email exactly as the customer receives it.
+ *
+ * Mirrors lib/email-templates.ts. ServiceSignal is shown honestly as the
+ * sender; the business name appears in the subject, body and sign-off. No
+ * Pay Now button is shown because this demonstration invoice has no payment
+ * link — the same behaviour as the real product.
+ */
+export function EmailReviewScene({
+  onContinue,
+  interactive,
+}: {
+  onContinue: () => void;
+  interactive: boolean;
+}) {
   return (
-    <Modal title="Review the message" sub={`${DEMO.customerName} · ${DEMO.reference} · ${DEMO.amount}`}
-      footer={<><span className="v2-mbtn ghost">Back</span><span className="v2-mbtn primary">Approve and send</span></>}>
-      <div className="v2-prev-tabs" aria-hidden="true">
-        <span className="v2-prev-tab is-on">SMS</span>
-        <span className="v2-prev-tab">Email</span>
-      </div>
-      <div className="v2-prev-sms">
-        <span className="v2-prev-from">From {DEMO.businessName}</span>
-        <p className="v2-prev-body">{DEMO.sms}</p>
-      </div>
-      <div className="v2-prev-email">
-        <span className="v2-prev-label">Email · supporting</span>
-        <span className="v2-prev-subj">{DEMO.emailSubject}</span>
+    <Modal title="Review email" sub={`${DEMO.customerName} · ${DEMO.reference} · ${DEMO.amount}`}
+      footer={
+        <>
+          <span className="v2-mbtn ghost" aria-hidden="true">Back</span>
+          {/* Advances to step 4 only. It approves nothing and sends nothing:
+              the dashboard row, the ready count and the sent state are all
+              untouched by this action. */}
+          <button type="button" className="v2-mbtn primary" onClick={onContinue} tabIndex={interactive ? 0 : -1}>
+            Continue to approval
+          </button>
+        </>
+      }>
+      <div className="v2-mail is-compact">
+        <div className="v2-mail-head">
+          <span className="v2-mail-row">
+            <span className="v2-mail-k">From</span>
+            <span className="v2-mail-v">
+              {DEMO.emailFromName} <span className="v2-mail-addr">&lt;{DEMO.emailFromAddress}&gt;</span>
+            </span>
+          </span>
+          <span className="v2-mail-row">
+            <span className="v2-mail-k">Subject</span>
+            <span className="v2-mail-v v2-mail-subj">{DEMO.emailSubject}</span>
+          </span>
+        </div>
+        <div className="v2-mail-body">
+          <p>{DEMO.emailOpening}</p>
+          <p className="v2-mail-from-line">{DEMO.emailFromLine}</p>
+          <p>{DEMO.emailBody}</p>
+          <p className="v2-mail-sign">{DEMO.emailClosingLine}<br />{DEMO.emailSignOff}</p>
+        </div>
+        <p className="v2-mail-foot">{DEMO.emailFooter}</p>
       </div>
       <p className="v2-tour-note">Still nothing sent. You decide what happens next.</p>
     </Modal>
@@ -208,16 +240,21 @@ export function ApprovalScene({
 }) {
   if (done) {
     return (
-      <Modal title="Reminder sent" sub={`${DEMO.customerName} · ${DEMO.reference}`}
+      <Modal title="Email reminder sent" sub="The reminder has left your approval queue."
         footer={
           <button type="button" className="v2-mbtn primary" onClick={onReset} tabIndex={interactive ? 0 : -1}>
             Done
           </button>
         }>
-        <div className="v2-done">
-          <span className="v2-done-ico" aria-hidden="true">✓</span>
-          <p className="v2-done-t">Sent by SMS and email</p>
-          <p className="v2-done-s">You approved it — {DEMO.businessName} stays in control of every message.</p>
+        <p className="v2-sent-mark">
+          <span className="v2-sent-ico" aria-hidden="true">✓</span>
+        </p>
+        <div className="v2-sum">
+          <div className="v2-sum-row"><span>Customer</span><strong>{DEMO.customerName}</strong></div>
+          <div className="v2-sum-row"><span>Invoice</span><strong>{DEMO.reference}</strong></div>
+          <div className="v2-sum-row"><span>Amount</span><strong>{DEMO.amount}</strong></div>
+          <div className="v2-sum-row"><span>Reminder</span><strong>Email</strong></div>
+          <div className="v2-sum-row"><span>Status</span><strong className="t-blue">Reminder sent</strong></div>
         </div>
       </Modal>
     );
@@ -236,7 +273,7 @@ export function ApprovalScene({
         <div className="v2-sum-row"><span>Customer</span><strong>{DEMO.customerName}</strong></div>
         <div className="v2-sum-row"><span>Invoice</span><strong>{DEMO.reference}</strong></div>
         <div className="v2-sum-row"><span>Amount</span><strong>{DEMO.amount}</strong></div>
-        <div className="v2-sum-row"><span>Channels</span><strong>SMS + email</strong></div>
+        <div className="v2-sum-row"><span>Reminder</span><strong>Email</strong></div>
         <div className="v2-sum-row"><span>Status</span><strong className="t-amber">Awaiting your approval</strong></div>
       </div>
     </Modal>
