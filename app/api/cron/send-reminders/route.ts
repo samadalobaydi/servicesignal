@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { buildReminderEmail } from "@/lib/email-templates";
 import { todaysSchedule } from "@/lib/reminder-schedule";
 import { sendAndUpdateLog } from "@/lib/reminder-sender";
+import { BETA_APPROVAL_ONLY } from "@/lib/beta-capabilities";
 import type { Invoice, Profile } from "@/types";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -184,7 +185,19 @@ export async function GET(request: NextRequest) {
       paymentLink: invoice.payment_link || undefined,
     });
 
-    const isAutoMode = profile.reminder_mode === "auto";
+    // Final sending gate. While BETA_APPROVAL_ONLY holds, a stored 'auto'
+    // value can never cause a send — the reminder is still prepared and left
+    // 'pending' for the owner to approve. This gate is authoritative: it also
+    // covers rows written before the flag existed, direct API calls and any
+    // future UI regression.
+    const storedAutoMode = profile.reminder_mode === "auto";
+    const isAutoMode = !BETA_APPROVAL_ONLY && storedAutoMode;
+
+    if (storedAutoMode && !isAutoMode) {
+      console.warn(
+        `[cron] Profile ${invoice.user_id} is stored as 'auto', but approval-only is enforced for the founding beta. Reminder left pending for approval.`
+      );
+    }
 
     // ── Insert the reminder_logs row first (always — detection is automatic) ──
     const { data: insertedLog, error: insertError } = await supabase

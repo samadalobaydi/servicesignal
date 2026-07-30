@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Profile, ReminderMode } from "@/types";
+import type { Profile } from "@/types";
 import { updateProfile } from "@/lib/profile";
 
 interface SettingsCardProps {
@@ -33,16 +33,6 @@ export default function SettingsCard({ profile, userEmail, onUpdated }: Settings
     setSaving(false);
   };
 
-  const setReminderMode = async (mode: ReminderMode) => {
-    setError(null);
-    const result = await updateProfile({ reminder_mode: mode });
-    if (result.success && result.profile) {
-      onUpdated(result.profile);
-    } else {
-      setError(result.message ?? "Failed to update mode.");
-    }
-  };
-
   return (
     <div className="dash-card overflow-hidden">
       <div className="px-6 py-5" style={{ borderBottom: "1px solid var(--dash-border)" }}>
@@ -50,7 +40,7 @@ export default function SettingsCard({ profile, userEmail, onUpdated }: Settings
           Reminder Settings
         </h2>
         <p className="text-sm mt-1" style={{ color: "var(--dash-text-muted)" }}>
-          Controls how reminder emails identify your business and whether they send automatically.
+          Controls how reminder emails identify your business.
         </p>
       </div>
 
@@ -84,45 +74,29 @@ export default function SettingsCard({ profile, userEmail, onUpdated }: Settings
           </div>
         </div>
 
-        {/* Reminder mode */}
+        {/* Sending behaviour — approval-only during the founding beta.
+            The Auto Mode chooser is not offered: it is disabled server-side,
+            so presenting it (even greyed out) would advertise something no
+            user can turn on. */}
         <div>
           <label className="block text-sm mb-2" style={{ color: "var(--dash-text)", fontWeight: 600 }}>
             Sending mode
           </label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <button
-              onClick={() => setReminderMode("approval")}
-              className="p-4 rounded-xl border text-left transition-all"
-              style={{
-                background: profile.reminder_mode === "approval" ? "var(--dash-accent-soft)" : "var(--dash-card)",
-                borderColor: profile.reminder_mode === "approval" ? "var(--dash-accent)" : "var(--dash-border)",
-                boxShadow: profile.reminder_mode === "approval" ? "0 0 0 1px var(--dash-accent)" : "none",
-              }}
-            >
-              <p className="text-sm" style={{ fontWeight: 650, color: profile.reminder_mode === "approval" ? "var(--dash-accent-strong)" : "var(--dash-text)" }}>
-                Approval Mode
-              </p>
-              <p className="text-sm mt-1" style={{ color: "var(--dash-text-muted)", lineHeight: 1.45 }}>
-                Reminders are detected automatically but wait for you to click Send.
-              </p>
-            </button>
-
-            <button
-              onClick={() => setReminderMode("auto")}
-              className="p-4 rounded-xl border text-left transition-all"
-              style={{
-                background: profile.reminder_mode === "auto" ? "var(--dash-green-soft)" : "var(--dash-card)",
-                borderColor: profile.reminder_mode === "auto" ? "var(--dash-green)" : "var(--dash-border)",
-                boxShadow: profile.reminder_mode === "auto" ? "0 0 0 1px var(--dash-green)" : "none",
-              }}
-            >
-              <p className="text-sm" style={{ fontWeight: 650, color: profile.reminder_mode === "auto" ? "var(--dash-green)" : "var(--dash-text)" }}>
-                Auto Mode
-              </p>
-              <p className="text-sm mt-1" style={{ color: "var(--dash-text-muted)", lineHeight: 1.45 }}>
-                Reminders are detected and sent automatically — no manual step.
-              </p>
-            </button>
+          <div
+            className="p-4 rounded-xl border"
+            style={{
+              background: "var(--dash-accent-soft)",
+              borderColor: "var(--dash-accent)",
+              boxShadow: "0 0 0 1px var(--dash-accent)",
+            }}
+          >
+            <p className="text-sm" style={{ fontWeight: 650, color: "var(--dash-accent-strong)" }}>
+              Approval Mode
+            </p>
+            <p className="text-sm mt-1" style={{ color: "var(--dash-text-muted)", lineHeight: 1.45 }}>
+              Reminders are detected and prepared for you automatically, then wait
+              in your queue. Nothing is sent to a customer until you approve it.
+            </p>
           </div>
         </div>
 

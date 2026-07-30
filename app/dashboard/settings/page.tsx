@@ -2,12 +2,16 @@
 
 import { useDashboard } from "@/components/dashboard/DashboardProvider";
 import SettingsCard from "@/components/dashboard/SettingsCard";
+import { BETA_APPROVAL_ONLY } from "@/lib/beta-capabilities";
 
 export default function SettingsPage() {
   const { profile, userEmail, setProfile, stats, buckets } = useDashboard();
 
-  const modeLabel = profile?.reminder_mode === "auto" ? "Auto Mode" : "Approval Mode";
-  const modeColor = profile?.reminder_mode === "auto" ? "var(--dash-green)" : "var(--dash-accent-strong)";
+  // A historical 'auto' row must not be labelled Auto Mode while the cron is
+  // gating sends — that would misreport actual behaviour to the owner.
+  const autoActive = !BETA_APPROVAL_ONLY && profile?.reminder_mode === "auto";
+  const modeLabel = autoActive ? "Auto Mode" : "Approval Mode";
+  const modeColor = autoActive ? "var(--dash-green)" : "var(--dash-accent-strong)";
   const businessName = profile?.business_name?.trim();
 
   return (

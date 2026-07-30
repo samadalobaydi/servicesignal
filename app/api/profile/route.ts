@@ -3,6 +3,7 @@ import { getSupabaseServer } from "@/lib/supabase-server";
 import { sendWelcomeEmailIfNeeded } from "@/lib/welcome-email";
 import { LEGAL_CONFIG } from "@/lib/legal";
 import type { ProfileUpdate, ReminderTone, ReminderMode } from "@/types";
+import { BETA_APPROVAL_ONLY } from "@/lib/beta-capabilities";
 
 const VALID_TONES: ReminderTone[] = ["friendly", "firm", "final"];
 const VALID_MODES: ReminderMode[] = ["approval", "auto"];
@@ -175,8 +176,26 @@ export async function PUT(request: NextRequest) {
   if (body.default_tone && VALID_TONES.includes(body.default_tone)) {
     update.default_tone = body.default_tone;
   }
-  if (body.reminder_mode && VALID_MODES.includes(body.reminder_mode)) {
-    update.reminder_mode = body.reminder_mode;
+  if (body.reminder_mode) {
+    // Reject rather than silently rewrite: a caller that asked for 'auto'
+    // should be told it was refused, not quietly given something else.
+    if (BETA_APPROVAL_ONLY && body.reminder_mode === "auto") {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Automatic sending is turned off during the founding beta. Every reminder waits for your approval.",
+          fieldErrors: {
+            reminder_mode:
+              "Automatic sending is not available during the founding beta.",
+          },
+        },
+        { status: 400 }
+      );
+    }
+    if (VALID_MODES.includes(body.reminder_mode)) {
+      update.reminder_mode = body.reminder_mode;
+    }
   }
 
   if (Object.keys(update).length === 0) {
