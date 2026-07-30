@@ -64,7 +64,7 @@ export default function Hero() {
         </div>
 
         {/* ══════ Product tour ══════ */}
-        <div className="v2-reveal v2-d5">
+        <div id="tour" className="v2-reveal v2-d5">
           <ProductTour />
         </div>
       </div>

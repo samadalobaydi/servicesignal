@@ -113,12 +113,12 @@ export default function FoundingBetaSection() {
         <div className="v2-beta-copy">
           <p className="v2-beta-eyebrow">Founding beta</p>
           <h2 id="beta-heading" className="v2-beta-heading">
-            Built for UK trades. Opening to a small founding group.
+            Built for UK trades. Join the founding beta.
           </h2>
           <p className="v2-beta-sub">
-            We&rsquo;re opening ServiceSignal to a limited number of trades and local
-            service businesses. Tell us about your work and we&rsquo;ll contact you
-            about joining the beta.
+            We&rsquo;re opening ServiceSignal to trades and local service businesses
+            who want a simpler way to follow up overdue invoices. Tell us about your
+            work and we&rsquo;ll contact you about joining the beta.
           </p>
         </div>
 

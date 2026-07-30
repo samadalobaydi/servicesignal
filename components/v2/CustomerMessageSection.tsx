@@ -1,18 +1,16 @@
 import { DEMO } from "./demo";
 
 /**
- * Section 2 — What your customer actually gets.
+ * Section 2 — Professional follow-up.
  *
- * The perspective shifts from the owner's workspace (hero) to the customer's
- * side: the actual reminder email, shown at readable size, with plain
- * commentary beside it.
- *
- * Renders one fixed state. It reads nothing from the hero tour and requires
- * no interaction — INV-1042 provides continuity, not a dependency.
+ * Purpose: explain why the reminder is professional, trustworthy and suitable
+ * to send to a real customer. The persuasive copy and its three supporting
+ * points sit on one side; the real email artefact sits on the other, so the
+ * argument and its evidence are read together.
  *
  * Static by design: no motion, no observers, no hover behaviour.
  *
- * Product truth. The email shown here mirrors lib/email-templates.ts:
+ * Product truth. The email mirrors lib/email-templates.ts exactly:
  *  - ServiceSignal is the sender, shown honestly. The business name appears
  *    in the subject, the body and the sign-off — it is not the From address.
  *  - No delivery, open, read, reply or click tracking is depicted.
@@ -21,14 +19,14 @@ import { DEMO } from "./demo";
  *  - No phone hardware, no browser chrome, no invented email client.
  */
 
-const COMMENTARY = [
+const POINTS = [
   {
     title: "Clearly connected to your business",
-    line: `${DEMO.businessName} appears in the subject, message and sign-off, while ServiceSignal is shown honestly as the sender.`,
+    line: "Your business name appears in the subject, message and sign-off, while ServiceSignal is clearly identified as the sender.",
   },
   {
     title: "Clear about what's owed",
-    line: "The amount, due date and how overdue the invoice is are stated plainly.",
+    line: "The customer, invoice amount, due date and overdue position are stated plainly.",
   },
   {
     title: "Replies come back to you",
@@ -38,23 +36,48 @@ const COMMENTARY = [
 
 export default function CustomerMessageSection() {
   return (
-    <section className="v2-cms" aria-labelledby="cms-heading">
-      <span className="v2-cms-wash" aria-hidden="true" />
+    <section id="customer" className="v2-pfu" aria-labelledby="pfu-heading">
+      <span className="v2-pfu-wash" aria-hidden="true" />
 
-      <div className="v2-section v2-cms-grid">
-        {/* ── Copy ── */}
-        <div className="v2-cms-copy">
-          <p className="v2-cms-eyebrow">What your customer sees</p>
-          <h2 id="cms-heading" className="v2-cms-heading">
-            A reminder you&rsquo;d be comfortable sending yourself.
+      <div className="v2-section v2-pfu-grid">
+        {/* ── Argument: copy + the three supporting points ── */}
+        <div className="v2-pfu-copy">
+          <p className="v2-pfu-eyebrow">Professional follow-up</p>
+          <h2 id="pfu-heading" className="v2-pfu-heading">
+            A reminder you&rsquo;d be comfortable putting your name on.
           </h2>
-          <p className="v2-cms-sub">
-            Clear about what&rsquo;s owed, polite in tone, and easy for your customer to act on.
+          <p className="v2-pfu-sub">
+            Clear about what&rsquo;s owed, polite in tone and unmistakably connected
+            to your business.
+          </p>
+
+          <ul className="v2-pfu-points">
+            {POINTS.map((p) => (
+              <li key={p.title}>
+                <span className="v2-pfu-tick" aria-hidden="true">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                    <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </span>
+                <span>
+                  <span className="v2-pfu-point-t">{p.title}</span>
+                  <span className="v2-pfu-point-l">{p.line}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+
+          {/* Conditional — this invoice has no payment link, so no button
+              appears in the email beside it. */}
+          <p className="v2-pfu-paynote">
+            When you add a payment link, the email can include a Pay Now button
+            pointing to your chosen payment page. ServiceSignal never handles the
+            payment.
           </p>
         </div>
 
-        {/* ── The real reminder email, then commentary ── */}
-        <div className="v2-cms-right">
+        {/* ── Evidence: the real reminder email ── */}
+        <div className="v2-pfu-proof">
           <figure
             className="v2-cms-mail"
             aria-label={`Example reminder email. From ${DEMO.emailFromName}, ${DEMO.emailFromAddress}. Subject: ${DEMO.emailSubject}. It reads: ${DEMO.emailOpening} ${DEMO.emailFromLine} ${DEMO.emailBody} ${DEMO.emailClosingLine} ${DEMO.emailSignOff}. ${DEMO.emailFooter}. This is a demonstration.`}
@@ -88,23 +111,6 @@ export default function CustomerMessageSection() {
 
             <p className="v2-cms-mail-foot">{DEMO.emailFooter}</p>
           </figure>
-
-          {/* Commentary — three plain text columns, no cards */}
-          <div className="v2-cms-notes">
-            {COMMENTARY.map((c) => (
-              <div key={c.title}>
-                <p className="v2-cms-note-t">{c.title}</p>
-                <p className="v2-cms-note-l">{c.line}</p>
-              </div>
-            ))}
-          </div>
-
-          {/* Conditional, deliberately quiet — this invoice has no payment
-              link, so no button appears above. */}
-          <p className="v2-cms-paynote">
-            When you add a payment link, the email includes a Pay Now button pointing
-            to your chosen payment page. ServiceSignal never handles the money.
-          </p>
         </div>
       </div>
     </section>

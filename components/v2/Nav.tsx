@@ -18,10 +18,11 @@ export default function Nav() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  /* Deliberately not a table of contents — two waypoints only. Everything
+     else is found by scrolling. "Access" is not a text link because it would
+     duplicate the Join the beta button beside it. */
   const links = [
-    { href: "#journey", label: "How it works" },
-    { href: "#proof", label: "Features" },
-    { href: "#access", label: "Access" },
+    { href: "#tour", label: "How it works" },
     { href: "#faq", label: "FAQ" },
   ];
 
@@ -45,14 +46,14 @@ export default function Nav() {
 
         <nav className="hidden md:flex items-center gap-8" style={{ fontSize: "0.9rem", color: "var(--v2-muted)" }}>
           {links.map((l) => (
-            <a key={l.href} href={l.href} className="transition-colors hover:text-[color:var(--v2-ink)]">
+            <a key={l.href} href={l.href} className="v2-navlink">
               {l.label}
             </a>
           ))}
         </nav>
 
         <div className="flex items-center gap-3">
-          <Link href="/login" className="hidden sm:inline text-sm" style={{ color: "var(--v2-muted)" }}>
+          <Link href="/login" className="v2-navlink v2-navlink-signin hidden sm:inline">
             Sign in
           </Link>
           <a href="#access" className="lp-btn hidden md:inline-flex" style={{ background: "var(--v2-blue)", padding: "0.5rem 1.15rem", fontSize: "0.9rem" }}>
@@ -79,11 +80,11 @@ export default function Nav() {
       {open && (
         <div className="md:hidden px-6 py-4 flex flex-col gap-4" style={{ background: "#fff", borderTop: "1px solid var(--v2-line)" }}>
           {links.map((l) => (
-            <a key={l.href} href={l.href} style={{ color: "var(--v2-muted)" }} onClick={() => setOpen(false)}>
+            <a key={l.href} href={l.href} className="v2-navlink-m" onClick={() => setOpen(false)}>
               {l.label}
             </a>
           ))}
-          <Link href="/login" style={{ color: "var(--v2-muted)" }} onClick={() => setOpen(false)}>
+          <Link href="/login" className="v2-navlink-m" onClick={() => setOpen(false)}>
             Sign in
           </Link>
           <a href="#access" className="lp-btn" style={{ background: "var(--v2-blue)" }} onClick={() => setOpen(false)}>
