@@ -75,7 +75,8 @@ export default function DashboardShell({
     >
       {/* Logo */}
       <div className="p-5 border-b border-[rgba(0,200,255,0.08)]">
-        <Link href="/" className="flex items-center gap-2">
+        {/* REVIEW BRANCH: points at the /v2 preview. Change back to "/" when v2 becomes the root landing page. */}
+        <Link href="/v2" className="flex items-center gap-2">
           <div className="w-6 h-6 rounded bg-[#00c8ff] flex items-center justify-center flex-shrink-0">
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
               <path d="M8 1L14 13H2L8 1Z" fill="#0a0e1a" />
@@ -133,8 +134,9 @@ export default function DashboardShell({
 
       {/* Back to site */}
       <div className="p-4 border-t border-[rgba(0,200,255,0.08)]">
+        {/* REVIEW BRANCH: points at the /v2 preview. Change back to "/" when v2 becomes the root landing page. */}
         <Link
-          href="/"
+          href="/v2"
           className="flex items-center gap-2 text-xs text-[#475569] hover:text-[#94a3b8] transition-colors"
         >
           <svg width="14" height="14" fill="none" viewBox="0 0 24 24">

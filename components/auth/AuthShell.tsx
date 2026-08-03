@@ -4,6 +4,7 @@ import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { getAuthCallbackUrl } from "@/lib/app-urls";
+import split from "./auth-split.module.css";
 
 /**
  * v8.6.0 — shared shell + primitives for the authentication pages
@@ -22,7 +23,73 @@ import { getAuthCallbackUrl } from "@/lib/app-urls";
 export const BRAND_BLUE = "#2A5FE3";        // ServiceSignal logo blue
 export const BRAND_BLUE_HOVER = "#2350C4";
 
-export function AuthShell({ children, footer }: { children: React.ReactNode; footer?: React.ReactNode }) {
+/**
+ * OAuth providers confirmed working in the Supabase project.
+ *
+ * Deliberately EMPTY. The repository cannot prove dashboard configuration, and
+ * a provider that is enabled here but not in Supabase renders a prominent
+ * button that fails on click — worse for trust than offering no social sign-in
+ * at all. SocialButtons renders nothing while this list is empty.
+ *
+ * To enable one later: confirm it in Supabase → Authentication → Providers,
+ * then add its key here. No other change is required.
+ */
+export const ENABLED_OAUTH_PROVIDERS: readonly OAuthProvider[] = [];
+
+export type OAuthProvider = "google" | "apple" | "azure";
+
+interface AuthShellProps {
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+  /**
+   * Optional reassurance panel. When omitted — signup, forgot-password and
+   * reset-password — the centred-card layout below is used unchanged.
+   */
+  aside?: React.ReactNode;
+}
+
+export function AuthShell({ children, footer, aside }: AuthShellProps) {
+  // ── Split layout: /login only ────────────────────────────────────────────
+  if (aside) {
+    return (
+      <div className={split.root}>
+        <div className={split.formCol}>
+          <div className={split.formInner}>
+            {/* The Landing Page 2.0 lockup: the mark asset plus real HTML
+                text. servicesignal-auth-logo.png is NOT used here — it is a
+                stacked lockup carrying the retired "AUTOMATED INVOICE CHASING
+                FOR UK BUSINESSES" tagline, which contradicts the approval-first
+                product. No image was edited; this composes the same two parts
+                Nav and SiteFooter already use.
+                REVIEW BRANCH: points at the /v2 preview. Change back to "/"
+                when v2 becomes the root landing page. */}
+            <Link href="/v2" aria-label="ServiceSignal home" className={split.lockup}>
+              <Image
+                src="/branding/servicesignal-mark.png"
+                alt=""
+                width={875}
+                height={1366}
+                priority
+                sizes="30px"
+                className={split.lockupMark}
+              />
+              <span className={split.lockupWord}>
+                Service<span className={split.lockupWordAccent}>Signal</span>
+              </span>
+            </Link>
+
+            {children}
+
+            {footer && <div className={split.footer}>{footer}</div>}
+          </div>
+        </div>
+
+        {aside}
+      </div>
+    );
+  }
+
+  // ── Centred card: every other auth page, byte-identical to before ────────
   return (
     <div
       className="min-h-screen flex flex-col items-center justify-center px-4 py-12"
@@ -42,7 +109,8 @@ export function AuthShell({ children, footer }: { children: React.ReactNode; foo
           height), so the -22px margin lands the VISUAL bottom of the logo
           ~36px above the card — inside the requested 32-40px window. The
           image is untouched; this is layout positioning only. */}
-      <Link href="/" aria-label="ServiceSignal home" className="block max-w-full" style={{ marginBottom: -22, width: "min(440px, 100%)" }}>
+      {/* REVIEW BRANCH: points at the /v2 preview. Change back to "/" when v2 becomes the root landing page. */}
+      <Link href="/v2" aria-label="ServiceSignal home" className="block max-w-full" style={{ marginBottom: -22, width: "min(440px, 100%)" }}>
         <Image
           src="/branding/servicesignal-auth-logo.png"
           alt="ServiceSignal"
@@ -209,7 +277,13 @@ export function OrDivider() {
  * Until then, Supabase returns "provider is not enabled" and the button
  * shows a clear message inline — it never fails silently.
  */
-export function SocialButtons({ next = "/dashboard" }: { next?: string }) {
+export function SocialButtons({
+  next = "/dashboard",
+  providers = ENABLED_OAUTH_PROVIDERS,
+}: {
+  next?: string;
+  providers?: readonly OAuthProvider[];
+}) {
   const [busy, setBusy] = useState<string | null>(null);
   const [oauthError, setOauthError] = useState<string | null>(null);
 
@@ -248,6 +322,9 @@ export function SocialButtons({ next = "/dashboard" }: { next?: string }) {
     // Otherwise the browser is navigating to the provider now.
   };
 
+  // No confirmed provider — render nothing rather than a button that fails.
+  if (providers.length === 0) return null;
+
   const btnStyle: React.CSSProperties = {
     border: "1px solid #d3dae3",
     background: "#ffffff",
@@ -266,32 +343,32 @@ export function SocialButtons({ next = "/dashboard" }: { next?: string }) {
 
   return (
     <div className="space-y-2.5">
-      <button type="button" onClick={() => oauth("google", "Google")} disabled={!!busy}
+      {providers.includes("google") && <button type="button" onClick={() => oauth("google", "Google")} disabled={!!busy}
         className="w-full inline-flex items-center justify-center gap-2.5 rounded-lg transition-colors hover:bg-[#f8fafc]"
         style={{ ...btnStyle, opacity: busy && busy !== "google" ? 0.55 : 1 }}>
         {busy === "google" ? spinner : (
           <svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 010-4.2V7.06H2.18a11 11 0 000 9.88l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
         )}
         {busy === "google" ? "Redirecting to Google…" : "Continue with Google"}
-      </button>
+      </button>}
 
-      <button type="button" onClick={() => oauth("apple", "Apple")} disabled={!!busy}
+      {providers.includes("apple") && <button type="button" onClick={() => oauth("apple", "Apple")} disabled={!!busy}
         className="w-full inline-flex items-center justify-center gap-2.5 rounded-lg transition-colors hover:bg-[#f8fafc]"
         style={{ ...btnStyle, opacity: busy && busy !== "apple" ? 0.55 : 1 }}>
         {busy === "apple" ? spinner : (
           <svg width="17" height="17" viewBox="0 0 24 24" fill="#0f172a" aria-hidden="true"><path d="M16.62 12.9c.03 3.22 2.83 4.29 2.86 4.3-.02.08-.45 1.53-1.47 3.03-.89 1.3-1.81 2.59-3.26 2.62-1.43.03-1.89-.85-3.52-.85-1.63 0-2.14.82-3.49.88-1.4.05-2.47-1.4-3.36-2.7C2.55 17.55 1.14 12.7 3.01 9.5a5.2 5.2 0 014.39-2.67c1.38-.03 2.68.93 3.52.93.84 0 2.42-1.15 4.08-.98.7.03 2.65.28 3.9 2.12-.1.06-2.33 1.36-2.28 4zM13.9 4.31c.74-.9 1.24-2.15 1.1-3.4-1.07.04-2.35.71-3.12 1.6-.68.8-1.28 2.07-1.12 3.29 1.19.1 2.4-.6 3.14-1.49z"/></svg>
         )}
         {busy === "apple" ? "Redirecting to Apple…" : "Continue with Apple"}
-      </button>
+      </button>}
 
-      <button type="button" onClick={() => oauth("azure", "Microsoft")} disabled={!!busy}
+      {providers.includes("azure") && <button type="button" onClick={() => oauth("azure", "Microsoft")} disabled={!!busy}
         className="w-full inline-flex items-center justify-center gap-2.5 rounded-lg transition-colors hover:bg-[#f8fafc]"
         style={{ ...btnStyle, opacity: busy && busy !== "azure" ? 0.55 : 1 }}>
         {busy === "azure" ? spinner : (
           <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="10" height="10" fill="#F25022"/><rect x="13" y="1" width="10" height="10" fill="#7FBA00"/><rect x="1" y="13" width="10" height="10" fill="#00A4EF"/><rect x="13" y="13" width="10" height="10" fill="#FFB900"/></svg>
         )}
         {busy === "azure" ? "Redirecting to Microsoft…" : "Continue with Microsoft"}
-      </button>
+      </button>}
 
       {/* Errors show HERE, right under the buttons that caused them. */}
       {oauthError && (

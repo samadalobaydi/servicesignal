@@ -167,10 +167,27 @@ export interface BetaSignupErrors {
   email?: string;
 }
 
+/**
+ * Outcome of a beta-signup attempt. Saving the row and sending the access
+ * email are separate events, so the client can tell the visitor the truth
+ * about each rather than inferring one from the other.
+ */
+export type SignupOutcome =
+  | "saved_and_sent"   // row written AND access email accepted by Resend
+  | "saved_no_email"   // row written, email failed or was suppressed
+  | "already_listed"   // this address is already on the beta list
+  | "invalid"          // validation failed
+  | "rate_limited"     // too many attempts from this network
+  | "not_saved";       // datastore unavailable — nothing was recorded
+
 export interface ApiResponse {
   success: boolean;
   message: string;
   error?: string;
   /** Field-level validation errors, keyed by form field name. */
   fieldErrors?: Record<string, string>;
+  /** Which of the five terminal states this request reached. */
+  outcome?: SignupOutcome;
+  /** True only when Resend accepted the access email for delivery. */
+  emailSent?: boolean;
 }

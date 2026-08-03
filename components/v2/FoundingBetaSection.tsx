@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { V2_BUSINESS_TYPES, V2_UNPAID_RANGES } from "@/lib/beta-options";
+import { writeSignupPrefill } from "@/lib/signup-prefill";
 
 /**
  * Section 3 — Founding beta access.
@@ -36,6 +37,8 @@ export default function FoundingBetaSection() {
   const [form, setForm] = useState<Fields>(EMPTY);
   const [errors, setErrors] = useState<Errors>({});
   const [status, setStatus] = useState<"idle" | "sending" | "done">("idle");
+  /* True only when the API confirms Resend accepted the access email. */
+  const [emailSent, setEmailSent] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
 
@@ -86,6 +89,16 @@ export default function FoundingBetaSection() {
       const data = await res.json().catch(() => null);
 
       if (res.ok && data?.success) {
+        // The API reports saving and sending as separate outcomes, so the
+        // confirmation below can only claim an email was sent when one was.
+        setEmailSent(Boolean(data.emailSent));
+        // Hand the two reusable values to /signup via same-origin
+        // sessionStorage — never a query string, so the address stays out of
+        // history, referrer headers and server logs.
+        writeSignupPrefill({
+          businessName: form.business_name,
+          email: form.email.trim().toLowerCase(),
+        });
         setStatus("done"); // only on confirmed save
         return;
       }
@@ -127,10 +140,30 @@ export default function FoundingBetaSection() {
           {status === "done" ? (
             <div className="v2-beta-done" role="status" aria-live="polite">
               <span className="v2-beta-done-ico" aria-hidden="true">✓</span>
-              <p className="v2-beta-done-t">
-                Thanks — we&rsquo;ve received your details. We&rsquo;ll be in touch about
-                the founding beta.
-              </p>
+
+              {/* The two states stay genuinely distinct: "Check your inbox" is
+                  shown only when the API confirmed Resend accepted the email. */}
+              {emailSent ? (
+                <>
+                  <p className="v2-beta-done-t">Check your inbox</p>
+                  <p className="v2-beta-done-s">
+                    We&rsquo;ve emailed you the next step. You can also continue
+                    setting up your account now.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="v2-beta-done-t">Thanks — your details are saved.</p>
+                  <p className="v2-beta-done-s">
+                    Continue to set up your ServiceSignal account. We&rsquo;ll carry
+                    your business name and email into the next step.
+                  </p>
+                </>
+              )}
+
+              <Link href="/signup" className="v2-beta-cta">
+                Continue to account setup
+              </Link>
             </div>
           ) : (
             <form ref={formRef} onSubmit={onSubmit} noValidate>
@@ -213,7 +246,7 @@ export default function FoundingBetaSection() {
               <p className="v2-beta-privacy">
                 We&rsquo;ll only use your details to contact you about the ServiceSignal
                 beta. Read our{" "}
-                <Link href="/privacy" className="v2-beta-privacy-link">Privacy Policy</Link>.
+                <Link href="/privacy?from=landing" className="v2-beta-privacy-link">Privacy Policy</Link>.
               </p>
             </form>
           )}

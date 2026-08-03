@@ -1,3 +1,4 @@
+import { SUPPORT_FROM } from "@/lib/resend";
 import "server-only";
 import { render } from "@react-email/render";
 import { tryClaim, confirmSent, markFailed } from "./email-events";
@@ -5,7 +6,9 @@ import { getResendClient } from "./resend";
 import { WelcomeEmail } from "@/emails/templates/WelcomeEmail";
 
 const RESEND_TIMEOUT_MS = 10_000;
-const WELCOME_FROM = "ServiceSignal <hello@servicesignal.app>";
+// Welcome is account communication, so it sends from the monitored support
+// mailbox rather than a separate unmonitored address.
+const WELCOME_FROM = SUPPORT_FROM;
 
 /**
  * Attempts to send the one-time Welcome email for a user, using the

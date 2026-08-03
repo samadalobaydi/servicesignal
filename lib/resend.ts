@@ -24,5 +24,17 @@ export function getResendClient(): Resend | null {
   return new Resend(key);
 }
 
-/** Sender identity for all reminder emails — fixed for MVP. */
+/**
+ * Sender identities. Two addresses, two jobs — deliberately separate so a
+ * deliverability problem with one can never take down the other:
+ *
+ *   reminders@ — automated invoice reminders to the BUSINESS OWNER'S customers.
+ *                Reply-To is set per-send to the owner's own account email, so
+ *                a customer replying reaches the trade, not ServiceSignal.
+ *   support@   — beta access, welcome, account and legal contact. Replies come
+ *                to a monitored ServiceSignal mailbox.
+ */
 export const REMINDER_FROM = "ServiceSignal <reminders@servicesignal.app>";
+
+export const SUPPORT_ADDRESS = "support@servicesignal.app";
+export const SUPPORT_FROM = `ServiceSignal <${SUPPORT_ADDRESS}>`;

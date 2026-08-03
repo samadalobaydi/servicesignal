@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { LEGAL_CONFIG } from "@/lib/legal";
 
 /**
  * Minimal footer. Continues the navy of the founding beta section above it, so
@@ -7,11 +8,9 @@ import Link from "next/link";
  * Deliberately omitted: social icons, product/company/resource columns, a
  * newsletter form, and any link that leads nowhere.
  *
- * A contact email is also omitted for now. lib/legal.ts annotates
- * support@ and privacy@servicesignal.app as conventions rather than confirmed
- * inboxes, and the hello@servicesignal.co.uk address used by the v1 footer is
- * on a different domain from the verified sending domain. Pending Sam
- * confirming a monitored address, nothing is guessed here.
+ * The contact address comes from LEGAL_CONFIG.supportEmail — one monitored
+ * mailbox for support, account, beta-access and privacy correspondence, and
+ * the same address the legal pages and every ServiceSignal email use.
  */
 export default function SiteFooter() {
   return (
@@ -32,9 +31,12 @@ export default function SiteFooter() {
         </div>
 
         <nav className="v2-foot-links" aria-label="Footer">
-          <Link href="/privacy" className="v2-foot-link">Privacy</Link>
-          <Link href="/terms" className="v2-foot-link">Terms</Link>
+          <Link href="/privacy?from=landing" className="v2-foot-link">Privacy</Link>
+          <Link href="/terms?from=landing" className="v2-foot-link">Terms</Link>
           <Link href="/login" className="v2-foot-link">Sign in</Link>
+          <a href={`mailto:${LEGAL_CONFIG.supportEmail}`} className="v2-foot-link">
+            {LEGAL_CONFIG.supportEmail}
+          </a>
         </nav>
       </div>
 

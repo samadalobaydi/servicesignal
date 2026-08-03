@@ -1,0 +1,412 @@
+/*
+ * Split layout for the sign-in page only.
+ *
+ * A CSS Module rather than an addition to app/globals.css: the class names
+ * cannot collide with the .lp-*, .dash-* or .v2-* systems, and this work stays
+ * in its own file instead of entangling with the substantial uncommitted
+ * changes already sitting in globals.css.
+ *
+ * These rules only apply when AuthShell is given an `aside`: /login and
+ * /signup. Forgot-password and reset-password pass none and keep the centred
+ * card. Shared by two pages now, so a change here affects both.
+ */
+
+.root {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1fr;
+  background: #ffffff;
+}
+
+/* ── Form column ──────────────────────────────────────────────────────── */
+.formCol {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 2.5rem 1.5rem 3rem;
+}
+.formInner {
+  width: 100%;
+  max-width: 440px;
+  margin-inline: auto;
+}
+
+/* AuthHeading ships a Tailwind mb-7 (1.75rem). Scoped to this layout only, so
+   the lockup, heading, subtitle and first input read as one deliberate block
+   without touching the shared component or the other three auth pages. */
+.formInner :global(.mb-7) {
+  margin-bottom: 1.35rem;
+}
+
+/* Mark + text wordmark, matching the Landing Page 2.0 lockup exactly. The
+   text is real HTML, so it is crisp at any size and cannot carry a legacy
+   tagline. */
+.lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  text-decoration: none;
+  margin-bottom: 1.1rem;
+}
+.lockupMark {
+  height: 34px;
+  width: auto;
+  display: block;
+}
+.lockupWord {
+  font-weight: 700;
+  font-size: 1.35rem;
+  letter-spacing: -0.015em;
+  color: #0f172a;
+}
+.lockupWordAccent {
+  color: #2a5fe3;
+}
+
+/* Footer: account creation is primary, back-to-landing subordinate. */
+.footer {
+  margin-top: 1.75rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid #eef1f6;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.footerPrimary {
+  font-size: 0.875rem;
+  color: #475569;
+}
+.footerSecondary {
+  font-size: 0.8rem;
+  color: #94a3b8;
+  text-decoration: none;
+  transition: color 160ms ease;
+}
+.footerSecondary:hover {
+  color: #475569;
+}
+.footerSecondary:focus-visible {
+  outline: 2px solid #2a5fe3;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* ── Reassurance panel ────────────────────────────────────────────────── */
+.aside {
+  position: relative;
+  /* Solid navy with one restrained tonal wash — not a loud gradient. */
+  background:
+    radial-gradient(680px 420px at 12% 8%, rgba(42, 95, 227, 0.22), transparent 68%),
+    #0f172a;
+  color: #cbd5e1;
+  padding: 2.75rem 1.5rem 3rem;
+}
+.asideInner {
+  width: 100%;
+  max-width: 420px;
+  margin-inline: auto;
+}
+
+.asideHeading {
+  font-size: 1.3rem;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.022em;
+  color: #ffffff;
+  max-width: 18ch;
+}
+.asideSub {
+  margin-top: 0.85rem;
+  color: #a8b6cc;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  max-width: 46ch;
+}
+
+.points {
+  margin: 1.9rem 0 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 1.05rem;
+}
+.point {
+  display: flex;
+  gap: 0.7rem;
+  align-items: flex-start;
+}
+.tick {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  height: 19px;
+  margin-top: 1px;
+  border-radius: 999px;
+  background: rgba(122, 162, 245, 0.18);
+  color: #7ba2f5;
+}
+.pointTitle {
+  display: block;
+  font-weight: 650;
+  font-size: 0.88rem;
+  line-height: 1.35;
+  color: #ffffff;
+}
+.pointLine {
+  display: block;
+  margin-top: 0.15rem;
+  color: #93a3ba;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  max-width: 40ch;
+}
+
+/* ── Product artefact: approval-queue preview ─────────────────────────────
+   One card padding rather than per-section padding, and exactly one divider.
+   Everything inside sits on the same left edge as the copy above it. */
+.card {
+  margin: 2rem 0 0 0;
+  padding: 1.15rem;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+}
+.cardLabel {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #8fa2bd;
+}
+
+.queueHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.7rem;
+}
+.queueTitle {
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: #ffffff;
+}
+.queueCount {
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #9dbcff;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The single divider in the card. */
+.queueRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 0.7rem;
+  margin-top: 0.85rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.11);
+}
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: rgba(122, 162, 245, 0.2);
+  color: #b9d0ff;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.rowId {
+  min-width: 0;
+}
+.rowName {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: #ffffff;
+  line-height: 1.3;
+}
+/* Wraps rather than truncating: the invoice reference and overdue position
+   must stay fully readable. */
+.rowMeta {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: #93a3ba;
+}
+.rowAmount {
+  align-self: start;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.queueFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.95rem;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #fcd34d;
+  white-space: nowrap;
+}
+.chipDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+/* Reads as the dashboard action, but it is a span — no pointer, no focus, no
+   handler. Kept at full strength so it never looks disabled. */
+.action {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.34rem 0.7rem;
+  border-radius: 8px;
+  background: #2a5fe3;
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.asideLink {
+  display: inline-block;
+  margin-top: 1.6rem;
+  color: #9dbcff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 160ms ease;
+}
+.asideLink:hover {
+  color: #ffffff;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.asideLink:focus-visible {
+  outline: 2px solid #9dbcff;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* ── Desktop: 52/48 ───────────────────────────────────────────────────────
+   Measured at 1440px, the previous 55/45 left the white column with roughly
+   240px of slack around its content while the navy panel had about 124px.
+   52/48 evens that to ~197px and ~167px, which is why the white side felt
+   loose and the panel felt tight. */
+@media (min-width: 1024px) {
+  .root {
+    grid-template-columns: 52fr 48fr;
+  }
+  .formCol {
+    padding: 3rem 3.5rem;
+  }
+  /* This block previously re-declared max-width: 400px and
+     margin-inline: 0 auto, silently undoing the centring set in the base
+     rule above — margin-left: 0 pinned the whole block to the left content
+     edge. It now simply inherits the base rule; the only desktop-specific
+     property is the bottom margin below. */
+  .formInner {
+    /* Flex centring centres the MARGIN box, so a bottom margin lifts the
+       content by half its value. 4.5rem raises the lockup, heading, form and
+       footer together by ~36px, bringing the branding into line with the
+       panel headline. Nothing moves independently. */
+    margin-bottom: 4.5rem;
+  }
+  .aside {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 3rem 3.25rem;
+  }
+  .asideInner {
+    max-width: 400px;
+    margin-inline: 0;
+  }
+  .asideHeading {
+    font-size: 1.45rem;
+  }
+}
+
+@media (min-width: 1280px) {
+  .formCol {
+    padding: 3rem 4.5rem;
+  }
+  .aside {
+    padding: 3rem 4rem;
+  }
+  .asideInner {
+    max-width: 420px;
+  }
+}
+
+/* ── Tablet: single column, panel is content-height not full-height ───── */
+@media (max-width: 1023px) {
+  .aside {
+    padding-block: 2.5rem 3rem;
+  }
+}
+
+/* ── Mobile ───────────────────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .formCol {
+    padding: 1.75rem 1.15rem 2.25rem;
+  }
+  .lockupMark {
+    height: 29px;
+  }
+  .lockupWord {
+    font-size: 1.2rem;
+  }
+  .aside {
+    padding: 2.25rem 1.15rem 2.5rem;
+  }
+  .asideHeading {
+    font-size: 1.18rem;
+  }
+  /* Amount drops beneath the identity block rather than squeezing it, so the
+     larger name and meta type stay fully readable. */
+  .card {
+    padding: 1rem;
+  }
+  .queueRow {
+    grid-template-columns: auto minmax(0, 1fr);
+    row-gap: 0.55rem;
+  }
+  .rowAmount {
+    grid-column: 2;
+    font-size: 0.95rem;
+  }
+  .avatar {
+    width: 30px;
+    height: 30px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .asideLink,
+  .footerSecondary {
+    transition: none;
+  }
+}

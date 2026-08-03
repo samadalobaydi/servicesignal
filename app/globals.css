@@ -467,48 +467,7 @@ body {
   margin-right: 8px;
 }
 
-/* ── Legal page prose (v8.9.0) — scoped to .legal-prose within /terms and
-   /privacy only. Matches the .lp-* landing typography (navy headings,
-   DM Sans, cyan links) so these read as part of the same product. */
-.legal-prose h2 {
-  font-size: 1.15rem;
-  font-weight: 700;
-  color: #0f172a;
-  margin-top: 2rem;
-  margin-bottom: 0.6rem;
-  letter-spacing: -0.01em;
-}
-.legal-prose h2:first-child {
-  margin-top: 0;
-}
-.legal-prose h3 {
-  font-size: 1rem;
-  font-weight: 650;
-  color: #0f172a;
-  margin-top: 1.25rem;
-  margin-bottom: 0.4rem;
-}
-.legal-prose p {
-  margin: 0 0 0.9rem 0;
-}
-.legal-prose ul {
-  margin: 0 0 0.9rem 0;
-  padding-left: 1.25rem;
-}
-.legal-prose li {
-  margin-bottom: 0.4rem;
-}
-.legal-prose a {
-  color: #0891b2;
-  text-decoration: underline;
-}
-.legal-prose a:hover {
-  color: #0e7490;
-}
-.legal-prose strong {
-  color: #0f172a;
-  font-weight: 650;
-}
+/* Legal-page prose now lives in the .v2-legal block below. */
 
 /* ══════════════════════════════════════════════════════════════════
    LANDING PAGE 2.0 — scoped to .v2-root
@@ -1752,3 +1711,160 @@ html { scroll-behavior: smooth; }
 .v2-foot-copy { font-size: 0.8rem; color: #7c8ca5; }
 
 @media (prefers-reduced-motion: reduce) { .v2-foot-link, .v2-foot-link::after { transition: none; } }
+
+/* ══════════════════════════════════════════════════════════════════
+   Legal pages (/privacy, /terms).
+   A white document page — header and body share one surface. No badge,
+   no floating card, no tinted void. Dividers only where they separate
+   structural regions, not between every section.
+   ══════════════════════════════════════════════════════════════════ */
+.v2-legal { background: #ffffff; min-height: 100vh; }
+
+/* ── Header ── */
+.v2-legal-bar { border-bottom: 1px solid var(--v2-line); }
+.v2-legal-bar-in {
+  max-width: 1160px; margin-inline: auto; padding: 0.95rem 2rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+@media (max-width: 640px) { .v2-legal-bar-in { padding: 0.8rem 1.15rem; } }
+
+.v2-legal-lockup { display: inline-flex; align-items: center; gap: 0.55rem; text-decoration: none; }
+.v2-legal-mark { height: 28px; width: auto; }
+.v2-legal-word { font-weight: 700; font-size: 1.05rem; color: var(--v2-ink); letter-spacing: -0.01em; }
+.v2-legal-word-b { color: var(--v2-blue); }
+@media (max-width: 640px) {
+  .v2-legal-mark { height: 24px; }
+  .v2-legal-word { font-size: 0.95rem; }
+}
+
+/* Shared by the <a> return link and the signup-context <button> that closes
+   the tab, so the two are visually indistinguishable. The button resets are
+   what stop a <button> inheriting its UA styling. */
+.v2-legal-back {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  color: var(--v2-muted); font-size: 0.85rem; font-weight: 500;
+  text-decoration: none; white-space: nowrap; transition: color 160ms ease;
+  background: none; border: 0; padding: 0; margin: 0;
+  font-family: inherit; line-height: inherit; cursor: pointer;
+}
+.v2-legal-back:hover { color: var(--v2-ink); }
+.v2-legal-back:focus-visible { outline: 2px solid var(--v2-blue); outline-offset: 4px; border-radius: 4px; color: var(--v2-ink); }
+@media (hover: none) { .v2-legal-back:hover { color: var(--v2-muted); } .v2-legal-back:active { color: var(--v2-ink); } }
+@media (max-width: 640px) { .v2-legal-back { font-size: 0.8rem; } }
+
+/* ── Page ── */
+.v2-legal-page { max-width: 1160px; margin-inline: auto; padding: 3.25rem 2rem 5rem; }
+@media (max-width: 640px) { .v2-legal-page { padding: 2.25rem 1.15rem 3.5rem; } }
+
+.v2-legal-head { max-width: 62ch; }
+.v2-legal-title {
+  font-size: clamp(1.8rem, 4vw, 2.5rem); font-weight: 700;
+  letter-spacing: -0.028em; line-height: 1.12; color: var(--v2-ink);
+}
+.v2-legal-meta { margin-top: 0.75rem; color: var(--v2-muted); font-size: 0.88rem; }
+.v2-legal-dot { margin: 0 0.5rem; color: #cbd5e1; }
+
+/* ── Contents + prose ── */
+.v2-legal-body { margin-top: 2.75rem; }
+@media (min-width: 1024px) {
+  .v2-legal-body.has-toc {
+    display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 4rem; align-items: start;
+  }
+}
+@media (min-width: 1280px) { .v2-legal-body.has-toc { grid-template-columns: 240px minmax(0, 1fr); gap: 5rem; } }
+
+/* Mobile: the contents column is redundant next to the document itself. */
+.v2-legal-toc { display: none; }
+@media (min-width: 1024px) {
+  .v2-legal-toc { display: block; position: sticky; top: 2.5rem; max-height: calc(100vh - 5rem); overflow-y: auto; }
+}
+.v2-legal-toc-h {
+  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--v2-faint); margin-bottom: 0.85rem;
+}
+.v2-legal-toc ul { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--v2-line); }
+.v2-legal-toc li { margin: 0; }
+.v2-legal-toc-l {
+  display: block; padding: 0.32rem 0 0.32rem 0.9rem; margin-left: -1px;
+  border-left: 1px solid transparent;
+  color: var(--v2-muted); font-size: 0.82rem; line-height: 1.45;
+  text-decoration: none; transition: color 160ms ease, border-color 160ms ease;
+}
+.v2-legal-toc-l:hover { color: var(--v2-ink); border-left-color: var(--v2-blue); }
+.v2-legal-toc-l:focus-visible { outline: 2px solid var(--v2-blue); outline-offset: 2px; border-radius: 3px; color: var(--v2-ink); }
+
+.v2-legal-prose { max-width: 68ch; color: #334155; font-size: 0.97rem; line-height: 1.75; }
+/* No rule between sections — spacing carries the hierarchy instead. */
+.v2-legal-prose h2 {
+  margin-top: 2.9rem; scroll-margin-top: 2rem;
+  font-size: 1.2rem; font-weight: 700; line-height: 1.3;
+  letter-spacing: -0.012em; color: var(--v2-ink);
+}
+.v2-legal-prose h2:first-of-type { margin-top: 0; }
+.v2-legal-prose h3 {
+  margin-top: 1.7rem; margin-bottom: 0.3rem;
+  font-size: 0.99rem; font-weight: 650; color: var(--v2-ink);
+}
+.v2-legal-prose h2 + p, .v2-legal-prose h3 + p { margin-top: 0.6rem; }
+.v2-legal-prose p { margin: 0 0 1rem 0; }
+.v2-legal-prose ul { margin: 0 0 1rem 0; padding-left: 1.35rem; }
+.v2-legal-prose li { margin-bottom: 0.45rem; }
+.v2-legal-prose strong { color: var(--v2-ink); font-weight: 650; }
+.v2-legal-prose a {
+  color: var(--v2-blue); text-decoration: underline; text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+.v2-legal-prose a:hover { color: #2453cf; }
+.v2-legal-prose a:focus-visible { outline: 2px solid var(--v2-blue); outline-offset: 2px; border-radius: 3px; }
+
+@media (max-width: 640px) {
+  .v2-legal-prose { font-size: 0.94rem; line-height: 1.7; }
+  .v2-legal-prose h2 { font-size: 1.09rem; margin-top: 2.4rem; }
+}
+
+/* The one divider that earns its place: document end. */
+.v2-legal-foot { margin-top: 3.25rem; padding-top: 1.5rem; border-top: 1px solid var(--v2-line); }
+@media (min-width: 1024px) { .v2-legal-body.has-toc + .v2-legal-foot { margin-left: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .v2-legal-back, .v2-legal-toc-l { transition: none; }
+}
+
+/* Confirmation supporting line + inline link (beta access states). */
+.v2-beta-done-s { margin-top: 0.55rem; color: var(--v2-muted); font-size: 0.86rem; line-height: 1.6; }
+
+/* Beta success primary CTA — same weight and shape as the form submit button,
+   so the next step reads as an action rather than a footnote. */
+.v2-beta-cta {
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-top: 1.5rem; width: 100%;
+  background: var(--v2-blue); color: #ffffff;
+  border: none; border-radius: 10px;
+  padding: 0.8rem 1.4rem; font-size: 0.95rem; font-weight: 600;
+  text-decoration: none;
+  transition: background-color 180ms ease;
+}
+.v2-beta-cta:hover { background: #2453cf; }
+.v2-beta-cta:focus-visible { outline: 2px solid var(--v2-blue); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .v2-beta-cta { transition: none; } }
+
+/* Signup-context close control. The blocked state is a message first and a
+   link second: sending the visitor to /signup from this tab would give them
+   an empty form, while their real one is still open in the previous tab. */
+.v2-legal-close { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; }
+.v2-legal-close-msg {
+  margin: 0; max-width: 34ch; text-align: right;
+  color: var(--v2-muted); font-size: 0.8rem; line-height: 1.5;
+}
+.v2-legal-close-msg:focus-visible { outline: 2px solid var(--v2-blue); outline-offset: 3px; border-radius: 4px; }
+.v2-legal-close-alt {
+  color: var(--v2-muted); font-size: 0.78rem; text-decoration: underline;
+  text-underline-offset: 2px; transition: color 160ms ease;
+}
+.v2-legal-close-alt:hover { color: var(--v2-ink); }
+.v2-legal-close-alt:focus-visible { outline: 2px solid var(--v2-blue); outline-offset: 3px; border-radius: 3px; }
+@media (max-width: 640px) {
+  .v2-legal-close { align-items: flex-start; }
+  .v2-legal-close-msg { text-align: left; max-width: 30ch; font-size: 0.78rem; }
+}
+@media (prefers-reduced-motion: reduce) { .v2-legal-close-alt { transition: none; } }

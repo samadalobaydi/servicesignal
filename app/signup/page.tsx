@@ -1,14 +1,17 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { getAuthCallbackUrl } from "@/lib/app-urls";
+import { readSignupPrefill, writeSignupPrefill, clearSignupPrefill } from "@/lib/signup-prefill";
+import { SignupAside } from "@/components/auth/SignupAside";
+import splitStyles from "@/components/auth/auth-split.module.css";
 import { updateProfile } from "@/lib/profile";
 import {
   AuthShell, AuthHeading, AuthError, AuthInput, PasswordInput,
-  SubmitButton, OrDivider, SocialButtons, BRAND_BLUE,
+  SubmitButton, OrDivider, SocialButtons, BRAND_BLUE, ENABLED_OAUTH_PROVIDERS,
 } from "@/components/auth/AuthShell";
 
 // ── Live password rules ────────────────────────────────────────────────
@@ -43,9 +46,53 @@ function SignupForm() {
   const [error, setError]       = useState<string | null>(null);
   const [success, setSuccess]   = useState(false);
 
+  /**
+   * Prefill from the Founding Beta form, handed over via same-origin
+   * sessionStorage (see lib/signup-prefill.ts).
+   *
+   * Runs in an effect rather than a lazy useState initialiser on purpose:
+   * this component is server-rendered first, where sessionStorage does not
+   * exist, so reading during render would produce a hydration mismatch.
+   *
+   * Only fills a field that is still empty, so anything the visitor has
+   * already typed is never overwritten.
+   *
+   * Reading does NOT clear. The values must survive a refresh, a trip to
+   * Terms or Privacy and back, and a failed account-creation attempt — all
+   * of which remount this page and re-run this effect. Cleanup happens at
+   * exactly one place: a successful supabase.auth.signUp in onSubmit below.
+   * sessionStorage is tab-scoped, so anything not cleared there is discarded
+   * when the tab closes.
+   */
+  useEffect(() => {
+    const prefill = readSignupPrefill();
+    if (!prefill) return;
+
+    if (prefill.businessName.trim()) {
+      setBusinessName((current) => (current ? current : prefill.businessName.trim()));
+    }
+    if (prefill.email.trim()) {
+      setEmail((current) => (current ? current : prefill.email.trim()));
+    }
+  }, []);
+
   const passed = RULES.filter((r) => r.test(password)).length;
   const allRulesPass = passed === RULES.length;
   const strength = STRENGTH[passed];
+
+  /**
+   * Snapshot taken just before a legal document opens.
+   *
+   * Saves ONLY the business name and email — never the password, the
+   * confirmation field or the consent checkbox — and only at this moment,
+   * never on every keystroke. If the visitor later lands on a fresh instance
+   * of this page (typically by reloading the original tab), the prefill effect
+   * above restores what they had actually typed rather than the older values
+   * carried over from the beta form.
+   */
+  const snapshotBeforeLegal = () => {
+    writeSignupPrefill({ businessName, email });
+  };
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,10 +133,20 @@ function SignupForm() {
     });
 
     if (authError) {
+      // Account creation failed. The prefill is deliberately LEFT IN PLACE so
+      // a retry — including one after a full page reload — still starts from
+      // the details the visitor already gave us.
       setError(authError.message);
       setLoading(false);
       return;
     }
+
+    // ── The one cleanup point ────────────────────────────────────────────────
+    // signUp returned without error, so the account exists. This single call
+    // covers both branches below (immediate session, and the confirmation-
+    // required path), which is why it sits here rather than being duplicated.
+    // Anything not cleared here dies with the tab.
+    clearSignupPrefill();
 
     // If email confirmation is disabled in Supabase, session is created immediately
     if (data.session) {
@@ -118,7 +175,7 @@ function SignupForm() {
 
   if (success) {
     return (
-      <AuthShell>
+      <AuthShell aside={<SignupAside />}>
         <div className="text-center py-4">
           <div className="w-14 h-14 rounded-full mx-auto mb-5 flex items-center justify-center" style={{ background: "#ecfdf5", border: "2px solid #059669" }}>
             <svg width="24" height="24" fill="none" viewBox="0 0 24 24"><path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke="#059669" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -138,17 +195,21 @@ function SignupForm() {
 
   return (
     <AuthShell
+      aside={<SignupAside />}
       footer={
         <>
-          <Link href="/" className="text-sm inline-block" style={{ color: "#64748b" }}>← Back to landing page</Link>
-          <p className="text-sm" style={{ color: "#64748b" }}>
+          {/* Sign-in leads; returning to the landing page is a quieter
+              secondary route beneath it — mirrors /login's footer hierarchy. */}
+          <p className={splitStyles.footerPrimary}>
             Already have an account?{" "}
-            <Link href="/login" style={{ color: BRAND_BLUE, fontWeight: 600 }}>Sign in →</Link>
+            <Link href="/login" style={{ color: BRAND_BLUE, fontWeight: 600 }}>Sign in</Link>
           </p>
+          {/* REVIEW BRANCH: points at the /v2 preview. Change back to "/" when v2 becomes the root landing page. */}
+          <Link href="/v2" className={splitStyles.footerSecondary}>← Back to landing page</Link>
         </>
       }
     >
-      <AuthHeading title="Create your account" subtitle="Start chasing unpaid invoices automatically in minutes." />
+      <AuthHeading title="Create your account" subtitle="Follow up overdue invoices with professional email reminders you approve before they send." />
       <AuthError message={error} />
 
       <form onSubmit={handleSignup} noValidate className="space-y-5">
@@ -188,28 +249,45 @@ function SignupForm() {
           <p className="text-xs -mt-3" style={{ color: "#dc2626" }}>Passwords do not match yet.</p>
         )}
 
+        {/* Both legal links open in a new tab so this form — including anything
+            already typed, and any prefill carried from the Founding Beta form —
+            is never unmounted mid-signup. rel="noopener" severs the new tab's
+            window.opener reference; "noreferrer" additionally withholds the
+            Referer header.
+
+            Each link carries a visually hidden "(opens in a new tab)" suffix.
+            WCAG technique G201 asks for advance warning before a new window
+            opens; putting the warning inside the link makes the accessible
+            name "Terms of Service (opens in a new tab)" for screen-reader
+            users while adding nothing to the visible line. It is a suffix
+            rather than an aria-label so the visible text is not replaced.
+
+            stopPropagation keeps a click on either link from toggling the
+            surrounding checkbox label. */}
         <label className="flex items-start gap-2.5 cursor-pointer select-none">
           <input type="checkbox" checked={terms} onChange={(e) => setTerms(e.target.checked)} className="w-4 h-4 rounded mt-0.5" style={{ accentColor: BRAND_BLUE }} />
           <span className="text-sm" style={{ color: "#0f172a", lineHeight: 1.5 }}>
             I agree to the{" "}
             <Link
-              href="/terms"
+              href="/terms?from=signup"
               target="_blank"
               rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); snapshotBeforeLegal(); }}
               style={{ fontWeight: 600, color: BRAND_BLUE }}
             >
               Terms of Service
+              <span className="sr-only"> (opens in a new tab)</span>
             </Link>{" "}
             and{" "}
             <Link
-              href="/privacy"
+              href="/privacy?from=signup"
               target="_blank"
               rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); snapshotBeforeLegal(); }}
               style={{ fontWeight: 600, color: BRAND_BLUE }}
             >
               Privacy Policy
+              <span className="sr-only"> (opens in a new tab)</span>
             </Link>
             .
           </span>
@@ -218,8 +296,16 @@ function SignupForm() {
         <SubmitButton loading={loading} idleText="Create Account" loadingText="Creating your account…" />
       </form>
 
-      <OrDivider />
-      <SocialButtons next={next} />
+      {/* The divider is only meaningful when there is something below it.
+          ENABLED_OAUTH_PROVIDERS is empty until a provider is confirmed in
+          Supabase, so both are hidden together rather than leaving a stranded
+          "OR". Signup's layout is otherwise unchanged. */}
+      {ENABLED_OAUTH_PROVIDERS.length > 0 && (
+        <>
+          <OrDivider />
+          <SocialButtons next={next} />
+        </>
+      )}
     </AuthShell>
   );
 }

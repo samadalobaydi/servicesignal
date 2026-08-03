@@ -62,8 +62,9 @@ export default function DashNav({ onAddInvoice, userEmail }: DashNavProps) {
           )}
 
           {/* Back to landing */}
+          {/* REVIEW BRANCH: points at the /v2 preview. Change back to "/" when v2 becomes the root landing page. */}
           <a
-            href="/"
+            href="/v2"
             className="text-xs flex items-center gap-1.5 transition-colors"
             style={{ color: "#a3b0c4" }}
             onMouseEnter={(e) => (e.currentTarget.style.color = "#c2ccdb")}

@@ -6,8 +6,10 @@ import Link from "next/link";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import {
   AuthShell, AuthHeading, AuthError, AuthInput, PasswordInput,
-  SubmitButton, OrDivider, SocialButtons, BRAND_BLUE,
+  SubmitButton, BRAND_BLUE,
 } from "@/components/auth/AuthShell";
+import { LoginAside } from "@/components/auth/LoginAside";
+import splitStyles from "@/components/auth/auth-split.module.css";
 
 function LoginForm() {
   const router = useRouter();
@@ -46,17 +48,21 @@ function LoginForm() {
 
   return (
     <AuthShell
+      aside={<LoginAside />}
       footer={
         <>
-          <Link href="/" className="text-sm inline-block" style={{ color: "#64748b" }}>← Back to landing page</Link>
-          <p className="text-sm" style={{ color: "#64748b" }}>
-            Don&apos;t have an account?{" "}
-            <Link href={next !== "/dashboard" ? `/signup?next=${encodeURIComponent(next)}` : "/signup"} style={{ color: BRAND_BLUE, fontWeight: 600 }}>Create one →</Link>
+          {/* Account creation leads; returning to the landing page is a quieter
+              secondary route beneath it. */}
+          <p className={splitStyles.footerPrimary}>
+            New to ServiceSignal?{" "}
+            <Link href={next !== "/dashboard" ? `/signup?next=${encodeURIComponent(next)}` : "/signup"} style={{ color: BRAND_BLUE, fontWeight: 600 }}>Create an account</Link>
           </p>
+          {/* REVIEW BRANCH: points at the /v2 preview. Change back to "/" when v2 becomes the root landing page. */}
+          <Link href="/v2" className={splitStyles.footerSecondary}>← Back to landing page</Link>
         </>
       }
     >
-      <AuthHeading title="Welcome back" subtitle="Sign in to manage your invoices, reminders and payments." />
+      <AuthHeading title="Welcome back" subtitle="Sign in to review your reminders and manage your invoices." />
       <AuthError message={error} />
 
       <form onSubmit={handleLogin} noValidate className="space-y-5">
@@ -89,8 +95,6 @@ function LoginForm() {
         <SubmitButton loading={loading} idleText="Sign In" loadingText="Signing in…" />
       </form>
 
-      <OrDivider />
-      <SocialButtons next={next} />
     </AuthShell>
   );
 }

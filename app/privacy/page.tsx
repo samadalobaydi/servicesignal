@@ -7,29 +7,50 @@ export const metadata: Metadata = {
   description: "How ServiceSignal collects, uses, and protects your data.",
 };
 
-export default function PrivacyPage() {
+const SECTIONS = [
+  { id: "s1", label: "1. Information we collect" },
+  { id: "s2", label: "2. Purposes and lawful bases (UK GDPR)" },
+  { id: "s3", label: "3. Processors and third-party services" },
+  { id: "s4", label: "4. International transfers" },
+  { id: "s5", label: "5. Retention" },
+  { id: "s6", label: "6. Security" },
+  { id: "s7", label: "7. Your rights" },
+  { id: "s8", label: "8. Cookies and similar technology" },
+  { id: "s9", label: "9. Children" },
+  { id: "s10", label: "10. Changes to this policy" },
+  { id: "s11", label: "11. Contact and complaints" },
+] as const;
+
+export default function PrivacyPage({
+  searchParams,
+}: {
+  searchParams?: { from?: string | string[] };
+}) {
   return (
-    <LegalPageLayout title="Privacy Policy" effectiveDate={LEGAL_CONFIG.privacyEffectiveDate} version={LEGAL_CONFIG.privacyVersion}>
+    <LegalPageLayout
+      title="Privacy Policy"
+      effectiveDate={LEGAL_CONFIG.privacyEffectiveDate}
+      version={LEGAL_CONFIG.privacyVersion}
+      from={searchParams?.from}
+      sections={SECTIONS}
+    >
       <p>
         This Privacy Policy explains how ServiceSignal collects, uses, and
         protects information when you use our website and product.
         ServiceSignal is a UK-focused service; this policy is written with UK
         GDPR and the Data Protection Act 2018 in mind.
       </p>
-      <p style={{ fontStyle: "italic", color: "#64748b" }}>
-        This is an MVP document for our beta period, prepared for clarity
-        rather than as a substitute for professional legal advice. It will be
-        reviewed by a qualified solicitor before general availability.
+      <p>
+        This policy applies during the ServiceSignal founding beta.
       </p>
 
-      <h2>1. Information we collect</h2>
+      <h2 id="s1">1. Information we collect</h2>
       <h3>Account and profile data</h3>
       <p>
-        When you create an account, we collect your email address, a securely
-        hashed password (via Supabase Auth — we never see or store your
-        plaintext password), and any business details you choose to add, such
-        as a business name, contact email, contact phone, and reminder
-        preferences.
+        When you create an account, we collect your email address and any
+        business details you choose to add, such as a business name and contact
+        email. Passwords are handled by Supabase Auth and are never visible to
+        us.
       </p>
       <h3>Invoice and customer data</h3>
       <p>
@@ -59,7 +80,7 @@ export default function PrivacyPage() {
         duplicate emails.
       </p>
 
-      <h2>2. Purposes and lawful bases (UK GDPR)</h2>
+      <h2 id="s2">2. Purposes and lawful bases (UK GDPR)</h2>
       <ul>
         <li><strong>Providing the service</strong> — performance of our contract with you (Art. 6(1)(b)).</li>
         <li><strong>Security and fraud prevention</strong> — our legitimate interests (Art. 6(1)(f)).</li>
@@ -67,7 +88,7 @@ export default function PrivacyPage() {
         <li><strong>Legal compliance</strong> — where we&apos;re required to by law (Art. 6(1)(c)).</li>
       </ul>
 
-      <h2>3. Processors and third-party services</h2>
+      <h2 id="s3">3. Processors and third-party services</h2>
       <p>We use the following processors to operate ServiceSignal:</p>
       <ul>
         <li><strong>Supabase</strong> — authentication and database hosting.</li>
@@ -75,13 +96,13 @@ export default function PrivacyPage() {
         <li><strong>Vercel</strong> — application hosting.</li>
       </ul>
       <p>
-        Where you add a payment link to an invoice, the third-party payment
-        provider you choose (for example Stripe, GoCardless, PayPal, or SumUp)
-        processes any payment made by your customer directly — ServiceSignal
-        is not party to that transaction and does not process payments itself.
+        Where you add a payment link to an invoice, whichever payment provider
+        you choose processes any payment made by your customer directly —
+        ServiceSignal is not party to that transaction and does not process
+        payments itself.
       </p>
 
-      <h2>4. International transfers</h2>
+      <h2 id="s4">4. International transfers</h2>
       <p>
         Some of our processors (including Resend) operate infrastructure
         outside the UK, which may involve transferring data internationally.
@@ -90,7 +111,7 @@ export default function PrivacyPage() {
         GDPR.
       </p>
 
-      <h2>5. Retention</h2>
+      <h2 id="s5">5. Retention</h2>
       <p>
         We keep account and invoice data for as long as your account is
         active, plus a reasonable period afterward to allow account recovery
@@ -98,7 +119,7 @@ export default function PrivacyPage() {
         Section 7.
       </p>
 
-      <h2>6. Security</h2>
+      <h2 id="s6">6. Security</h2>
       <p>
         We use industry-standard measures to protect your data, including
         encryption in transit and at rest (via our infrastructure providers)
@@ -106,7 +127,7 @@ export default function PrivacyPage() {
         accessible to your own account.
       </p>
 
-      <h2>7. Your rights</h2>
+      <h2 id="s7">7. Your rights</h2>
       <p>Under UK GDPR, you have the right to:</p>
       <ul>
         <li>access the personal data we hold about you;</li>
@@ -121,26 +142,26 @@ export default function PrivacyPage() {
         <a href={`mailto:${LEGAL_CONFIG.privacyEmail}`}>{LEGAL_CONFIG.privacyEmail}</a>.
       </p>
 
-      <h2>8. Cookies and similar technology</h2>
+      <h2 id="s8">8. Cookies and similar technology</h2>
       <p>
         We use essential cookies to keep you signed in and to secure your
         session. We do not currently use advertising or third-party tracking
         cookies.
       </p>
 
-      <h2>9. Children</h2>
+      <h2 id="s9">9. Children</h2>
       <p>
         ServiceSignal is intended for business use by adults. We do not
         knowingly collect personal data from children.
       </p>
 
-      <h2>10. Changes to this policy</h2>
+      <h2 id="s10">10. Changes to this policy</h2>
       <p>
         We may update this policy as ServiceSignal develops. We&apos;ll update the
         version number and effective date above when we do.
       </p>
 
-      <h2>11. Contact and complaints</h2>
+      <h2 id="s11">11. Contact and complaints</h2>
       <p>
         Questions about this policy can be sent to{" "}
         <a href={`mailto:${LEGAL_CONFIG.privacyEmail}`}>{LEGAL_CONFIG.privacyEmail}</a>.

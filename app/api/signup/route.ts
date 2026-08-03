@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSupabase } from "@/lib/supabase";
 import type { BetaSignupFormData, ApiResponse } from "@/types";
+import { checkSignupRateLimit, clientIpFrom } from "@/lib/signup-rate-limit";
+import { sendBetaAccessEmail, firstNameFrom } from "@/lib/beta-access-email";
 import {
   ALLOWED_BUSINESS_TYPES,
   ALLOWED_UNPAID_RANGES,
@@ -91,6 +93,7 @@ export async function POST(request: NextRequest) {
         success: false,
         message: Object.values(fieldErrors)[0] ?? "Please check the form and try again.",
         fieldErrors,
+        outcome: "invalid",
       },
       { status: 400 }
     );
@@ -109,8 +112,28 @@ export async function POST(request: NextRequest) {
       "\x1b[31m\u2717 Beta signup rejected: Supabase is not configured (missing URL and/or key).\x1b[0m"
     );
     return NextResponse.json<ApiResponse>(
-      { success: false, message: "We couldn't submit your details. Please try again." },
+      { success: false, message: "We couldn't submit your details. Please try again.", outcome: "not_saved" },
       { status: 503 }
+    );
+  }
+
+  // ── Rate limit ───────────────────────────────────────────────────────────
+  // This endpoint sends email, so it is an abuse target. The limiter is
+  // durable (Supabase-backed); if it cannot run — migration 004 not applied,
+  // query failure — `degraded` is true and we still SAVE the signup but
+  // suppress the email, so an unverified environment can never become an
+  // open relay while a real lead is still captured.
+  const rate = await checkSignupRateLimit(supabase, clientIpFrom(request.headers));
+
+  if (!rate.degraded && !rate.ok) {
+    return NextResponse.json<ApiResponse>(
+      {
+        success: false,
+        message: "Too many attempts from this network. Please try again later.",
+        outcome: "rate_limited",
+        emailSent: false,
+      },
+      { status: 429 }
     );
   }
 
@@ -127,22 +150,66 @@ export async function POST(request: NextRequest) {
   if (error) {
     // Postgres unique violation — duplicate email
     if (error.code === "23505") {
+      // Already on the list. Deliberately NOT an error state for the visitor:
+      // a distinct "already registered" message confirms to anyone who asks
+      // whether a given address has signed up. The response is shaped exactly
+      // like the saved-but-no-email case, so the two are indistinguishable
+      // from outside, and the visitor still gets a route forward.
+      //
+      // No email is resent here. Doing that safely needs a per-address
+      // cooldown column on beta_signups, which does not exist yet — without
+      // it, repeated submissions would let anyone mail the same address
+      // indefinitely. See the report for the proposed migration.
       return NextResponse.json<ApiResponse>(
-        { success: false, message: "This email has already been registered for the ServiceSignal beta." },
-        { status: 409 }
+        {
+          success: true,
+          message: "Thanks — your details are on the founding beta list.",
+          outcome: "already_listed",
+          emailSent: false,
+        },
+        { status: 200 }
       );
     }
     console.error("\x1b[31m✗ Supabase beta_signups insert error:\x1b[0m", error);
     return NextResponse.json<ApiResponse>(
-      { success: false, message: "We couldn't submit your details. Please try again." },
+      { success: false, message: "We couldn't submit your details. Please try again.", outcome: "not_saved" },
       { status: 500 }
     );
   }
 
   logSignup(data, "supabase");
 
+  // ── Access email ─────────────────────────────────────────────────────────
+  // The row is saved. From here nothing may fail the request: a send problem
+  // changes only what the visitor is told, never whether we kept the lead.
+  let emailSent = false;
+
+  if (rate.degraded) {
+    console.error(
+      "[signup] Access email suppressed: the rate limiter is unavailable. " +
+        "Signup WAS saved. Apply supabase/sql/004_signup_rate_limit.sql, then " +
+        `send access email manually to: ${data.email.trim().toLowerCase()}`
+    );
+  } else {
+    emailSent = await sendBetaAccessEmail({
+      to: data.email.trim().toLowerCase(),
+      firstName: firstNameFrom(data.name),
+    });
+
+    if (!emailSent) {
+      console.error(
+        "[signup] Signup SAVED but access email failed. Retry manually for: " +
+          data.email.trim().toLowerCase()
+      );
+    }
+  }
+
   return NextResponse.json<ApiResponse>({
     success: true,
-    message: "Thanks — we've received your details. We'll be in touch about the founding beta.",
+    message: emailSent
+      ? "Check your inbox — we've sent you a link to create your account."
+      : "Thanks — we've received your details. You can create your account now.",
+    outcome: emailSent ? "saved_and_sent" : "saved_no_email",
+    emailSent,
   });
 }
