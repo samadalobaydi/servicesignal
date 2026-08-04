@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServer } from "@/lib/supabase-server";
+import { cleanBusinessNameOrNull, isBusinessNameBlank } from "@/lib/business-name";
 import { sendWelcomeEmailIfNeeded } from "@/lib/welcome-email";
 import { LEGAL_CONFIG } from "@/lib/legal";
 import type { ProfileUpdate, ReminderTone, ReminderMode } from "@/types";
@@ -25,11 +26,16 @@ export async function GET() {
     return NextResponse.json({ success: false, message: "Not authenticated." }, { status: 401 });
   }
 
-  const { data: existing, error: fetchError } = await supabase
+  const fetchResult = await supabase
     .from("profiles")
     .select("*")
     .eq("user_id", user.id)
     .maybeSingle();
+
+  const fetchError = fetchResult.error;
+  // `let`, not `const`: the repair branch below may replace this with the
+  // updated row so the response carries the seeded value immediately.
+  let existing = fetchResult.data;
 
   if (fetchError) {
     console.error(`[api/profile] Profile fetch failed for user ${user.id}:`, fetchError.message);
@@ -37,6 +43,37 @@ export async function GET() {
   }
 
   if (existing) {
+    // ── Repair ────────────────────────────────────────────────────────────
+    // Accounts created before business_name travelled in auth metadata reach
+    // here with nothing stored. Fill it ONLY when the profile value is absent
+    // or blank AND the metadata holds something usable.
+    //
+    // The guard is what makes this safe to run on every profile read: once a
+    // non-blank value exists — whether the user typed it at signup or edited
+    // it later in Settings — this branch can never fire again, so metadata
+    // can never overwrite a deliberate edit. Idempotent by construction.
+    if (isBusinessNameBlank(existing.business_name)) {
+      const seeded = cleanBusinessNameOrNull(user.user_metadata?.business_name);
+      if (seeded) {
+        const { data: repaired, error: repairError } = await supabase
+          .from("profiles")
+          .update({ business_name: seeded })
+          .eq("user_id", user.id) // belt-and-braces; RLS already scopes this
+          .select()
+          .single();
+
+        if (repairError) {
+          // Non-fatal: the profile is still usable, and the next read retries.
+          console.error(
+            `[api/profile] business_name repair failed for user ${user.id}:`,
+            repairError.message
+          );
+        } else if (repaired) {
+          existing = repaired;
+        }
+      }
+    }
+
     // Attempted on EVERY authenticated call, not just profile creation —
     // this is what makes a failed/timed-out send from an earlier request
     // retryable here, even though the profile already exists by now.
@@ -88,9 +125,21 @@ export async function GET() {
   // called exactly once per branch, exactly as before. Idempotency and
   // retry behaviour are unaffected: tryClaim's own atomicity is what
   // prevents duplicates, not anything in this route.
+  // ── Seed ────────────────────────────────────────────────────────────────
+  // business_name comes from auth metadata, written at signUp. This is the
+  // authoritative path: it works whether or not a session existed at signup,
+  // so the email-confirmation flow no longer loses the name.
+  //
+  // Validated, not trusted: user_metadata is untyped JSON and could have been
+  // set by a crafted signUp that bypassed the client. cleanBusinessNameOrNull
+  // rejects non-strings, blanks and anything over 100 characters rather than
+  // truncating, so an over-long name is dropped instead of being corrupted.
+  // A null simply leaves the column null, exactly as before this change.
+  const seededBusinessName = cleanBusinessNameOrNull(user.user_metadata?.business_name);
+
   const { data: created, error: insertError } = await supabase
     .from("profiles")
-    .insert({})
+    .insert(seededBusinessName ? { business_name: seededBusinessName } : {})
     .select()
     .single();
 

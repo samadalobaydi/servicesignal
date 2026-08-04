@@ -6,6 +6,7 @@ import Link from "next/link";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { getAuthCallbackUrl } from "@/lib/app-urls";
 import { readSignupPrefill, writeSignupPrefill, clearSignupPrefill } from "@/lib/signup-prefill";
+import { cleanBusinessName, BUSINESS_NAME_MESSAGES } from "@/lib/business-name";
 import { SignupAside } from "@/components/auth/SignupAside";
 import splitStyles from "@/components/auth/auth-split.module.css";
 import { updateProfile } from "@/lib/profile";
@@ -99,6 +100,15 @@ function SignupForm() {
     setError(null);
 
     // Weak passwords are blocked client-side before any auth call.
+    // Business name is validated FIRST: it is the only field whose absence
+    // silently degrades what the customer eventually receives, and until now
+    // it was the only field with no validation at all.
+    const business = cleanBusinessName(businessName);
+    if (business.error) {
+      setError(BUSINESS_NAME_MESSAGES[business.error]);
+      return;
+    }
+
     if (!allRulesPass) {
       setError("Please choose a stronger password — all requirements must be met.");
       return;
@@ -128,7 +138,13 @@ function SignupForm() {
       password,
       options: {
         emailRedirectTo: getAuthCallbackUrl(),
-        data: { terms_accepted: true },
+        // business_name travels in user_metadata so it SURVIVES email
+        // confirmation. With confirmation enabled signUp returns no session,
+        // so the profile write below never runs — previously the name the
+        // user typed was simply discarded. Supabase stores user_metadata on
+        // auth.users immediately, before confirmation, so GET /api/profile
+        // can seed the profile from it whenever the user first arrives.
+        data: { terms_accepted: true, business_name: business.value },
       },
     });
 
@@ -156,12 +172,14 @@ function SignupForm() {
       // update handler is PUT, not PATCH — lib/profile.ts's own
       // updateProfile() already uses the correct method; this now reuses
       // it instead of a second, inconsistent ad-hoc call.
-      if (businessName.trim()) {
-        try {
-          await updateProfile({ business_name: businessName.trim() });
-        } catch {
-          // Non-fatal — the user can set it in Settings.
-        }
+      // Fast path only. The authoritative write is the metadata seed in
+      // GET /api/profile, which covers BOTH branches; this just avoids a
+      // one-render gap when there is already a session. Same cleaned value,
+      // so the two can never disagree.
+      try {
+        await updateProfile({ business_name: business.value });
+      } catch {
+        // Non-fatal — the seed will still populate it on first profile read.
       }
       router.push(next);
       router.refresh();
