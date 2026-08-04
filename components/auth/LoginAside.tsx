@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { DEMO } from "@/components/v2/demo";
 import split from "./auth-split.module.css";
 
@@ -134,10 +133,12 @@ export function LoginAside() {
           </div>
         </figure>
 
-        {/* REVIEW BRANCH: points at the /v2 preview. Change back to "/" when v2 becomes the root landing page. */}
-        <Link href="/v2" className={split.asideLink}>
-          New to ServiceSignal? See how it works →
-        </Link>
+        {/* No footer link here by design. This is a returning user's sign-in
+            journey, and a link back to the landing page invites them away from
+            it. Both routes they might actually need — "Create an account" and
+            "Back to landing page" — already sit beneath the form in the left
+            column, earlier in DOM order. The panel ends on the queue preview;
+            .aside's own bottom padding provides the spacing. */}
       </div>
     </section>
   );

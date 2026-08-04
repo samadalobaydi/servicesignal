@@ -290,26 +290,6 @@
   white-space: nowrap;
 }
 
-.asideLink {
-  display: inline-block;
-  margin-top: 1.6rem;
-  color: #9dbcff;
-  font-size: 0.85rem;
-  font-weight: 600;
-  text-decoration: none;
-  transition: color 160ms ease;
-}
-.asideLink:hover {
-  color: #ffffff;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-.asideLink:focus-visible {
-  outline: 2px solid #9dbcff;
-  outline-offset: 3px;
-  border-radius: 4px;
-}
-
 /* ── Desktop: 52/48 ───────────────────────────────────────────────────────
    Measured at 1440px, the previous 55/45 left the white column with roughly
    240px of slack around its content while the navy panel had about 124px.
@@ -405,7 +385,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .asideLink,
   .footerSecondary {
     transition: none;
   }
