@@ -3,6 +3,8 @@ import { getSupabaseServer } from "@/lib/supabase-server";
 import { getResendClient, REMINDER_FROM } from "@/lib/resend";
 import { buildReminderEmail } from "@/lib/email-templates";
 import type { ReminderLog, ReminderSchedule } from "@/types";
+import { prepareEligibility } from "@/lib/reminder-schedule";
+import { formatDate } from "@/lib/invoices";
 
 /**
  * POST /api/reminders/[id]/approve
@@ -32,7 +34,7 @@ export async function POST(
   // Fetch the reminder log — RLS ensures this is null if not owned by `user`
   const { data: log, error: fetchError } = await supabase
     .from("reminder_logs")
-    .select("*, invoice:invoices(customer_name, amount, due_date, customer_email, payment_link, reminder_tone, status)")
+    .select("*, invoice:invoices(customer_name, amount, due_date, customer_email, payment_link, reminder_tone, status, reminder_schedules, reminders_sent)")
     .eq("id", params.id)
     .single();
 
@@ -69,6 +71,41 @@ export async function POST(
       { success: false, message: "This invoice has already been marked paid. Reminders are stopped." },
       { status: 409 }
     );
+  }
+
+  // ── Eligibility revalidation (v8.9.2) ────────────────────────────────────
+  // The last gate before an email leaves the building. Rows queued under the
+  // previous unsafe fallback — which could prepare a reminder whose checkpoint
+  // was still weeks away — are NOT deleted, because that would destroy user
+  // data to fix our bug. They are simply not sendable: this check refuses them
+  // until the schedule genuinely comes due, at which point the same row sends
+  // normally. Nothing about the email itself changes.
+  const invoiceForEligibility = reminder.invoice as unknown as {
+    due_date?: string;
+    reminder_schedules?: ReminderSchedule[];
+    reminders_sent?: ReminderSchedule[];
+  };
+
+  if (invoiceForEligibility?.due_date) {
+    const eligibility = prepareEligibility(
+      invoiceForEligibility.reminder_schedules ?? [reminder.schedule],
+      invoiceForEligibility.reminders_sent ?? [],
+      invoiceForEligibility.due_date
+    );
+
+    if (!eligibility.schedule) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: eligibility.eligibleFrom
+            ? `This reminder isn't due yet. It can be sent from ${formatDate(eligibility.eligibleFrom)}.`
+            : "This reminder is no longer due to be sent.",
+          blockedReason: eligibility.blockedReason,
+          eligibleFrom: eligibility.eligibleFrom,
+        },
+        { status: 409 }
+      );
+    }
   }
 
   const resend = getResendClient();

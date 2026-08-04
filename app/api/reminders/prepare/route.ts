@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServer } from "@/lib/supabase-server";
-import { scheduleToPrepare } from "@/lib/reminder-schedule";
+import { prepareEligibility } from "@/lib/reminder-schedule";
 import type { Invoice } from "@/types";
+import { formatDate } from "@/lib/invoices";
 
 /**
  * POST /api/reminders/prepare
@@ -76,19 +77,35 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Choose which schedule to prepare based on how overdue the invoice is
-  const schedule = scheduleToPrepare(
+  // Eligibility: selected, unsent AND reached. A schedule whose checkpoint is
+  // still in the future is NOT preparable — see lib/reminder-schedule.ts.
+  const eligibility = prepareEligibility(
     invoice.reminder_schedules,
     invoice.reminders_sent ?? [],
     invoice.due_date
   );
 
-  if (!schedule) {
+  if (!eligibility.schedule) {
+    // 409, never 500: this is a legitimate state, not a failure.
+    const message =
+      eligibility.blockedReason === "all_sent"
+        ? "All reminders for this invoice have already been sent."
+        : eligibility.eligibleFrom
+          ? `No reminder is due yet for this invoice. The next one can be prepared from ${formatDate(eligibility.eligibleFrom)}.`
+          : "No reminder is due for this invoice yet.";
+
     return NextResponse.json(
-      { success: false, message: "All reminders for this invoice have already been sent." },
+      {
+        success: false,
+        message,
+        blockedReason: eligibility.blockedReason,
+        eligibleFrom: eligibility.eligibleFrom,
+      },
       { status: 409 }
     );
   }
+
+  const schedule = eligibility.schedule;
 
   // Check for an existing reminder_log for this invoice + schedule
   const { data: existing } = await supabase
@@ -101,7 +118,13 @@ export async function POST(request: NextRequest) {
   if (existing) {
     if (existing.status === "pending") {
       return NextResponse.json(
-        { success: true, message: "A reminder is already waiting for approval.", alreadyPending: true },
+        {
+          success: true,
+          message: "A reminder is already waiting for approval.",
+          alreadyPending: true,
+          reminderId: existing.id,
+          invoiceId: invoice.id,
+        },
         { status: 200 }
       );
     }
@@ -130,7 +153,12 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      return NextResponse.json({ success: true, message: "Reminder prepared and added to the approval queue." });
+      return NextResponse.json({
+        success: true,
+        message: "Reminder prepared and added to the approval queue.",
+        reminderId: existing.id,
+        invoiceId: invoice.id,
+      });
     }
 
     // status === "sent" — the genuine business rule: this exact scheduled
@@ -146,7 +174,9 @@ export async function POST(request: NextRequest) {
 
   // Insert the pending reminder. user_id explicitly set from the session —
   // RLS would block any other value, and the table requires user_id NOT NULL.
-  const { error: insertError } = await supabase
+  // .select() so the caller receives the reminder id — onboarding needs the
+  // exact identity to build its resume URL rather than guessing.
+  const { data: inserted, error: insertError } = await supabase
     .from("reminder_logs")
     .insert({
       invoice_id: invoice.id,
@@ -155,12 +185,30 @@ export async function POST(request: NextRequest) {
       status: "pending",
       email_to: invoice.customer_email,
       subject,
-    });
+    })
+    .select("id")
+    .single();
 
   if (insertError) {
     if (insertError.code === "23505") {
+      // Race with a concurrent prepare: the UNIQUE(invoice_id, schedule)
+      // constraint fired. `existing` was null on this path, so re-read the
+      // row the other request created rather than referencing it.
+      const { data: raced } = await supabase
+        .from("reminder_logs")
+        .select("id")
+        .eq("invoice_id", invoice.id)
+        .eq("schedule", schedule)
+        .maybeSingle();
+
       return NextResponse.json(
-        { success: true, message: "A reminder is already waiting for approval.", alreadyPending: true },
+        {
+          success: true,
+          message: "A reminder is already waiting for approval.",
+          alreadyPending: true,
+          reminderId: raced?.id ?? null,
+          invoiceId: invoice.id,
+        },
         { status: 200 }
       );
     }
@@ -170,5 +218,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  return NextResponse.json({ success: true, message: "Reminder prepared and added to the approval queue." });
+  return NextResponse.json({
+    success: true,
+    message: "Reminder prepared and added to the approval queue.",
+    reminderId: inserted?.id ?? null,
+    invoiceId: invoice.id,
+  });
 }

@@ -4,7 +4,7 @@ import { useState, useEffect, Fragment } from "react";
 import type { Invoice, ReminderLog } from "@/types";
 import { formatCurrency, formatDate, daysOverdueLabel } from "@/lib/invoices";
 import { getDueStatusLabel } from "@/lib/date-status";
-import { scheduleToPrepare } from "@/lib/reminder-schedule";
+import { prepareEligibility } from "@/lib/reminder-schedule";
 import InvoiceActivityLog, { HistoryToggle } from "./InvoiceActivityLog";
 import { useDashboard } from "./DashboardProvider";
 import ChannelPickerModal from "./ChannelPickerModal";
@@ -15,9 +15,16 @@ function reminderStateLabel(invoice: Invoice, hasPending: boolean): { text: stri
   const sentCount = invoice.reminders_sent?.length ?? 0;
   const total = invoice.reminder_schedules?.length ?? 0;
   if (total === 0) return { text: "No reminders set", color: "var(--dash-text-muted)" };
-  const canPrepare = !!scheduleToPrepare(invoice.reminder_schedules, invoice.reminders_sent ?? [], invoice.due_date);
+  const eligibility = prepareEligibility(invoice.reminder_schedules, invoice.reminders_sent ?? [], invoice.due_date);
+  const canPrepare = !!eligibility.schedule;
   if (sentCount === 0 && canPrepare) return { text: "Ready to chase", color: "var(--dash-accent-strong)" };
   if (canPrepare) return { text: `${sentCount} of ${total} reminders sent`, color: "var(--dash-accent-strong)" };
+  // Not eligible yet is NOT the same as finished — before the stricter
+  // eligibility rule this branch mislabelled a future invoice "All reminders
+  // sent". Say when the first reminder becomes available instead.
+  if (eligibility.blockedReason === "not_yet_due" && eligibility.eligibleFrom) {
+    return { text: `First reminder from ${formatDate(eligibility.eligibleFrom)}`, color: "var(--dash-text-muted)" };
+  }
   return { text: "All reminders sent", color: "var(--dash-green)" };
 }
 
@@ -52,7 +59,7 @@ function ChaseRowAction({ invoice, hasPending, pendingReminder, onRequestPrepare
 }) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ title: string; detail?: string } | null>(null);
-  const canPrepare = !!scheduleToPrepare(invoice.reminder_schedules ?? [], invoice.reminders_sent ?? [], invoice.due_date);
+  const canPrepare = !!prepareEligibility(invoice.reminder_schedules ?? [], invoice.reminders_sent ?? [], invoice.due_date).schedule;
 
   // Whenever the row's active reminder changes or disappears (dismissed,
   // sent, refetched, or a new one prepared), any old row-level error is

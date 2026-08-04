@@ -92,9 +92,17 @@ export const SCHEDULE_CHRONOLOGY: ReminderSchedule[] = [
  * invoice is right now:
  *   - the latest checkpoint at or before today's days-overdue (so a 10-day
  *     overdue invoice prepares the "7 days overdue" message, not "3 days")
- *   - if none have been reached yet (invoice not yet due), pick the
- *     earliest unsent schedule so the user can still send an early nudge
- *   - returns null only if every selected schedule has already been sent
+ *   - returns null when NO selected checkpoint has been reached yet, or when
+ *     every selected schedule has already been sent
+ *
+ * SAFETY (v8.9.2): this previously fell back to `unsent[0]` when no checkpoint
+ * had been reached, which queued a reminder for an invoice that was nowhere
+ * near its first checkpoint — an invoice due in 30 days with only
+ * overdue_14_days selected got a reminder in the approval queue today. The
+ * email body is computed live from due-status at send time, so nothing false
+ * would have reached a customer, but the queue entry was premature and the
+ * "Prepare Reminder" control implied an action the schedule did not support.
+ * Eligibility is now strict: selected, unsent, AND reached.
  */
 export function scheduleToPrepare(
   selectedSchedules: ReminderSchedule[],
@@ -102,28 +110,96 @@ export function scheduleToPrepare(
   dueDateISO: string,
   today: Date = new Date()
 ): ReminderSchedule | null {
-  const unsent = SCHEDULE_CHRONOLOGY.filter(
-    (s) => selectedSchedules.includes(s) && !alreadySent.includes(s)
-  );
+  const unsent = unsentSchedules(selectedSchedules, alreadySent);
   if (unsent.length === 0) return null;
 
   const days = daysFromDue(dueDateISO, today);
 
-  // Map each schedule to the days-from-due it represents
-  const scheduleDay: Record<ReminderSchedule, number> = {
-    before_due_3_days: -3,
-    due_today: 0,
-    overdue_3_days: 3,
-    overdue_7_days: 7,
-    overdue_14_days: 14,
-  };
-
-  // Latest unsent checkpoint that today has already reached or passed
-  const reached = unsent.filter((s) => scheduleDay[s] <= days);
+  // Latest unsent checkpoint that today has already reached or passed.
+  const reached = unsent.filter((s) => SCHEDULE_DAY[s] <= days);
   if (reached.length > 0) {
     return reached[reached.length - 1]; // furthest-along reached checkpoint
   }
 
-  // Invoice not yet at any checkpoint — offer the earliest unsent one
-  return unsent[0];
+  // No checkpoint reached yet. NOT eligible — see the safety note above.
+  return null;
+}
+
+/**
+ * The days-from-due each checkpoint represents. Negative is before the due
+ * date. Exported so callers can explain *when* a reminder becomes available
+ * rather than only that it is unavailable.
+ */
+export const SCHEDULE_DAY: Record<ReminderSchedule, number> = {
+  before_due_3_days: -3,
+  due_today: 0,
+  overdue_3_days: 3,
+  overdue_7_days: 7,
+  overdue_14_days: 14,
+};
+
+function unsentSchedules(
+  selectedSchedules: ReminderSchedule[],
+  alreadySent: ReminderSchedule[]
+): ReminderSchedule[] {
+  return SCHEDULE_CHRONOLOGY.filter(
+    (s) => selectedSchedules.includes(s) && !alreadySent.includes(s)
+  );
+}
+
+/**
+ * Why a reminder cannot be prepared right now, so the UI and the API can say
+ * something specific instead of failing silently.
+ *
+ *   "none_selected"  — the invoice has no reminder schedules at all
+ *   "all_sent"       — every selected schedule has already gone out
+ *   "not_yet_due"    — schedules remain, but none has been reached yet
+ */
+export type PrepareBlockedReason = "none_selected" | "all_sent" | "not_yet_due";
+
+export interface PrepareEligibility {
+  /** The schedule that may be prepared now, or null. */
+  schedule: ReminderSchedule | null;
+  /** Set only when schedule is null. */
+  blockedReason?: PrepareBlockedReason;
+  /**
+   * ISO date (YYYY-MM-DD) on which the earliest remaining checkpoint becomes
+   * eligible. Set only when blockedReason is "not_yet_due".
+   */
+  eligibleFrom?: string;
+}
+
+/**
+ * The full eligibility picture. scheduleToPrepare() answers "can I?"; this
+ * answers "and if not, why, and when?".
+ */
+export function prepareEligibility(
+  selectedSchedules: ReminderSchedule[],
+  alreadySent: ReminderSchedule[],
+  dueDateISO: string,
+  today: Date = new Date()
+): PrepareEligibility {
+  if (!selectedSchedules || selectedSchedules.length === 0) {
+    return { schedule: null, blockedReason: "none_selected" };
+  }
+
+  const unsent = unsentSchedules(selectedSchedules, alreadySent);
+  if (unsent.length === 0) {
+    return { schedule: null, blockedReason: "all_sent" };
+  }
+
+  const schedule = scheduleToPrepare(selectedSchedules, alreadySent, dueDateISO, today);
+  if (schedule) return { schedule };
+
+  // Nothing reached yet: the earliest remaining checkpoint decides the date.
+  const earliestOffset = Math.min(...unsent.map((s) => SCHEDULE_DAY[s]));
+  const due = new Date(dueDateISO);
+  due.setUTCHours(0, 0, 0, 0);
+  due.setUTCDate(due.getUTCDate() + earliestOffset);
+
+  return {
+    schedule: null,
+    blockedReason: "not_yet_due",
+    eligibleFrom: due.toISOString().slice(0, 10),
+  };
 }
