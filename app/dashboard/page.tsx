@@ -251,7 +251,16 @@ export default function OverviewPage() {
                           // place, so a tone can never be half-applied. Muted
                           // when every visible row shares a state: the colour
                           // has nothing left to distinguish.
-                          ["--attn-tone" as string]: uniformKind ? "var(--dash-text-muted)" : TONE_COLOUR[tone],
+                          // AMBER, not red, when every row shares a state: the
+                          // colour distinguishes nothing between rows, so it
+                          // marks "unresolved" rather than shouting. The one
+                          // exception is a failed send — that is a genuine
+                          // error, not a task, and keeps its own tone even when
+                          // uniform.
+                          ["--attn-tone" as string]:
+                            uniformKind && uniformKind !== "send_failed"
+                              ? "var(--dash-amber)"
+                              : TONE_COLOUR[tone],
                         }}
                       >
                         {!uniformKind && (

@@ -4,6 +4,7 @@ import { useBetaAllowance } from "./BetaAllowanceContext";
 import {
   ALLOWANCE_LABEL_PREFIX,
   allowanceExhausted,
+  ALLOWANCE_LIMIT_BADGE,
   allowanceUsageDetail,
   allowanceUsageLabelCompact,
   allowanceUsageLabelMini,
@@ -85,6 +86,15 @@ export default function BetaAllowanceIndicator({ tone }: { tone: AllowanceTone }
         <span className="ss-beta-t-compact">{allowanceUsageLabelCompact(allowance)}</span>
         <span className="ss-beta-t-mini">{allowanceUsageLabelMini(allowance)}</span>
       </span>
+
+      {/* A SEPARATE element, not more words on the end of the sentence above.
+          Appended, it was the part that got truncated away; beside it, it has
+          its own box and cannot be clipped by the usage line's length.
+          Still no upgrade CTA — there is no billing destination to send
+          anyone to, so this states the fact and stops. */}
+      {exhausted && (
+        <span className="ss-beta-badge">{ALLOWANCE_LIMIT_BADGE}</span>
+      )}
 
       {/*
         Real progress semantics, since there is now a real progress element.

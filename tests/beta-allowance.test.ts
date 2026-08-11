@@ -12,6 +12,7 @@ import {
   betaAllowance,
   allowanceUsageLabel,
   allowanceExhausted,
+  ALLOWANCE_LIMIT_BADGE,
   allowanceUsageLabelCompact,
   allowanceUsageLabelMini,
   allowanceProgressLabel,
@@ -155,25 +156,65 @@ test("the desktop wording is one statement with one number", () => {
   assert.equal(allowanceUsageLabel(betaAllowance(1)), "Founding beta \u2014 1 / 10 reminders used");
   assert.equal(allowanceUsageLabel(betaAllowance(4)), "Founding beta \u2014 4 / 10 reminders used");
   assert.equal(allowanceUsageLabel(betaAllowance(9)), "Founding beta \u2014 9 / 10 reminders used");
-  // AT THE CAP the fraction is no longer sufficient on its own. A full bar
-  // reads as "nearly there"; the owner needs to know that reminders have
-  // actually stopped. "limit reached" adds a STATE, not a second number — the
-  // one-number rule below still holds.
-  assert.equal(allowanceUsageLabel(betaAllowance(10)),
-    "Founding beta \u2014 10 / 10 reminders used \u2014 limit reached");
-  assert.equal(/\d/.test("limit reached"), false, "the added words carry no second figure");
+  // AT THE CAP the sentence is UNCHANGED. The state is carried by a separate
+  // badge, not appended here — see the truncation test below.
+  assert.equal(allowanceUsageLabel(betaAllowance(10)), "Founding beta \u2014 10 / 10 reminders used");
 });
 
-test("only the exhausted state says the limit is reached", () => {
+test("[static] the progress fill stays teal at the cap", () => {
+  // The bar shows a FRACTION, and a fraction is not a warning: at 10 / 10 it
+  // is the same measurement it was at 9 / 10. Recolouring it amber made the
+  // header read as an alert bar and broke the dashboard's colour language,
+  // where teal means "this product" and amber means "attention".
+  //
+  // Exhaustion is carried by the badge alone.
+  const css = readFileSync(join(ROOT, "app/globals.css"), "utf8");
+  assert.equal(/\.ss-beta-panel--spent[^{]*\.ss-beta-fill\s*\{/.test(css), false,
+    "the spent state must not restyle the progress fill");
+  assert.equal(/\.ss-beta-fill[^{]*\{[^}]*amber/.test(css), false,
+    "no amber may reach the progress fill");
+
+  // ...and the badge is where the amber lives.
+  const badge = css.slice(css.indexOf(".ss-beta-badge {"));
+  assert.match(badge.slice(0, badge.indexOf("}")), /--dash-amber/,
+    "the restrained amber belongs to the badge");
+});
+
+test("the cap state is its own short string, never appended to the sentence", () => {
+  // THE BUG: "Founding beta — 10 / 10 reminders used — limit reached" in a
+  // fixed-width header panel rendered as "…limit reac…". Appending state to a
+  // sentence means the sentence's length decides whether the state survives.
+  assert.equal(ALLOWANCE_LIMIT_BADGE, "Limit reached");
+
+  for (const used of [0, 1, 4, 9, 10]) {
+    const a = betaAllowance(used);
+    for (const label of [allowanceUsageLabel(a), allowanceUsageLabelCompact(a), allowanceUsageLabelMini(a)]) {
+      assert.equal(/limit/i.test(label), false,
+        `"${label}" must not carry the cap state inside the sentence`);
+    }
+  }
+
+  // And the sentence must stay short enough to be a header line. 46 chars is
+  // the longest legitimate value ("Founding beta — 10 / 10 reminders used");
+  // anything materially beyond that is a regression toward concatenation.
+  for (const used of [0, 10]) {
+    assert.ok(allowanceUsageLabel(betaAllowance(used)).length <= 46,
+      `"${allowanceUsageLabel(betaAllowance(used))}" is too long for the header panel`);
+  }
+});
+
+test("only the exhausted state renders the limit badge", () => {
   // A near-full allowance must not be dressed up as a stop.
   for (const used of [0, 1, 4, 9]) {
-    assert.equal(/limit reached/.test(allowanceUsageLabel(betaAllowance(used))), false,
+    assert.equal(allowanceExhausted(betaAllowance(used)), false,
       `${used}/10 is not the cap and must not claim to be`);
-    assert.equal(allowanceExhausted(betaAllowance(used)), false);
   }
   assert.equal(allowanceExhausted(betaAllowance(10)), true);
-  assert.match(allowanceUsageLabel(betaAllowance(10)), /limit reached/);
-  assert.match(allowanceUsageLabelCompact(betaAllowance(10)), /limit reached/);
+
+  // The component gates the badge on exactly that predicate.
+  const chip = readFileSync(join(ROOT, "components/dashboard/BetaAllowanceIndicator.tsx"), "utf8");
+  assert.match(chip, /const exhausted = allowanceExhausted\(allowance\);/);
+  assert.match(chip, /\{exhausted && \(\s*\n?\s*<span className="ss-beta-badge">\{ALLOWANCE_LIMIT_BADGE\}<\/span>/);
 });
 
 test("the cap state never promises billing that does not exist", () => {
@@ -207,7 +248,7 @@ test("no wording anywhere restates the same number a second way", () => {
 
 test("the compact and mini wordings shorten the framing, never the fraction", () => {
   assert.equal(allowanceUsageLabelCompact(betaAllowance(4)), "Beta \u2014 4 / 10 used");
-  assert.equal(allowanceUsageLabelCompact(betaAllowance(10)), "Beta \u2014 10 / 10 \u00b7 limit reached");
+  assert.equal(allowanceUsageLabelCompact(betaAllowance(10)), "Beta \u2014 10 / 10 used");
   assert.equal(allowanceUsageLabelMini(betaAllowance(4)), "Beta \u00b7 4 / 10");
   assert.equal(allowanceUsageLabelMini(betaAllowance(0)), "Beta \u00b7 0 / 10");
 

@@ -429,3 +429,49 @@ test("[static] Coming up has a SMALL empty state, and it stays small", () => {
     "the empty state must stay a single line of text");
   assert.ok((branch.match(/<p /g) ?? []).length === 1, "exactly one paragraph");
 });
+
+test("[static] Coming up may blame the beta cap ONLY if the cap gates scheduling", () => {
+  // ── THE CAUSALITY CHECK ─────────────────────────────────────────────────
+  //
+  // It is tempting to say "you've used all 10 founding beta reminders, so no
+  // new reminders are being scheduled" when the section is empty at 10/10.
+  // That is only honest if the allowance actually stops scheduling.
+  //
+  // AUDITED, and it does not. The founding-beta allowance is claimed at SEND
+  // time via claim_reminder_allowance — in the approval route, and in the
+  // (currently unreachable) auto-send branch of the cron. The daily run still
+  // creates the reminder first: `summary.remindersCreated++` runs before any
+  // claim, and an exhausted claim leaves the row "pending — prepared,
+  // reviewable". Preparation and the upcoming calculation never consult it.
+  //
+  // So an empty Coming up at 10/10 is caused by there being no future
+  // checkpoint, NOT by the cap, and the causal wording would misattribute it.
+  //
+  // This test ties the copy to the code path rather than freezing today's
+  // answer: if the allowance ever does gate scheduling, the claim becomes
+  // permitted automatically.
+  const upcomingLib = readFileSync(join(ROOT, "lib/overview-upcoming.ts"), "utf8");
+  const dailyRun = readFileSync(join(ROOT, "lib/daily-reminder-run.ts"), "utf8");
+  const prepare = readFileSync(join(ROOT, "app/api/reminders/prepare/route.ts"), "utf8");
+
+  const schedulingConsultsAllowance = [upcomingLib, dailyRun, prepare].some((src) =>
+    /allowance/i.test(src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, ""))
+  );
+
+  const page = readFileSync(join(ROOT, "app/dashboard/page.tsx"), "utf8");
+  const code = page.replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+  const blamesTheCap =
+    /founding beta reminders, so no new reminders/i.test(code) ||
+    /used all \d+ founding beta/i.test(code) ||
+    /(no new reminders are being scheduled)/i.test(code);
+
+  if (!schedulingConsultsAllowance) {
+    assert.equal(blamesTheCap, false,
+      "Coming up must not attribute its empty state to the beta cap: no scheduling path consults the allowance");
+  }
+
+  // Either way, the generic empty state is what is shown today.
+  assert.match(code, /No reminders are scheduled to go out in the next few days\./);
+});

@@ -485,8 +485,16 @@ test("[static] identical rows are calmed by the heading, not repeated per row", 
   assert.match(code, /const uniformKind =/);
   assert.match(code, /visibleAttention\.every\(\(i\) => i\.kind === visibleAttention\[0\]\.kind\)/);
   assert.match(code, /\{UNIFORM_SUMMARY\[uniformKind\]\}/);
-  assert.match(code, /uniformKind \? "var\(--dash-text-muted\)" : TONE_COLOUR\[tone\]/,
-    "tone colour must be muted when it distinguishes nothing");
+  // Amber, not red, when the colour distinguishes nothing between rows — but a
+  // failed send keeps its own tone, because that is an error rather than a
+  // task waiting to be done.
+  assert.match(code, /uniformKind && uniformKind !== "send_failed"/,
+    "a uniform failed-send list must not be downgraded to amber");
+  assert.match(code, /\? "var\(--dash-amber\)"/,
+    "the unresolved accent must use the existing amber token");
+  assert.match(code, /: TONE_COLOUR\[tone\]/);
+  assert.equal(/var\(--dash-red\)"\s*:\s*TONE_COLOUR/.test(code), false,
+    "no return to a blanket red treatment");
   assert.match(code, /\{!uniformKind && \(/, "the per-row tag is dropped when uniform");
   assert.match(code, /\{!uniformKind && <>\{" · "\}\{attentionDescription\(item\)\}<\/>\}/,
     "the repeated explanation is dropped when uniform");
@@ -509,4 +517,39 @@ test("[static] Recent activity is not reintroduced, and Invoice Status is gone",
     "the empty full-width status card no longer belongs on Overview");
   // ...and the explanation must survive, so the next reader does not "restore" it.
   assert.match(page, /Recent activity/i, "the rationale must stay documented");
+});
+
+test("[static] the attention row is a desktop layout, not a wrapped block", () => {
+  const css = readFileSync(join(ROOT, "app/globals.css"), "utf8");
+
+  // THE WASTED SPACE: the base grid reserves 7.75rem for the state tag. When
+  // every visible row shares a state the tag is not rendered at all, so that
+  // column became ~124px of dead space per row — squeezing the detail line
+  // until it wrapped while the row itself looked half empty.
+  const uniform = css.slice(css.indexOf(".dash-attn-list--uniform .dash-attn-row"));
+  assert.ok(css.includes(".dash-attn-list--uniform .dash-attn-row"),
+    "the uniform list must reclaim the tag column");
+  assert.match(uniform.slice(0, 200), /grid-template-columns:\s*minmax\(0, 1fr\) auto;/,
+    "content takes the slack; the CTA takes only what it needs");
+
+  // The CTA is pinned to the right edge and is never the thing that shrinks.
+  const action = css.slice(css.indexOf(".dash-attn-action {"));
+  const actionBlock = action.slice(0, action.indexOf("}"));
+  assert.match(actionBlock, /justify-self:\s*end;/, "CTA pinned right");
+  assert.match(actionBlock, /flex-shrink:\s*0;/, "CTA must not be squeezed");
+  assert.match(actionBlock, /white-space:\s*nowrap;/);
+
+  // "£1,240.00 · 12 days overdue" must stay on one line at desktop. Below the
+  // breakpoint wrapping is deliberate.
+  const desktop = css.slice(css.indexOf("@media (min-width: 900px)"));
+  const query = desktop.slice(0, desktop.indexOf("\n}\n"));
+  assert.match(query, /\.dash-attn-meta\s*\{[^}]*white-space:\s*nowrap;/,
+    "the amount/overdue line must not wrap at desktop");
+  assert.match(query, /text-overflow:\s*ellipsis;/,
+    "overflow must ellipsise rather than reflow the row");
+
+  // Compact, so three rows read as a list rather than three cards.
+  const row = css.slice(css.indexOf(".dash-attn-row {"));
+  assert.match(row.slice(0, row.indexOf("}")), /padding:\s*0\.55rem/,
+    "vertical padding must stay tight");
 });

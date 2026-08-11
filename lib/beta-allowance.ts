@@ -258,13 +258,20 @@ export function allowanceExhausted(a: BetaAllowance): boolean {
   return a.remaining === 0;
 }
 
+/**
+ * The cap state, as its OWN short string.
+ *
+ * Deliberately not appended to the usage sentence. Concatenating it produced
+ * "Founding beta — 10 / 10 reminders used — limit reached" in a fixed-width
+ * header panel, which truncated to "...limit reac…" — losing precisely the
+ * word that carried the meaning. A separate element can sit beside the usage
+ * line and be given its own space, and it cannot be clipped by the length of
+ * the sentence in front of it.
+ */
+export const ALLOWANCE_LIMIT_BADGE = "Limit reached";
+
 export function allowanceUsageDetail(a: BetaAllowance): string {
-  const fraction = `${a.used} / ${a.allowance} ${plural(a.allowance, "reminder", "reminders")} used`;
-  // A full bar alone reads as "nearly there", not "stopped". At the cap the
-  // owner needs to know why no further reminders will go out, so the state is
-  // said in words. No upgrade promise is made here — there is no billing
-  // destination in the product yet, and inventing one would be a lie.
-  return allowanceExhausted(a) ? `${fraction} — limit reached` : fraction;
+  return `${a.used} / ${a.allowance} ${plural(a.allowance, "reminder", "reminders")} used`;
 }
 
 export function allowanceUsageLabel(a: BetaAllowance): string {
@@ -273,9 +280,7 @@ export function allowanceUsageLabel(a: BetaAllowance): string {
 
 /** Tablet and narrow desktop. Same fraction, less framing. */
 export function allowanceUsageLabelCompact(a: BetaAllowance): string {
-  return allowanceExhausted(a)
-    ? `Beta — ${a.used} / ${a.allowance} · limit reached`
-    : `Beta — ${a.used} / ${a.allowance} used`;
+  return `Beta — ${a.used} / ${a.allowance} used`;
 }
 
 /** The mobile bar, which also carries a logo, a wordmark and Sign out. */

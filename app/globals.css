@@ -2177,7 +2177,7 @@ html { scroll-behavior: smooth; }
   grid-template-columns: 7.75rem minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.9rem;
-  padding: 0.7rem 0.85rem;
+  padding: 0.55rem 0.85rem;
   border-radius: 10px;
   /* The tone as a quiet rule rather than a loud badge. Colour carries no
      meaning on its own here — the tag text says the same thing. */
@@ -2208,6 +2208,16 @@ html { scroll-behavior: smooth; }
   white-space: normal;
 }
 
+/* ── Uniform list: reclaim the tag column ──────────────────────────────────
+   THE WASTED SPACE. When every visible row shares one state the tag is not
+   rendered at all, but the grid still reserved 7.75rem for it — roughly 124px
+   of dead space per row, which squeezed the detail line until it wrapped while
+   the row itself looked half empty. Two columns: content takes the slack, the
+   CTA takes what it needs. */
+.dash-attn-list--uniform .dash-attn-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .dash-attn-body { display: block; min-width: 0; }
 
 /* Promoted in pass 2. The customer is the subject of the row. */
@@ -2231,6 +2241,24 @@ html { scroll-behavior: smooth; }
   color: var(--dash-text-muted);
   overflow-wrap: anywhere;
 }
+
+/* Desktop must not wrap this line. "£1,240.00 · 12 days overdue" splitting
+   across two lines is what made the list look ragged and tall. Below 900px
+   wrapping is deliberate and fine — there genuinely is not room. */
+@media (min-width: 900px) {
+  .dash-attn-meta {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    overflow-wrap: normal;
+  }
+  .dash-attn-who {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    overflow-wrap: normal;
+  }
+}
 .dash-attn-amount { font-weight: 600; color: var(--dash-text); }
 
 /* A specific verb, always visible — not a chevron that only appears on hover,
@@ -2238,6 +2266,10 @@ html { scroll-behavior: smooth; }
 .dash-attn-action {
   display: inline-flex;
   align-items: center;
+  /* Pinned to the right edge, and never squeezed: the content column is the
+     one that flexes. */
+  justify-self: end;
+  flex-shrink: 0;
   gap: 0.25rem;
   font-size: 0.855rem;
   font-weight: 650;
@@ -2671,14 +2703,53 @@ html { scroll-behavior: smooth; }
 .ss-archived-tag--unpaid { background: var(--dash-card-muted); color: var(--dash-text-muted); }
 
 /* ── Founding beta: allowance spent ────────────────────────────────────────
-   10 / 10 must read as a LIMIT, not as a bar that happens to be full. The
-   treatment is restrained on purpose: amber, not red, and applied to the bar
-   and one word rather than to the whole panel. This sits in the dashboard
-   header, where a loud state would shout on every page.
+   10 / 10 must read as a LIMIT, not as a bar that happens to be full.
+
+   THE PROGRESS FILL STAYS TEAL. An earlier version recoloured it amber at the
+   cap; it read as an alert bar rather than a ServiceSignal usage meter and
+   broke the dashboard's colour language, where teal is simply "this product"
+   and amber means "attention". The bar's job is to show the fraction, and the
+   fraction is not a warning — it is the same measurement it was at 9 / 10.
+
+   Exhaustion is carried by ONE element instead: the compact `Limit reached`
+   badge. One restrained amber mark, in one place, rather than a header that
+   changes colour.
 
    No upgrade affordance is offered here. ServiceSignal has no billing
    destination, and a dead or "coming soon" button would be worse than the
    honest statement. */
-.ss-beta-panel--spent .ss-beta-fill { background: var(--dash-amber, #b45309); }
-.ss-beta-panel--spent.ss-beta-panel--dark .ss-beta-fill { background: #fbbf24; }
 .ss-beta-panel--spent .ss-beta-detail { font-weight: 650; }
+
+/* ── Founding beta: the "Limit reached" state ──────────────────────────────
+   Its own element rather than more words appended to the usage sentence,
+   which is what truncated to "…limit reac…" in the header. Amber, compact,
+   and never wrapping: if space is genuinely short the usage line ellipsises
+   first, because the fraction is recoverable from the bar and the STATE is
+   not. */
+.ss-beta-badge {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  padding: 0.2rem 0.4rem;
+  border-radius: 5px;
+  background: var(--dash-amber-soft, #fef3c7);
+  color: var(--dash-amber, #b45309);
+}
+.ss-beta-panel--dark .ss-beta-badge {
+  background: rgba(251, 191, 36, 0.18);
+  color: #fbbf24;
+}
+/* The usage line yields space to the badge, never the other way round. */
+.ss-beta-panel--spent .ss-beta-panel-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Room for the badge at the cap, so nothing has to shrink to fit. */
+@media (min-width: 1024px) {
+  .ss-beta-panel--light.ss-beta-panel--spent { width: 300px; }
+}
