@@ -1,8 +1,10 @@
-import { SUPPORT_FROM } from "@/lib/resend";
+import { SUPPORT_FROM, SUPPORT_ADDRESS } from "@/lib/resend";
 import "server-only";
 import { render } from "@react-email/render";
 import { tryClaim, confirmSent, markFailed } from "./email-events";
+import { requireAppBaseUrl } from "@/lib/app-urls";
 import { getResendClient } from "./resend";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { WelcomeEmail } from "@/emails/templates/WelcomeEmail";
 
 const RESEND_TIMEOUT_MS = 10_000;
@@ -23,11 +25,52 @@ const WELCOME_FROM = SUPPORT_FROM;
  * This function can NEVER throw — every path is caught internally, so a
  * failure here can never break the caller's response.
  */
+/**
+ * Resolves the ACCOUNT HOLDER's own name for the greeting.
+ *
+ * beta_signups is where it already lives: the founding-beta form collects
+ * `name` alongside `business_name`, and neither the verification row nor the
+ * created user's metadata carries it forward. Reading it here is the smallest
+ * safe fix — it touches no protected flow, asks the customer for nothing they
+ * have already given, and requires no schema change.
+ *
+ * Read with the service-role client because beta_signups is not readable by an
+ * ordinary session, and this runs in a trusted server context.
+ *
+ * NEVER THROWS and never blocks the send. A missing name simply produces the
+ * generic greeting — an email that arrives saying "Welcome to ServiceSignal" is
+ * strictly better than no email at all.
+ */
+async function resolvePersonName(email: string): Promise<string | null> {
+  try {
+    const admin = getSupabaseAdmin();
+    if (!admin) return null;
+
+    const { data, error } = await admin
+      .from("beta_signups")
+      .select("name")
+      .eq("email", email.trim().toLowerCase())
+      .maybeSingle();
+
+    if (error || !data?.name) return null;
+    return typeof data.name === "string" ? data.name : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function sendWelcomeEmailIfNeeded(
   userId: string,
   email: string | null | undefined,
+  /**
+   * Retained in the signature so every existing call site keeps compiling, and
+   * because it may be wanted again later. It is deliberately NOT used for the
+   * greeting: greeting a person by their trading name is the defect this fix
+   * removes.
+   */
   businessName: string | null
 ): Promise<void> {
+  void businessName;
   try {
     // Correction 3: don't blindly use a possibly-missing email. Skip the
     // whole attempt (don't even burn a claim) rather than fail loudly —
@@ -37,6 +80,25 @@ export async function sendWelcomeEmailIfNeeded(
       console.warn(`[welcome-email] User ${userId} has no usable email address — skipping welcome email.`);
       return;
     }
+
+    // FAILS CLOSED, and BEFORE the claim. Without an explicitly configured
+    // origin the "Continue setup" CTA would point into the wrong environment,
+    // so the email is not sent at all. Checked ahead of tryClaim so the send
+    // is not marked failed for a configuration problem that will resolve on
+    // the next attempt — the claim is left untouched and a later run retries.
+    const baseUrl = requireAppBaseUrl();
+    if (!baseUrl) {
+      console.error(
+        `[welcome-email] Welcome email for user ${userId} SUPPRESSED: ` +
+          "NEXT_PUBLIC_APP_URL is missing or malformed. It will be retried on " +
+          "the next profile read once the environment is configured."
+      );
+      return;
+    }
+    // /continue, not /onboarding: this link may be opened days later, from
+    // another browser, before or after setup is finished. The route resolves
+    // the user's real status at click time.
+    const continueUrl = `${baseUrl}/continue`;
 
     const claim = await tryClaim(userId, "welcome");
     if (!claim) return; // already sent, or another request currently owns it
@@ -48,10 +110,16 @@ export async function sendWelcomeEmailIfNeeded(
       return;
     }
 
+    // Resolved AFTER the claim, so a slow lookup cannot cause a second request
+    // to claim and send in parallel.
+    const personName = await resolvePersonName(recipient);
+
     let html: string, text: string;
     try {
-      html = await render(WelcomeEmail({ businessName }));
-      text = await render(WelcomeEmail({ businessName }), { plainText: true });
+      // The plain-text alternative is rendered from the SAME component, so the
+      // two versions cannot drift apart in wording — there is only one source.
+      html = await render(WelcomeEmail({ personName, continueUrl }));
+      text = await render(WelcomeEmail({ personName, continueUrl }), { plainText: true });
     } catch (renderErr) {
       // Pre-send, definite: no request ever reached Resend.
       await markFailed(
@@ -84,6 +152,12 @@ export async function sendWelcomeEmailIfNeeded(
         {
           from: WELCOME_FROM,
           to: recipient,
+          // EXPLICIT, not inherited from `from`. The body tells the customer
+          // they can just reply, so where a reply lands must be stated rather
+          // than left to a default — and it must be the MONITORED support
+          // mailbox, unlike a reminder email whose Reply-To routes the
+          // customer to the trade.
+          replyTo: SUPPORT_ADDRESS,
           subject: "Welcome to ServiceSignal",
           html,
           text,

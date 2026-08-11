@@ -1,9 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { V2_BUSINESS_TYPES, V2_UNPAID_RANGES } from "@/lib/beta-options";
-import { writeSignupPrefill } from "@/lib/signup-prefill";
+import { writeSignupPrefill, clearSignupPrefill } from "@/lib/signup-prefill";
 
 /**
  * Section 3 — Founding beta access.
@@ -40,7 +40,24 @@ export default function FoundingBetaSection() {
   /* True only when the API confirms Resend accepted the access email. */
   const [emailSent, setEmailSent] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  /**
+   * The address we actually submitted, captured at the moment of success.
+   *
+   * Deliberately NOT read from `form.email` at render time: "Use a different
+   * email" puts the visitor back in the form and lets them edit that field, so
+   * reading it live would let the confirmation drift away from the address the
+   * email was really sent to.
+   */
+  const [submittedEmail, setSubmittedEmail] = useState("");
+  /* Set when returning to the form, so the cursor lands on the field to fix. */
+  const [refocusEmail, setRefocusEmail] = useState(false);
   const formRef = useRef<HTMLFormElement | null>(null);
+
+  useEffect(() => {
+    if (!refocusEmail) return;
+    formRef.current?.querySelector<HTMLInputElement>('[name="email"]')?.focus();
+    setRefocusEmail(false);
+  }, [refocusEmail]);
 
   const set = (k: keyof Fields, v: string) => {
     setForm((f) => ({ ...f, [k]: v }));
@@ -72,6 +89,10 @@ export default function FoundingBetaSection() {
       return;
     }
 
+    // Normalised once, then used for the request, the handover and the
+    // confirmation — so all three can never disagree about the address.
+    const cleanEmail = form.email.trim().toLowerCase();
+
     setStatus("sending");
     try {
       const res = await fetch("/api/signup", {
@@ -80,7 +101,7 @@ export default function FoundingBetaSection() {
         body: JSON.stringify({
           name: form.name.trim(),
           business_name: form.business_name.trim(),
-          email: form.email.trim().toLowerCase(),
+          email: cleanEmail,
           business_type: form.business_type,
           unpaid_range: form.unpaid_range,
           source: "v2",
@@ -97,8 +118,9 @@ export default function FoundingBetaSection() {
         // history, referrer headers and server logs.
         writeSignupPrefill({
           businessName: form.business_name,
-          email: form.email.trim().toLowerCase(),
+          email: cleanEmail,
         });
+        setSubmittedEmail(cleanEmail);
         setStatus("done"); // only on confirmed save
         return;
       }
@@ -119,6 +141,40 @@ export default function FoundingBetaSection() {
 
   const sending = status === "sending";
 
+  /**
+   * "Use a different email" — a typo recovery route, and nothing more.
+   *
+   * PURELY CLIENT-SIDE. It makes no request, so it cannot create a second beta
+   * record, cannot issue a token and cannot send an email. Nothing new happens
+   * until the corrected form is submitted again, which goes through the same
+   * validated, rate-limited endpoint as the first attempt.
+   *
+   * The name, business name, business type and amount are kept — they were
+   * correct, and making someone retype four fields to fix one is the reason
+   * people abandon a form. Only the email is cleared, because it is the field
+   * being corrected and a pre-filled wrong address is easy to resubmit by
+   * accident.
+   *
+   * The /signup handover is cleared too. It currently holds the mistyped
+   * address, and leaving it would let the typo prefill the account form later
+   * in the journey — the exact error the visitor just came back to fix.
+   *
+   * Nothing here treats the old address as verified: no token is held on the
+   * client at any point, and the previously issued one is untouched. It simply
+   * expires, and issuing a token for any address supersedes that address's
+   * earlier tokens server-side.
+   */
+  const useDifferentEmail = () => {
+    setForm((f) => ({ ...f, email: "" }));
+    setErrors({});
+    setFormError(null);
+    setEmailSent(false);
+    setSubmittedEmail("");
+    clearSignupPrefill();
+    setStatus("idle");
+    setRefocusEmail(true);
+  };
+
   return (
     <section id="access" className="v2-beta" aria-labelledby="beta-heading">
       <div className="v2-section v2-beta-grid">
@@ -131,7 +187,7 @@ export default function FoundingBetaSection() {
           <p className="v2-beta-sub">
             We&rsquo;re opening ServiceSignal to trades and local service businesses
             who want a simpler way to follow up overdue invoices. Tell us about your
-            work and we&rsquo;ll contact you about joining the beta.
+            work, verify your email and finish creating your account.
           </p>
         </div>
 
@@ -141,29 +197,53 @@ export default function FoundingBetaSection() {
             <div className="v2-beta-done" role="status" aria-live="polite">
               <span className="v2-beta-done-ico" aria-hidden="true">✓</span>
 
-              {/* The two states stay genuinely distinct: "Check your inbox" is
+              {/* There is deliberately NO link to account setup here.
+                  Verification now happens BEFORE the account exists, so
+                  offering a route onward would let an unverified person skip
+                  the one step that proves they own the address — and would
+                  recreate the two competing funnels this replaced.
+                  The two states stay genuinely distinct: "Check your inbox" is
                   shown only when the API confirmed Resend accepted the email. */}
               {emailSent ? (
                 <>
                   <p className="v2-beta-done-t">Check your inbox</p>
                   <p className="v2-beta-done-s">
-                    We&rsquo;ve emailed you the next step. You can also continue
-                    setting up your account now.
+                    We&rsquo;ve sent a verification link to{" "}
+                    {/* The exact address we mailed, shown so a typo is
+                        caught here rather than after a silent non-arrival.
+                        overflow-wrap lets a long address break mid-string
+                        instead of pushing the card wide. */}
+                    <span className="v2-beta-done-email">{submittedEmail}</span>.
+                  </p>
+                  <p className="v2-beta-done-s">
+                    Open it to finish creating your ServiceSignal account. The link
+                    expires in 48 hours. If it hasn&rsquo;t arrived after a few
+                    minutes, check your spam folder.
                   </p>
                 </>
               ) : (
                 <>
                   <p className="v2-beta-done-t">Thanks — your details are saved.</p>
                   <p className="v2-beta-done-s">
-                    Continue to set up your ServiceSignal account. We&rsquo;ll carry
-                    your business name and email into the next step.
+                    We couldn&rsquo;t send a verification link to{" "}
+                    <span className="v2-beta-done-email">{submittedEmail}</span> just
+                    now. We&rsquo;ll be in touch shortly, or email
+                    support@servicesignal.app and we&rsquo;ll get you set up.
                   </p>
                 </>
               )}
 
-              <Link href="/signup" className="v2-beta-cta">
-                Continue to account setup
-              </Link>
+              {/* Restrained on purpose: the primary path is the inbox, and
+                  this must not compete with it. Offered in BOTH states —
+                  a wrong address is the most likely reason an email did not
+                  arrive, whichever branch the visitor is looking at. */}
+              <button
+                type="button"
+                className="v2-beta-done-alt"
+                onClick={useDifferentEmail}
+              >
+                Use a different email
+              </button>
             </div>
           ) : (
             <form ref={formRef} onSubmit={onSubmit} noValidate>
@@ -173,6 +253,7 @@ export default function FoundingBetaSection() {
                   <input
                     id="beta-name" name="name" type="text" autoComplete="name"
                     value={form.name} onChange={(e) => set("name", e.target.value)}
+                    aria-required="true"
                     aria-invalid={!!errors.name}
                     aria-describedby={errors.name ? "beta-name-err" : undefined}
                     disabled={sending}
@@ -185,6 +266,7 @@ export default function FoundingBetaSection() {
                   <input
                     id="beta-business" name="business_name" type="text" autoComplete="organization"
                     value={form.business_name} onChange={(e) => set("business_name", e.target.value)}
+                    aria-required="true"
                     aria-invalid={!!errors.business_name}
                     aria-describedby={errors.business_name ? "beta-business-err" : undefined}
                     disabled={sending}
@@ -197,6 +279,7 @@ export default function FoundingBetaSection() {
                   <input
                     id="beta-email" name="email" type="email" autoComplete="email"
                     value={form.email} onChange={(e) => set("email", e.target.value)}
+                    aria-required="true"
                     aria-invalid={!!errors.email}
                     aria-describedby={errors.email ? "beta-email-err" : undefined}
                     disabled={sending}
@@ -209,6 +292,7 @@ export default function FoundingBetaSection() {
                   <select
                     id="beta-type" name="business_type"
                     value={form.business_type} onChange={(e) => set("business_type", e.target.value)}
+                    aria-required="true"
                     aria-invalid={!!errors.business_type}
                     aria-describedby={errors.business_type ? "beta-type-err" : undefined}
                     disabled={sending}
@@ -224,6 +308,7 @@ export default function FoundingBetaSection() {
                   <select
                     id="beta-range" name="unpaid_range"
                     value={form.unpaid_range} onChange={(e) => set("unpaid_range", e.target.value)}
+                    aria-required="true"
                     aria-invalid={!!errors.unpaid_range}
                     aria-describedby={errors.unpaid_range ? "beta-range-err" : undefined}
                     disabled={sending}
@@ -244,8 +329,9 @@ export default function FoundingBetaSection() {
               </button>
 
               <p className="v2-beta-privacy">
-                We&rsquo;ll only use your details to contact you about the ServiceSignal
-                beta. Read our{" "}
+                We&rsquo;ll use your details to create your account, send essential
+                service emails and keep you updated about the ServiceSignal beta.
+                Read our{" "}
                 <Link href="/privacy?from=landing" className="v2-beta-privacy-link">Privacy Policy</Link>.
               </p>
             </form>

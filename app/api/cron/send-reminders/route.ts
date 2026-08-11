@@ -4,9 +4,9 @@ import { buildReminderEmail } from "@/lib/email-templates";
 import { todaysSchedule } from "@/lib/reminder-schedule";
 import { sendAndUpdateLog } from "@/lib/reminder-sender";
 import { BETA_APPROVAL_ONLY } from "@/lib/beta-capabilities";
+import { canEmailCustomer } from "@/lib/daily-reminder-run";
+import { getTodayLondonDate } from "@/lib/date-status";
 import type { Invoice, Profile } from "@/types";
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 interface RunSummary {
   invoicesScanned: number;
@@ -79,7 +79,11 @@ export async function GET(request: NextRequest) {
   const { data: invoices, error: invoicesError } = await supabase
     .from("invoices")
     .select("*")
-    .neq("status", "paid");
+    .neq("status", "paid")
+    // Archived invoices are out of the workflow entirely. The BEFORE INSERT
+    // guard in migration 012 also refuses a reminder for an archived invoice,
+    // which closes the race between this SELECT and the INSERT below.
+    .is("archived_at", null);
 
   if (invoicesError) {
     console.error("✗ Failed to fetch invoices:", invoicesError.message);
@@ -124,7 +128,16 @@ export async function GET(request: NextRequest) {
   );
 
   // ── 4. Process each invoice ────────────────────────────────────────────────
-  const today = new Date();
+  //
+  // The Europe/London calendar date, explicitly — not `new Date()`.
+  //
+  // Passing the raw instant worked only by coincidence: daysFromDue()
+  // truncates with setUTCHours(0,0,0,0), so "today" became the UTC date, which
+  // happens to equal the London date at 08:00 UTC. Move the cron to 23:00 and
+  // that silently breaks during BST, because 23:00 UTC is already tomorrow in
+  // London. Naming the timezone here removes the coincidence, and matches what
+  // the Overview forecast uses to predict this job.
+  const today = getTodayLondonDate();
 
   for (const invoice of allInvoices) {
     if (!invoice.user_id) {
@@ -132,8 +145,10 @@ export async function GET(request: NextRequest) {
       continue;
     }
 
-    // Check 1: valid email
-    if (!invoice.customer_email || !EMAIL_RE.test(invoice.customer_email)) {
+    // Check 1: valid email. Shared predicate — the Overview's "Coming up"
+    // forecast imports the same function, so it can never promise a reminder
+    // for an address this job rejects.
+    if (!canEmailCustomer(invoice.customer_email)) {
       summary.remindersSkipped++;
       continue;
     }
@@ -228,6 +243,40 @@ export async function GET(request: NextRequest) {
 
     // ── Auto mode: send immediately ────────────────────────────────────────────
     if (isAutoMode) {
+      // THE SECOND SEND PATH, and therefore the second enforcement point.
+      //
+      // Unreachable today — BETA_APPROVAL_ONLY holds isAutoMode false — but
+      // this is exactly the sort of gate that gets forgotten on the day the
+      // flag flips, and a cap with a bypass is not a cap. The same atomic
+      // function the approval route uses, so the two cannot drift.
+      //
+      // service_role has no auth.uid(), so the user is named explicitly; the
+      // function accepts that only from a trusted server process.
+      const { data: claimData, error: claimError } = await supabase.rpc(
+        "claim_reminder_allowance",
+        // The cap is server-side; see the security note in migration 011.
+        {
+          p_reminder_log_id: insertedLog.id,
+          p_user_id: invoice.user_id,
+        }
+      );
+
+      const claimRow = Array.isArray(claimData) ? claimData[0] : claimData;
+
+      // Fails closed, like the approval route. The reminder stays 'pending' —
+      // prepared, reviewable, and sendable once the customer upgrades.
+      if (claimError || !claimRow?.outcome || claimRow.outcome === "exhausted") {
+        console.warn(
+          `[cron] Reminder ${insertedLog.id} not auto-sent: ` +
+            (claimError
+              ? `allowance check failed (${claimError.message})`
+              : `founding beta allowance ${claimRow?.outcome ?? "unavailable"}`) +
+            ". Left pending."
+        );
+        summary.remindersSkipped++;
+        continue;
+      }
+
       const sent = await sendAndUpdateLog({
         supabase,
         logId: insertedLog.id,

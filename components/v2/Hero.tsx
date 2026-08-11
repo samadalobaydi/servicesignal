@@ -37,9 +37,13 @@ export default function Hero() {
             <span style={{ color: "var(--v2-blue)" }}>without you chasing.</span>
           </h1>
 
+          {/* Channel-neutral by design. "Reminders", not "email reminders":
+              email is what ships today, SMS is the intended primary channel,
+              and this sentence must not date the moment that changes — nor
+              claim SMS exists before it does. The FAQ carries the detail. */}
           <p className="v2-reveal v2-d2 v2-hero-sub">
-            ServiceSignal prepares professional email reminders for overdue invoices.
-            You review each one before it sends and stay in control.
+            ServiceSignal prepares professional reminders for your overdue invoices.
+            You review and approve every message before anything is sent.
           </p>
 
           <div className="v2-reveal v2-d3 v2-hero-cta">

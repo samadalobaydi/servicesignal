@@ -117,7 +117,9 @@ export function ActiveChasingScene({ dimmed = false, sentState = false }: { dimm
               <span className="v2-tour-acts">
                 {/* Once sent, the action cell is empty. Nothing replaces it:
                     the product cannot observe delivery, opening or payment. */}
-                {isHero && !heroSent ? <span className="v2-act-primary">Review email</span> : null}
+                {/* Matches the real dashboard row action verbatim — see
+                    components/dashboard/ActiveChasingList.tsx. */}
+                {isHero && !heroSent ? <span className="v2-act-primary">Review reminder</span> : null}
               </span>
             </div>
           );
@@ -146,13 +148,15 @@ function Modal({ title, sub, children, footer }: { title: string; sub?: string; 
 /**
  * Step 2 — the reminder has been prepared and is being held.
  *
- * There is no channel choice: email is the only reminder channel the product
- * has. Nothing has been sent at this point.
+ * There is no channel choice offered, because email is the only reminder
+ * channel the product currently sends on. The "Reminder — Email reminder" row
+ * states that plainly rather than leaving it implied. Nothing has been sent at
+ * this point.
  */
 export function PreparedScene() {
   return (
     <Modal title="Reminder prepared" sub={`${DEMO.customerName} · ${DEMO.reference} · ${DEMO.amount}`}
-      footer={<><span className="v2-mbtn ghost">Cancel</span><span className="v2-mbtn primary">Review email</span></>}>
+      footer={<><span className="v2-mbtn ghost">Cancel</span><span className="v2-mbtn primary">Review reminder</span></>}>
       <div className="v2-sum">
         <div className="v2-sum-row"><span>Customer</span><strong>{DEMO.customerName}</strong></div>
         <div className="v2-sum-row"><span>Invoice</span><strong>{DEMO.reference}</strong></div>
@@ -167,7 +171,11 @@ export function PreparedScene() {
 }
 
 /**
- * Step 3 — the email exactly as the customer receives it.
+ * Step 3 — the reminder exactly as the customer receives it.
+ *
+ * The modal title matches the real review page (app/dashboard/reminders/[id]/
+ * review) and is channel-neutral; the From and Subject rows inside it make it
+ * unmistakable that this particular reminder is an email.
  *
  * Mirrors lib/email-templates.ts. ServiceSignal is shown honestly as the
  * sender; the business name appears in the subject, body and sign-off. No
@@ -182,7 +190,7 @@ export function EmailReviewScene({
   interactive: boolean;
 }) {
   return (
-    <Modal title="Review email" sub={`${DEMO.customerName} · ${DEMO.reference} · ${DEMO.amount}`}
+    <Modal title="Review reminder" sub={`${DEMO.customerName} · ${DEMO.reference} · ${DEMO.amount}`}
       footer={
         <>
           <span className="v2-mbtn ghost" aria-hidden="true">Back</span>

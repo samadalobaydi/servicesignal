@@ -4,9 +4,17 @@ import { formatCurrency } from "@/lib/invoices";
 interface StatsCardsProps {
   totalUnpaid: number;
   overdueCount: number;
-  remindersScheduled: number;
+  /**
+   * Prepared reminder events currently waiting for the owner's approval.
+   *
+   * Replaces "Reminders Set", which summed reminder_schedules.length across
+   * open invoices — a count of CONFIGURED CHECKPOINTS, not of anything that
+   * exists. One invoice on the Standard plan contributed 3, so "Reminders Set:
+   * 9" could mean three invoices and zero actual reminders. Nothing could be
+   * done with the number.
+   */
+  awaitingApproval: number;
   paidThisMonth: number;
-  needsActionCount: number;
 }
 
 interface StatCardProps {
@@ -44,13 +52,21 @@ function StatCard({ label, value, sub, accent, accentSoft, icon, href, ariaLabel
   );
 }
 
-export default function StatsCards({ totalUnpaid, overdueCount, remindersScheduled, paidThisMonth, needsActionCount }: StatsCardsProps) {
+/**
+ * The four Overview KPIs.
+ *
+ * FIXED SLOTS. The third card previously swapped between "Needs Action" and
+ * "Reminders Set" depending on the data, so the row measured different things
+ * on different days and could never be learned. Every slot now always shows the
+ * same metric; a value of zero is itself information.
+ */
+export default function StatsCards({ totalUnpaid, overdueCount, awaitingApproval, paidThisMonth }: StatsCardsProps) {
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
       <StatCard
         href="/dashboard/chasing"
         ariaLabel="View active chasing invoices"
-        label="Total Unpaid"
+        label="Total unpaid"
         value={formatCurrency(totalUnpaid)}
         sub="across all open invoices"
         accent="var(--dash-red)"
@@ -75,43 +91,32 @@ export default function StatsCards({ totalUnpaid, overdueCount, remindersSchedul
           </svg>
         }
       />
-      {needsActionCount > 0 ? (
-        <StatCard
-          href="/dashboard/needs-action"
-          ariaLabel="View invoices needing action"
-          label="Needs Action"
-          value={String(needsActionCount)}
-          sub={needsActionCount === 1 ? "invoice needs a step" : "invoices need a step"}
-          accent="var(--dash-red)"
-          accentSoft="var(--dash-red-soft)"
-          icon={
-            <svg width="18" height="18" fill="none" viewBox="0 0 24 24">
-              <path d="M13 7l5 5m0 0l-5 5m5-5H6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          }
-        />
-      ) : (
-        <StatCard
-          href="/dashboard/chasing"
-          ariaLabel="View invoices with reminders set"
-          label="Reminders Set"
-          value={String(remindersScheduled)}
-          sub="across open invoices"
-          accent="var(--dash-accent)"
-          accentSoft="var(--dash-accent-soft)"
-          icon={
-            <svg width="18" height="18" fill="none" viewBox="0 0 24 24">
-              <path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-            </svg>
-          }
-        />
-      )}
+      <StatCard
+        href="/dashboard/chasing"
+        ariaLabel="View reminders awaiting your approval"
+        label="Awaiting approval"
+        value={String(awaitingApproval)}
+        sub={awaitingApproval === 1 ? "reminder ready to review" : "reminders ready to review"}
+        accent="var(--dash-accent)"
+        accentSoft="var(--dash-accent-soft)"
+        icon={
+          <svg width="18" height="18" fill="none" viewBox="0 0 24 24">
+            <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+          </svg>
+        }
+      />
+      {/* The heading is the metric; the supporting line carries the caveat.
+          ServiceSignal does not process payments, hold money or watch a bank
+          account — this total exists only because the owner marked those
+          invoices paid themselves, so "marked paid by you" has to stay. Pass 1
+          put "Marked paid" in the heading too, which said it twice and made
+          the only long label in the row. */}
       <StatCard
         href="/dashboard/paid"
-        ariaLabel="View paid invoices"
-        label="Paid This Month"
+        ariaLabel="View invoices you have marked paid"
+        label="Paid this month"
         value={formatCurrency(paidThisMonth)}
-        sub="collected so far"
+        sub="marked paid by you"
         accent="var(--dash-green)"
         accentSoft="var(--dash-green-soft)"
         icon={

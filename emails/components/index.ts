@@ -22,6 +22,7 @@
 
 export { EmailLayout } from "./EmailLayout";
 export { EmailHeader } from "./EmailHeader";
+export { EmailBrandHeader } from "./EmailBrandHeader";
 export { EmailFooter } from "./EmailFooter";
 export { PrimaryButton } from "./PrimaryButton";
 export { SecondaryButton } from "./SecondaryButton";

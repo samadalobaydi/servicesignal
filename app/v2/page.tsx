@@ -11,7 +11,7 @@ import SiteFooter from "@/components/v2/SiteFooter";
 export const metadata: Metadata = {
   title: "ServiceSignal — Unpaid invoices, followed up without you chasing",
   description:
-    "ServiceSignal prepares professional email reminders for overdue invoices. You review each one before it sends and stay in control.",
+    "ServiceSignal prepares professional reminders for your overdue invoices. You review and approve every message before anything is sent.",
 };
 
 /**

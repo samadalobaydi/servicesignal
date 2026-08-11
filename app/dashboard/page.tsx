@@ -1,188 +1,282 @@
 "use client";
 
+import { Suspense } from "react";
 import Link from "next/link";
 import { useDashboard } from "@/components/dashboard/DashboardProvider";
 import StatsCards from "@/components/dashboard/StatsCards";
 import InvoiceStatusChart from "@/components/dashboard/InvoiceStatusChart";
 import { formatCurrency } from "@/lib/invoices";
-import { actionTypeLabel, actionTypeColor } from "@/lib/escalation";
+import { OnboardingHandoff } from "@/components/dashboard/OnboardingHandoff";
+import FirstInvoiceActivation from "@/components/dashboard/FirstInvoiceActivation";
+import { isFirstRunOverview } from "@/lib/overview-first-run";
+import {
+  buildAttentionItems,
+  attentionDescription,
+  attentionTone,
+  type AttentionItem,
+} from "@/lib/overview-attention";
+import { buildUpcomingItems, upcomingRelative } from "@/lib/overview-upcoming";
+
+/**
+ * Overview.
+ *
+ * WHAT THE PAGE ANSWERS, IN ORDER
+ *
+ *   KPI row               what is the money picture?
+ *   Needs your attention  what should I do next, and where?
+ *   Coming up             what will need me next? (only when true)
+ *   Invoice status        how is the portfolio distributed?
+ *
+ * Each section has exactly one job.
+ *
+ * WHAT WAS REMOVED, AND WHY
+ *
+ * PASS 1 — four navigation cards (Active Chasing / Needs Action / Paid /
+ * Settings). Every one was a link the permanent sidebar already provides,
+ * wrapped around a count shown elsewhere on the same screen.
+ *
+ * PASS 2 — Recent activity. Its three most common entries were "Reminder
+ * prepared for review" (already stated, more usefully and with an action
+ * attached, in Needs your attention), "Invoice added" (a thing the owner did
+ * themselves, with no decision hanging off it) and "Marked paid" (likewise).
+ * A log answers "what happened?"; Overview exists to answer "what now?".
+ * With a handful of events it also rendered as a tall card mostly full of
+ * white. The activity data and helpers are untouched — this is a
+ * page-composition decision, not a system deletion.
+ *
+ * Neither removal was backfilled. The space is the improvement.
+ */
+
+const TONE_COLOUR = {
+  red: "var(--dash-red)",
+  amber: "var(--dash-amber)",
+  blue: "var(--dash-accent-strong)",
+} as const;
+
+/** The status word beside each item — so state never depends on colour alone. */
+const KIND_LABEL: Record<AttentionItem["kind"], string> = {
+  send_failed: "Needs resolving",
+  reminder_ready: "Ready to review",
+  needs_decision: "Needs a decision",
+  overdue_no_reminder: "Overdue",
+};
+
+/** How many items to show before deferring to the full list. */
+const MAX_ATTENTION_ROWS = 5;
+
+/** Coming up is context, not a queue. Four is enough to be useful. */
+const MAX_UPCOMING_ROWS = 4;
+
+/** "11 Aug", read as a UTC calendar date so the day never slips a timezone. */
+function shortDate(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", {
+    day: "numeric", month: "short", timeZone: "UTC",
+  });
+}
 
 export default function OverviewPage() {
   const {
-    stats, needsActionCount, reminders, reminderHistory, buckets,
-    latestActionMap, liveInvoices,
+    stats, reminders, reminderHistory, buckets,
+    liveInvoices, loading,
   } = useDashboard();
 
-  const invoiceName = (invoiceId: string) =>
-    liveInvoices.find((i) => i.id === invoiceId)?.customer_name ?? "Invoice";
+  // ── What needs attention ────────────────────────────────────────────────
+  //
+  // One item per invoice, chosen by precedence — see lib/overview-attention.ts.
+  // The three overlapping counts this replaced could describe a single invoice
+  // as two separate problems.
+  const needsDecisionIds = new Set(buckets.needs_action.map((i) => i.id));
+  const attention = buildAttentionItems({
+    invoices: liveInvoices,
+    pendingReminders: reminders,
+    reminderHistory,
+    needsDecisionInvoiceIds: needsDecisionIds,
+  });
+  const visibleAttention = attention.slice(0, MAX_ATTENTION_ROWS);
 
-  // ── Recent activity feed ────────────────────────────────────────────────
-  // Built entirely from existing data: invoices (added / paid), reminder
-  // logs (prepared / sent / dismissed / failed) and logged invoice actions.
-  interface ActivityItem {
-    key: string;
-    when: string;       // ISO timestamp for sorting/display
-    name: string;       // customer name
-    label: string;      // friendly wording
-    note?: string;
-    color: string;      // dot colour
-  }
+  // ── What is coming ──────────────────────────────────────────────────────
+  //
+  // Only ever the NEXT checkpoint per invoice, only when it is genuinely in
+  // the future, and only when the daily job's own preconditions are met — see
+  // lib/overview-upcoming.ts. An invoice already listed above appears here
+  // only for a later checkpoint, never for the same one.
+  const upcoming = buildUpcomingItems({
+    invoices: liveInvoices,
+    pendingReminders: reminders,
+    reminderHistory,
+  });
+  const visibleUpcoming = upcoming.slice(0, MAX_UPCOMING_ROWS);
 
-  const feed: ActivityItem[] = [];
-
-  for (const inv of liveInvoices) {
-    feed.push({
-      key: `inv-added-${inv.id}`, when: inv.created_at, name: inv.customer_name,
-      label: "Invoice added", color: "var(--dash-accent-strong)",
-    });
-    if (inv.status === "paid" && inv.paid_at) {
-      feed.push({
-        key: `inv-paid-${inv.id}`, when: inv.paid_at, name: inv.customer_name,
-        label: "Invoice marked paid — future reminders stopped", color: "var(--dash-green)",
-      });
-    }
-  }
-
-  for (const r of reminders) {
-    feed.push({
-      key: `rem-prep-${r.id}`, when: r.created_at, name: r.invoice?.customer_name ?? invoiceName(r.invoice_id),
-      label: "Email reminder prepared", color: "var(--dash-accent-strong)",
-    });
-  }
-
-  for (const r of reminderHistory) {
-    const name = r.invoice?.customer_name ?? invoiceName(r.invoice_id);
-    if (r.status === "sent") {
-      feed.push({ key: `rem-sent-${r.id}`, when: r.sent_at ?? r.created_at, name, label: "Email reminder sent", color: "var(--dash-green)" });
-    } else if (r.status === "dismissed") {
-      feed.push({ key: `rem-dis-${r.id}`, when: r.created_at, name, label: "Reminder dismissed", color: "var(--dash-text-soft)" });
-    } else if (r.status === "failed") {
-      feed.push({ key: `rem-fail-${r.id}`, when: r.created_at, name, label: "Reminder failed to send", color: "var(--dash-red)" });
-    }
-  }
-
-  for (const a of Object.values(latestActionMap)) {
-    if (a.action_type === "marked_paid") continue; // covered by the invoice paid entry
-    feed.push({
-      key: `act-${a.id}`, when: a.created_at, name: invoiceName(a.invoice_id),
-      label: actionTypeLabel(a.action_type), note: a.note ?? undefined,
-      color: actionTypeColor(a.action_type),
-    });
-  }
-
-  const recentActivity = feed
-    .sort((a, b) => new Date(b.when).getTime() - new Date(a.when).getTime())
-    .slice(0, 8);
-
-  const chasingCount = buckets.chasing.length;
-  const paidCount = buckets.paid.length;
-
-  // Quick navigation cards
-  const quickNav = [
-    { href: "/dashboard/chasing", ariaLabel: "View active chasing invoices", label: "Active Chasing", desc: `${chasingCount} ${chasingCount === 1 ? "invoice" : "invoices"} to chase`, accent: "var(--dash-accent)", soft: "var(--dash-accent-soft)",
-      icon: <path d="M13 10V3L4 14h7v7l9-11h-7z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /> },
-    { href: "/dashboard/needs-action", ariaLabel: "View invoices needing action", label: "Needs Action", desc: needsActionCount > 0 ? `${needsActionCount} need a decision` : "All clear", accent: "var(--dash-amber)", soft: "var(--dash-amber-soft)",
-      icon: <path d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /> },
-    { href: "/dashboard/paid", ariaLabel: "View paid invoices", label: "Paid Invoices", desc: `${paidCount} settled`, accent: "var(--dash-green)", soft: "var(--dash-green-soft)",
-      icon: <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /> },
-    { href: "/dashboard/settings", ariaLabel: "Open settings", label: "Settings", desc: "Business & reminders", accent: "var(--dash-text-muted)", soft: "var(--dash-card-muted)",
-      icon: <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-2.82 1.17V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 003.6 15H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9.4 1.65 1.65 0 004.27 7.6l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6h.09A1.65 1.65 0 0011 3.09V3a2 2 0 114 0v.09a1.65 1.65 0 002.51 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /> },
-  ];
-
-  // "What needs attention" priorities
-  const priorities: { text: string; href: string; tone: string }[] = [];
-  if (needsActionCount > 0) priorities.push({ text: `${needsActionCount} ${needsActionCount === 1 ? "invoice needs" : "invoices need"} a decision`, href: "/dashboard/needs-action", tone: "var(--dash-red)" });
-  if (reminders.length > 0) priorities.push({ text: `${reminders.length} ${reminders.length === 1 ? "reminder" : "reminders"} awaiting your approval`, href: "/dashboard/chasing", tone: "var(--dash-amber)" });
-  if (stats.overdueCount > 0) priorities.push({ text: `${stats.overdueCount} overdue ${stats.overdueCount === 1 ? "invoice" : "invoices"} to chase`, href: "/dashboard/chasing", tone: "var(--dash-amber)" });
+  // The ONE condition — see lib/overview-first-run.ts. Not "£0 unpaid", not
+  // "nothing overdue", not "no reminders yet": an account can be all of those
+  // and still be a working account that would be insulted by an activation
+  // screen.
+  const firstRun = isFirstRunOverview(liveInvoices);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
+      <Suspense fallback={null}>
+        <OnboardingHandoff />
+      </Suspense>
+
       <div>
         <h1 style={{ fontSize: "1.85rem", fontWeight: 700, color: "var(--dash-text)", letterSpacing: "-0.02em" }}>
           Overview
         </h1>
+        {/* "Here's what needs your attention today." sat directly above a
+            heading reading "Needs your attention", so the page introduced
+            itself with the name of one of its own sections. This wording
+            describes the whole page and leaves that heading its meaning. */}
         <p className="text-sm mt-1.5" style={{ color: "var(--dash-text-muted)" }}>
-          Here&apos;s what needs your attention today.
+          Your invoices and reminders at a glance.
         </p>
       </div>
 
-      <StatsCards
-        totalUnpaid={stats.totalUnpaid}
-        overdueCount={stats.overdueCount}
-        remindersScheduled={stats.remindersScheduled}
-        paidThisMonth={stats.paidThisMonth}
-        needsActionCount={needsActionCount}
-      />
+      {/* ── First run: zero invoices ─────────────────────────────────────
+          Everything below is a truthful report about nothing until an invoice
+          exists — four £0.00 cards, an empty attention list, a hidden Coming
+          up and an empty donut. Together they make a working product look
+          broken on the one screen where a new customer decides whether it is.
+          One activation card instead, and nothing invented to fill the space
+          the others left. */}
+      {!loading && firstRun ? (
+        <FirstInvoiceActivation />
+      ) : (
+        <>
+          <StatsCards
+            totalUnpaid={stats.totalUnpaid}
+            overdueCount={stats.overdueCount}
+            awaitingApproval={reminders.length}
+            paidThisMonth={stats.paidThisMonth}
+          />
 
-      {/* What needs attention */}
-      {priorities.length > 0 && (
-        <div className="dash-card p-5">
-          <p style={{ fontSize: "1.05rem", fontWeight: 650, color: "var(--dash-text)" }}>What needs attention</p>
-          <div className="mt-3.5 space-y-2.5">
-            {priorities.map((p, i) => (
-              <Link key={i} href={p.href} className="flex items-center gap-3 group">
-                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: p.tone }} />
-                <span className="text-sm group-hover:underline" style={{ color: "var(--dash-text)", fontWeight: 500 }}>{p.text}</span>
-                <svg className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity" width="16" height="16" fill="none" viewBox="0 0 24 24" style={{ color: "var(--dash-text-soft)" }}>
-                  <path d="M9 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Quick navigation cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {quickNav.map((q) => (
-          <Link key={q.href} href={q.href} aria-label={q.ariaLabel} className="dash-card p-5 transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0ea5c4] cursor-pointer" style={{ textDecoration: "none" }}>
-            <div className="w-10 h-10 rounded-lg flex items-center justify-center mb-3" style={{ background: q.soft, color: q.accent }}>
-              <svg width="20" height="20" fill="none" viewBox="0 0 24 24">{q.icon}</svg>
+          {/* ── Needs your attention — the core of the page ──────────────── */}
+          <section className="dash-card dash-section" aria-labelledby="attention-h">
+            <div className="flex items-center justify-between gap-3">
+              <h2 id="attention-h" style={{ fontSize: "1.05rem", fontWeight: 650, color: "var(--dash-text)" }}>
+                Needs your attention
+              </h2>
+              {attention.length > MAX_ATTENTION_ROWS && (
+                <Link href="/dashboard/chasing" className="text-sm" style={{ color: "var(--dash-accent-strong)", fontWeight: 600 }}>
+                  View all {attention.length} →
+                </Link>
+              )}
             </div>
-            <p style={{ fontSize: "0.95rem", fontWeight: 650, color: "var(--dash-text)" }}>{q.label}</p>
-            <p className="text-sm mt-0.5" style={{ color: "var(--dash-text-muted)" }}>{q.desc}</p>
-          </Link>
-        ))}
-      </div>
 
-      {/* Invoice status chart + recent activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <InvoiceStatusChart />
+            {visibleAttention.length === 0 ? (
+              /* Calm, not celebratory. Nothing to do is a normal state, not an
+                 achievement worth a fanfare. */
+              <div className="mt-3">
+                <p className="text-sm" style={{ color: "var(--dash-text)", fontWeight: 600 }}>
+                  You&apos;re all caught up
+                </p>
+                <p className="text-sm mt-1" style={{ color: "var(--dash-text-muted)" }}>
+                  No reminders need your attention right now.
+                </p>
+              </div>
+            ) : (
+              <ul className="dash-attn-list">
+                {visibleAttention.map((item) => {
+                  const tone = attentionTone(item.kind);
+                  return (
+                    <li key={item.invoiceId}>
+                      <Link
+                        href={item.href}
+                        className="dash-attn-row"
+                        style={{
+                          textDecoration: "none",
+                          // Drives the left rule and the tag text from one
+                          // place, so a tone can never be half-applied.
+                          ["--attn-tone" as string]: TONE_COLOUR[tone],
+                        }}
+                      >
+                        <span className="dash-attn-tag">{KIND_LABEL[item.kind]}</span>
 
-        <div className="dash-card p-6">
-          <div className="flex items-center justify-between mb-4">
-            <p style={{ fontSize: "1.05rem", fontWeight: 650, color: "var(--dash-text)" }}>Recent Activity</p>
-            {needsActionCount > 0 && (
-              <Link href="/dashboard/needs-action" className="text-sm" style={{ color: "var(--dash-accent-strong)", fontWeight: 600 }}>
-                View all →
-              </Link>
+                        <span className="dash-attn-body">
+                          {/* Customer first and largest — the row is about a
+                              person you are owed money by, not about a state. */}
+                          <span className="dash-attn-who">
+                            {item.customerName}
+                          </span>
+                          <span className="dash-attn-meta">
+                            {item.invoiceReference && <>{item.invoiceReference}{" · "}</>}
+                            <span className="dash-attn-amount">{formatCurrency(item.amount)}</span>
+                            {/* Live from due_date vs today, and omitted rather
+                                than faked when the invoice is not yet due. */}
+                            {item.urgencyLabel && <>{" · "}{item.urgencyLabel}</>}
+                            {" · "}{attentionDescription(item)}
+                          </span>
+                        </span>
+
+                        <span className="dash-attn-action">
+                          {item.actionLabel}
+                          <svg width="15" height="15" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M9 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
-          </div>
-          {recentActivity.length === 0 ? (
-            <p className="text-sm" style={{ color: "var(--dash-text-soft)" }}>
-              No activity logged yet. Actions you take on invoices will show up here.
-            </p>
-          ) : (
-            <div className="flex flex-col gap-3.5">
-              {recentActivity.map((item) => (
-                <div key={item.key} className="flex items-start gap-3">
-                  <span className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ background: item.color }} />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm" style={{ color: "var(--dash-text)" }}>
-                      <span style={{ fontWeight: 600 }}>{item.name}</span>
-                      {" — "}{item.label}
-                    </p>
-                    {item.note && <p className="text-sm mt-0.5" style={{ color: "var(--dash-text-muted)" }}>&ldquo;{item.note}&rdquo;</p>}
-                    <p className="text-xs mt-0.5" style={{ color: "var(--dash-text-soft)" }}>
-                      {new Date(item.when).toLocaleDateString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
+          </section>
+
+          {/* ── Coming up ────────────────────────────────────────────────────
+              Rendered ONLY when there is a real future checkpoint. There is no
+              empty state here by design: "No upcoming reminders" is a bordered
+              box that costs vertical space to tell the owner nothing. Absence
+              is the better answer. */}
+          {visibleUpcoming.length > 0 && (
+            <section className="dash-card dash-section" aria-labelledby="upcoming-h">
+              <h2 id="upcoming-h" style={{ fontSize: "1.05rem", fontWeight: 650, color: "var(--dash-text)" }}>
+                Coming up
+              </h2>
+
+              <ul className="dash-up-list">
+                {visibleUpcoming.map((item) => (
+                  <li key={`${item.invoiceId}-${item.schedule}`} className="dash-up-row">
+                    <span className="dash-up-date">
+                      <span className="dash-up-day">{shortDate(item.date)}</span>
+                      <span className="dash-up-rel">{upcomingRelative(item.daysAway)}</span>
+                    </span>
+                    <span className="dash-up-body">
+                      <span className="dash-up-who">
+                        {item.customerName}
+                        {item.invoiceReference && (
+                          <span style={{ color: "var(--dash-text-soft)", fontWeight: 400 }}>
+                            {" · "}{item.invoiceReference}
+                          </span>
+                        )}
+                      </span>
+                      <span className="dash-up-what">{item.description}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+
+              {upcoming.length > MAX_UPCOMING_ROWS && (
+                <p className="dash-up-more">
+                  and {upcoming.length - MAX_UPCOMING_ROWS} more after that
+                </p>
+              )}
+
+              {/* Said once, here, instead of on every row — and it is the
+                  whole point of the section. SMS and email, equally, are
+                  prepared for review. Nothing goes out on its own. */}
+              <p className="dash-up-note">
+                ServiceSignal prepares the SMS and email on the date shown and holds
+                them for your review. Nothing is sent without your approval.
+              </p>
+            </section>
           )}
-        </div>
-      </div>
+
+          {/* Full width now that Recent activity has gone. The donut is
+              unchanged in size — the extra width goes to the breakdown, which
+              becomes three columns at lg instead of three stacked rows. */}
+          <InvoiceStatusChart />
+        </>
+      )}
     </div>
   );
 }

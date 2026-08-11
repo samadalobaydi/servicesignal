@@ -4,7 +4,8 @@ import { useState } from "react";
 import type { ReminderLog, ReminderMode } from "@/types";
 import { formatCurrency, formatDate, SCHEDULE_LABELS } from "@/lib/invoices";
 import { getDueStatusLabel } from "@/lib/date-status";
-import { approveReminder, dismissReminder } from "@/lib/reminders";
+import { dismissReminder } from "@/lib/reminders";
+import Link from "next/link";
 
 interface ReminderQueueProps {
   reminders: ReminderLog[];
@@ -23,19 +24,12 @@ export default function ReminderQueue({ reminders, reminderMode, onChanged }: Re
 
   if (visibleReminders.length === 0) return null;
 
-  const handleApprove = async (id: string) => {
-    setBusyId(id);
-    setError(null);
-    const result = await approveReminder(id);
-    if (result.success) {
-      setHiddenIds((prev) => [...prev, id]); // hide immediately
-    } else {
-      setError(result.message);
-    }
-    setBusyId(null);
-    onChanged(); // parent refetches reminders + invoices to confirm state
-  };
-
+  // handleApprove() has been REMOVED. This queue previously called
+  // approveReminder() directly from a "Send Now" button, sending a real email
+  // without the owner ever seeing it. That was the second bypass alongside
+  // Active Chasing; sending now happens only on the review page.
+  //
+  // handleDismiss stays: discarding sends nothing.
   const handleDismiss = async (id: string) => {
     setBusyId(id);
     setError(null);
@@ -132,14 +126,14 @@ export default function ReminderQueue({ reminders, reminderMode, onChanged }: Re
                 >
                   Dismiss
                 </button>
-                <button
-                  onClick={() => handleApprove(r.id)}
-                  disabled={busy}
+                {/* Navigates; sends nothing. Safe in a new tab. */}
+                <Link
+                  href={`/dashboard/reminders/${r.id}/review`}
                   className="dash-btn"
-                  style={{ opacity: busy ? 0.5 : 1, padding: "0.5rem 0.9rem" }}
+                  style={{ padding: "0.5rem 0.9rem" }}
                 >
-                  {busy ? "..." : "Send Now"}
-                </button>
+                  Review reminder
+                </Link>
               </div>
             </div>
           );

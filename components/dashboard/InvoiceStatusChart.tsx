@@ -169,8 +169,18 @@ export default function InvoiceStatusChart() {
               </div>
             </div>
 
-            {/* Breakdown beside the donut */}
-            <div className="w-full space-y-3.5 min-w-0">
+            {/* Breakdown beside the donut.
+                The card became full-width when Recent activity was removed
+                from the Overview. The donut is deliberately NOT scaled up —
+                a 400px donut says nothing a 190px one does not. The width
+                goes to the breakdown instead, which splits into three columns
+                at xl so Paid / Overdue / Active read as three stat blocks
+                rather than three very wide, very empty rows.
+                xl and not lg deliberately: at a 1024 viewport the sidebar
+                leaves roughly 476px for the breakdown, and three columns of
+                ~158px would crush "1 invoice · 100%" against the amount. The
+                split only pays for itself once each column clears ~250px. */}
+            <div className="w-full min-w-0 grid grid-cols-1 xl:grid-cols-3 gap-3.5 xl:gap-7">
               {rows.map((r) => (
                 <div key={r.label} className="flex items-center gap-2.5">
                   <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: r.color }} />

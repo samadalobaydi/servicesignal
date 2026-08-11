@@ -1,10 +1,11 @@
 import "server-only";
 import { render } from "@react-email/render";
 import { getResendClient, SUPPORT_FROM, SUPPORT_ADDRESS } from "@/lib/resend";
+import { requireAppBaseUrl } from "@/lib/app-urls";
 import { BetaAccessEmail, betaAccessEmailText } from "@/emails/templates/BetaAccessEmail";
 
 /**
- * Sends the founding-beta access email.
+ * Sends the founding-beta VERIFICATION email — the only email in this journey.
  *
  * Deliberately returns a boolean rather than throwing: saving the signup and
  * sending the email are SEPARATE OUTCOMES. The lead is already in the
@@ -19,8 +20,26 @@ import { BetaAccessEmail, betaAccessEmailText } from "@/emails/templates/BetaAcc
 export async function sendBetaAccessEmail(params: {
   to: string;
   firstName: string;
+  /** The raw, single-use verification token. Never logged, never stored. */
+  token: string;
 }): Promise<boolean> {
-  const { to, firstName } = params;
+  const { to, firstName, token } = params;
+
+  // FAILS CLOSED. Without an explicitly configured origin this email is not
+  // sent at all, rather than sent with a link into the wrong environment.
+  // The signup row is already saved by the caller, so suppressing here loses
+  // no lead — it only means the applicant is contacted once the environment
+  // is configured correctly.
+  const baseUrl = requireAppBaseUrl();
+  if (!baseUrl) {
+    console.error(
+      `[beta-access] Verification email NOT sent to ${to}: NEXT_PUBLIC_APP_URL ` +
+        "is missing or malformed. The signup is saved; re-send once configured."
+    );
+    return false;
+  }
+
+  const verifyUrl = `${baseUrl}/api/beta/verify?token=${encodeURIComponent(token)}`;
 
   const resend = getResendClient();
   if (!resend) {
@@ -31,15 +50,15 @@ export async function sendBetaAccessEmail(params: {
   }
 
   try {
-    const element = BetaAccessEmail({ firstName });
+    const element = BetaAccessEmail({ firstName, verifyUrl });
     const html = await render(element);
-    const text = betaAccessEmailText(firstName);
+    const text = betaAccessEmailText(firstName, verifyUrl);
 
     const { data, error } = await resend.emails.send({
       from: SUPPORT_FROM,
       to,
       replyTo: SUPPORT_ADDRESS,
-      subject: "Your ServiceSignal founding beta access",
+      subject: "Verify your email to join the ServiceSignal founding beta",
       html,
       text,
     });

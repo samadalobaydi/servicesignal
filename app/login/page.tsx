@@ -55,7 +55,13 @@ function LoginForm() {
               secondary route beneath it. */}
           <p className={splitStyles.footerPrimary}>
             New to ServiceSignal?{" "}
-            <Link href={next !== "/dashboard" ? `/signup?next=${encodeURIComponent(next)}` : "/signup"} style={{ color: BRAND_BLUE, fontWeight: 600 }}>Create an account</Link>
+            {/* Points at the founding-beta form, not /signup. During the beta an
+                account can only be created through a verified invitation, so
+                sending someone to /signup would land them on the "access
+                required" state — a dead end dressed as a call to action.
+                The ?next= forwarding is gone with it: it only ever mattered
+                for a public signup path, which does not exist right now. */}
+            <Link href="/v2#access" style={{ color: BRAND_BLUE, fontWeight: 600 }}>Join the founding beta</Link>
           </p>
           {/* REVIEW BRANCH: points at the /v2 preview. Change back to "/" when v2 becomes the root landing page. */}
           <Link href="/v2" className={splitStyles.footerSecondary}>← Back to landing page</Link>

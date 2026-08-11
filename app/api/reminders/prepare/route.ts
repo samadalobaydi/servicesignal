@@ -3,6 +3,9 @@ import { getSupabaseServer } from "@/lib/supabase-server";
 import { prepareEligibility } from "@/lib/reminder-schedule";
 import type { Invoice } from "@/types";
 import { formatDate } from "@/lib/invoices";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { persistGeneratedContent } from "@/lib/reminder-channel-store";
+import { resolveBusinessName } from "@/lib/reminder-approval";
 
 /**
  * POST /api/reminders/prepare
@@ -48,6 +51,9 @@ export async function POST(request: NextRequest) {
     .from("invoices")
     .select("*")
     .eq("id", body.invoice_id)
+    // An archived invoice is not found for the purposes of preparing a
+    // reminder — the same answer as an invoice that is not yours.
+    .is("archived_at", null)
     .single();
 
   if (invoiceError || !invoiceRow) {
@@ -216,6 +222,52 @@ export async function POST(request: NextRequest) {
       { success: false, message: "Failed to prepare reminder." },
       { status: 500 }
     );
+  }
+
+  // ── Persist the generated originals for BOTH channels ────────────────
+  //
+  // This is what makes the reminder editable and what makes the send path able
+  // to use the owner's version. It happens ONCE, here, at preparation.
+  //
+  // Deliberately non-fatal. The reminder row already exists and is already in
+  // the approval queue; a content-write failure (most likely: migration 010 not
+  // applied yet) must not fail the request or lose the reminder. Such a
+  // reminder simply behaves as a legacy one — composed live, not editable —
+  // which is exactly the documented fallback.
+  //
+  // Written with the service-role client because reminder_channel_messages
+  // grants no INSERT to the user role: channel content is created only by
+  // trusted server code preparing a reminder, never by a browser.
+  if (inserted?.id) {
+    const admin = getSupabaseAdmin();
+    if (admin) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("business_name")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      await persistGeneratedContent(admin, {
+        reminderLogId: inserted.id,
+        userId: user.id,
+        facts: {
+          tone: invoice.reminder_tone,
+          schedule,
+          customerName: invoice.customer_name,
+          businessName: resolveBusinessName(profile?.business_name, user.email ?? null),
+          amount: invoice.amount,
+          dueDate: invoice.due_date,
+          paymentLink: invoice.payment_link,
+          invoiceReference: invoice.invoice_reference,
+          jobDescription: invoice.job_description,
+        },
+      });
+    } else {
+      console.error(
+        "[prepare] Admin client unavailable — reminder prepared without stored " +
+          "channel content. It will fall back to live composition."
+      );
+    }
   }
 
   return NextResponse.json({

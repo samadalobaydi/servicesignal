@@ -10,6 +10,7 @@ import {
   insertInvoice,
   markInvoicePaid,
   deleteInvoice,
+  archiveInvoice,
 } from "@/lib/invoices";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { fetchProfile } from "@/lib/profile";
@@ -73,6 +74,7 @@ interface DashboardContextValue {
   handleAddInvoice: (data: InvoiceFormData) => Promise<void>;
   handleMarkPaid: (id: string) => Promise<void>;
   handleDeleteInvoice: (id: string) => Promise<boolean>;
+  handleArchiveInvoice: (id: string) => Promise<boolean>;
   handlePrepareReminder: (invoiceId: string) => Promise<{ success: boolean; message: string }>;
   setProfile: (p: Profile) => void;
 }
@@ -166,8 +168,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       payment_link:       data.payment_link.trim(),
       reminder_tone:      data.reminder_tone,
       reminder_schedules: data.reminder_schedules,
-      status:             "unpaid",
-      reminders_sent:     [],
+      // status and reminders_sent are NOT sent. Production defaults them to
+      // 'unpaid' and an empty text[] (verified on main — PRODUCTION), and after
+      // migration 013 `authenticated` holds no INSERT privilege on either
+      // column, so naming them here would fail outright.
     });
     if (inserted) {
       setInvoices((prev) => refreshStatuses([inserted, ...prev]));
@@ -194,15 +198,36 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  /**
+   * Deletion now goes through the lifecycle API, which can refuse. The refusal
+   * is surfaced verbatim — an invoice with sent history must be ARCHIVED, and
+   * telling the owner "failed, try again" would be both wrong and unhelpful.
+   */
   const handleDeleteInvoice = useCallback(async (id: string): Promise<boolean> => {
-    const supabase = getSupabaseBrowser();
-    const ok = await deleteInvoice(supabase, id);
-    if (ok) {
+    const result = await deleteInvoice(getSupabaseBrowser(), id);
+    if (result.success) {
       setInvoices((prev) => refreshStatuses(prev.filter((inv) => inv.id !== id)));
     } else {
-      setError("Failed to delete invoice. Please try again.");
+      setError(result.message);
     }
-    return ok;
+    return result.success;
+  }, []);
+
+  /**
+   * Archive preserves everything and removes the invoice from the workflow.
+   * Dropping it from local state is correct because fetchInvoices() excludes
+   * archived rows — the browser never holds them.
+   */
+  const handleArchiveInvoice = useCallback(async (id: string): Promise<boolean> => {
+    const result = await archiveInvoice(id);
+    if (result.success) {
+      setInvoices((prev) => refreshStatuses(prev.filter((inv) => inv.id !== id)));
+      setReminders((prev) => prev.filter((r) => r.invoice_id !== id));
+      setNotice("Invoice archived. Its reminder history has been kept.");
+    } else {
+      setError(result.message);
+    }
+    return result.success;
   }, []);
 
   const handlePrepareReminder = useCallback(async (invoiceId: string) => {
@@ -249,7 +274,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     pendingReminderInvoiceIds, userEmail, loading, error, setError, notice, setNotice,
     stats, needsActionCount, buckets,
     refreshAll, refetchAfterReminderAction, handleAddInvoice, handleMarkPaid,
-    handleDeleteInvoice, handlePrepareReminder, setProfile,
+    handleDeleteInvoice, handleArchiveInvoice, handlePrepareReminder, setProfile,
   };
 
   return <DashboardContext.Provider value={value}>{children}</DashboardContext.Provider>;

@@ -3,6 +3,8 @@ import { getServerSupabase } from "@/lib/supabase";
 import type { BetaSignupFormData, ApiResponse } from "@/types";
 import { checkSignupRateLimit, clientIpFrom } from "@/lib/signup-rate-limit";
 import { sendBetaAccessEmail, firstNameFrom } from "@/lib/beta-access-email";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { issueVerification } from "@/lib/beta-verification";
 import {
   ALLOWED_BUSINESS_TYPES,
   ALLOWED_UNPAID_RANGES,
@@ -191,10 +193,33 @@ export async function POST(request: NextRequest) {
         `send access email manually to: ${data.email.trim().toLowerCase()}`
     );
   } else {
-    emailSent = await sendBetaAccessEmail({
-      to: data.email.trim().toLowerCase(),
-      firstName: firstNameFrom(data.name),
-    });
+    // Issue the single-use verification token, then mail it. The raw token
+    // exists only in this scope and in the link; only its SHA-256 is stored.
+    //
+    // Issuing needs the service-role client because beta_verifications has RLS
+    // enabled with no policies — nothing but trusted server code can touch it.
+    const admin = getSupabaseAdmin();
+    const issued = admin
+      ? await issueVerification(admin, {
+          email: data.email.trim().toLowerCase(),
+          businessName: data.business_name.trim(),
+        })
+      : null;
+
+    if (!issued) {
+      console.error(
+        "[signup] Verification token could NOT be issued. Signup WAS saved. " +
+          "Check SUPABASE_SERVICE_ROLE_KEY and that " +
+          "supabase/sql/006_beta_verifications.sql has been applied. " +
+          `No email sent to: ${data.email.trim().toLowerCase()}`
+      );
+    } else {
+      emailSent = await sendBetaAccessEmail({
+        to: data.email.trim().toLowerCase(),
+        firstName: firstNameFrom(data.name),
+        token: issued.token,
+      });
+    }
 
     if (!emailSent) {
       console.error(

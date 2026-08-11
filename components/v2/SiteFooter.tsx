@@ -25,8 +25,8 @@ export default function SiteFooter() {
             </span>
           </span>
           <p className="v2-foot-line">
-            ServiceSignal helps UK trades follow up overdue invoices with
-            professional email reminders they approve before sending.
+            ServiceSignal helps UK trades prepare professional invoice reminders
+            they review before sending.
           </p>
         </div>
 

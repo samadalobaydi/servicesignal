@@ -24,7 +24,7 @@ const STAGES = [
   {
     n: "2",
     title: "Review the prepared reminder",
-    line: "ServiceSignal prepares the email and holds it until you decide it is ready.",
+    line: "ServiceSignal writes the reminder and holds it until you decide it is ready.",
   },
   {
     n: "3",
@@ -63,7 +63,7 @@ export default function FitsProcessSection() {
                   <span className="v2-fit-ref">{DEMO.reference} · {DEMO.amount}</span>
                   <span className="v2-chip c-ready">Ready for review</span>
                 </div>
-                <span className="v2-fit-act">Review email</span>
+                <span className="v2-fit-act">Review reminder</span>
               </div>
             </div>
 

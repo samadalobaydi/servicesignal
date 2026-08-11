@@ -46,9 +46,15 @@ export default function CustomerMessageSection() {
           <h2 id="pfu-heading" className="v2-pfu-heading">
             A reminder you&rsquo;d be comfortable putting your name on.
           </h2>
+          {/* Names the channel explicitly. The section demonstrates the EMAIL
+              reminder — the richer of the two channels ServiceSignal is being
+              built around — and saying so stops the page reading as though
+              email were the whole product. It deliberately stops short of
+              implying an SMS channel exists yet, because it does not. */}
           <p className="v2-pfu-sub">
-            Clear about what&rsquo;s owed, polite in tone and unmistakably connected
-            to your business.
+            This is the email reminder your customer receives: clear about
+            what&rsquo;s owed, polite in tone and unmistakably connected to your
+            business.
           </p>
 
           <ul className="v2-pfu-points">

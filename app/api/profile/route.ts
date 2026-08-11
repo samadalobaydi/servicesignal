@@ -174,6 +174,31 @@ export async function GET() {
     }
   }
 
+  // ── First-run onboarding ────────────────────────────────────────────────
+  // Marked in a separate best-effort update for exactly the reason the terms
+  // columns are, above: this row is created for every new account, and it must
+  // not start failing because supabase/sql/005_onboarding_status.sql has not
+  // been run yet.
+  //
+  // The column's DEFAULT is already 'required', so this update is redundant
+  // once 005 has run — it is here so the value is explicit at the one place
+  // that decides a profile is brand new, rather than depending on a default
+  // that a later migration could change. A failure means 005 is not applied,
+  // in which case the gate reads 'exempt' and onboarding stays dormant, which
+  // is the correct behaviour for an unreleased feature.
+  const { error: onboardingError } = await supabase
+    .from("profiles")
+    .update({ onboarding_status: "required" })
+    .eq("user_id", user.id);
+
+  if (onboardingError) {
+    console.error(
+      `[api/profile] Onboarding status was NOT set for user ${user.id} ` +
+      `(profile creation still succeeded): ${onboardingError.message}. ` +
+      `If this mentions an unknown column, run supabase/sql/005_onboarding_status.sql.`
+    );
+  }
+
   try {
     await sendWelcomeEmailIfNeeded(user.id, user.email, created.business_name);
   } catch (err) {
@@ -183,7 +208,10 @@ export async function GET() {
     );
   }
 
-  return NextResponse.json({ success: true, profile: created });
+  return NextResponse.json({
+    success: true,
+    profile: onboardingError ? created : { ...created, onboarding_status: "required" },
+  });
 }
 
 /**
@@ -212,6 +240,29 @@ export async function PUT(request: NextRequest) {
   }
 
   const update: ProfileUpdate = {};
+
+  // ── Default payment link (migration 008) ────────────────────────────────
+  //
+  // Explicit null clears it; a string must be a plausible https URL. Validated
+  // server-side because this value is placed into a customer-facing email, so
+  // "whatever the client sent" is not good enough. http is rejected: a payment
+  // page served without TLS is not something to put in front of a customer.
+  if (body.default_payment_link !== undefined) {
+    if (body.default_payment_link === null || body.default_payment_link === "") {
+      update.default_payment_link = null;
+    } else if (
+      typeof body.default_payment_link === "string" &&
+      body.default_payment_link.trim().startsWith("https://") &&
+      body.default_payment_link.trim().length <= 500
+    ) {
+      update.default_payment_link = body.default_payment_link.trim();
+    } else {
+      return NextResponse.json(
+        { success: false, message: "Enter a valid payment link starting with https://" },
+        { status: 400 }
+      );
+    }
+  }
 
   if (typeof body.business_name === "string") {
     update.business_name = body.business_name.trim().slice(0, 100);

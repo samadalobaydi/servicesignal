@@ -5,14 +5,24 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { AuthShell, AuthHeading, AuthError, PasswordInput, SubmitButton, BRAND_BLUE } from "@/components/auth/AuthShell";
+import {
+  PASSWORD_RULES,
+  isPasswordAcceptable,
+  firstPasswordError,
+} from "@/lib/password-policy";
 
-const RULES: { id: string; label: string; test: (p: string) => boolean }[] = [
-  { id: "len",     label: "Minimum 8 characters", test: (p) => p.length >= 8 },
-  { id: "upper",   label: "Uppercase letter",     test: (p) => /[A-Z]/.test(p) },
-  { id: "lower",   label: "Lowercase letter",     test: (p) => /[a-z]/.test(p) },
-  { id: "number",  label: "Number",               test: (p) => /[0-9]/.test(p) },
-  { id: "special", label: "Special character",    test: (p) => /[^A-Za-z0-9]/.test(p) },
-];
+/**
+ * THE RULES COME FROM lib/password-policy.ts — the same module /signup and
+ * POST /api/beta/account use.
+ *
+ * This page previously carried its own private five-rule list (8 characters,
+ * upper, lower, number, special). That was a second source of truth, and it had
+ * already drifted from the signup policy in both directions: it demanded a
+ * lowercase letter signup did not, while allowing a shorter password than
+ * signup now does. The practical consequence was the one thing a password reset
+ * must never allow — a user could create a strong password and then reset it to
+ * a weaker one.
+ */
 
 function ResetPasswordForm() {
   const searchParams = useSearchParams();
@@ -24,14 +34,16 @@ function ResetPasswordForm() {
   const [error, setError]       = useState<string | null>(callbackError);
   const [done, setDone]         = useState(false);
 
-  const allRulesPass = RULES.every((r) => r.test(password));
+  const allRulesPass = isPasswordAcceptable(password);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
     if (!allRulesPass) {
-      setError("Please choose a stronger password — all requirements must be met.");
+      // The specific unmet rule, from the shared module, so this page says the
+      // same thing the server would.
+      setError(firstPasswordError(password) ?? "Please choose a stronger password.");
       return;
     }
     if (password !== confirm) {
@@ -100,7 +112,7 @@ function ResetPasswordForm() {
 
         {password.length > 0 && (
           <ul className="rounded-lg p-3.5 space-y-1" style={{ background: "#f8fafc", border: "1px solid #e5e7eb" }} aria-label="Password requirements">
-            {RULES.map((r) => {
+            {PASSWORD_RULES.map((r) => {
               const ok = r.test(password);
               return (
                 <li key={r.id} className="flex items-center gap-2 text-xs" style={{ color: ok ? "#059669" : "#64748b" }}>

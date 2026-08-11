@@ -389,3 +389,247 @@
     transition: none;
   }
 }
+
+/* ── Signup aside: how ServiceSignal works ────────────────────────────────
+   Replaces the three reassurance bullets. A numbered list semantically (it is
+   a sequence), styled as a connected vertical journey.
+
+   The connector is an absolutely-positioned 1px line between icon centres
+   rather than a border on the item, so it cannot add height, cannot push the
+   last step's spacing out, and cannot overflow at any width — which is what
+   made a border-based version misbehave on narrow screens. */
+.journey {
+  margin: 1.9rem 0 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 1.15rem;
+}
+.journeyStep {
+  position: relative;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 0.75rem;
+}
+.journeyIcon {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: rgba(122, 162, 245, 0.16);
+  border: 1px solid rgba(122, 162, 245, 0.28);
+  color: #9dbcff;
+}
+.journeyText {
+  padding-top: 0.34rem;
+  font-size: 0.85rem;
+  font-weight: 550;
+  line-height: 1.45;
+  color: #e2e8f0;
+  max-width: 34ch;
+}
+/* Runs from just below one icon to the top of the next. `gap` is 1.15rem and
+   the icon is 30px, so this spans exactly the space between them. */
+.journeyConnector {
+  position: absolute;
+  left: 15px;
+  top: 30px;
+  width: 1px;
+  height: calc(1.15rem + 1px);
+  background: rgba(122, 162, 245, 0.26);
+}
+
+/* The queue sits closer beneath the journey than it did beneath the bullets:
+   the journey ends on a payment step, and the example queue is the evidence
+   for it. */
+.card {
+  margin-top: 1.75rem;
+}
+
+/* ── Signup aside: closing summary ────────────────────────────────────────
+ *
+ * Sits beneath the queue and answers the four things someone hesitates over at
+ * the moment of signing up. Deliberately the quietest block on the panel: no
+ * border, no background, no card — just hairline rules and text, so it reads
+ * as a summary rather than as a third panel competing with the journey and the
+ * queue above it.
+ *
+ * Two columns from 1024px up. `.asideInner` is capped at 400px there (420px at
+ * 1280px), so each cell is roughly 185px — which is why the body lines are
+ * written short. Below 1024px it becomes a single column, where the panel is
+ * stacked under the form and horizontal space is not the constraint.
+ */
+.assure {
+  margin-top: 1.9rem;
+  padding-top: 1.6rem;
+  border-top: 1px solid rgba(148, 176, 226, 0.16);
+}
+.assureList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 1.25rem 1.5rem;
+}
+@media (min-width: 1024px) {
+  .assureList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    /* `start` so the two rows align on their accent rules whatever the copy
+       length does — without it a short cell would stretch and float its rule
+       away from its neighbour's. */
+    align-items: start;
+  }
+}
+
+/* The same accent device the landing page uses for its outcome columns, at a
+   smaller scale. Carries no meaning on its own, so it is hidden from assistive
+   technology. */
+.assureRule {
+  display: block;
+  width: 20px;
+  height: 2px;
+  border-radius: 999px;
+  background: #7aa2f5;
+  margin-bottom: 0.6rem;
+}
+.assureT {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  color: #ffffff;
+  /* The pill sits inline with the last word and wraps beneath it in a narrow
+     cell rather than forcing the heading wider. */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+.assureL {
+  margin: 0.3rem 0 0 0;
+  font-size: 0.785rem;
+  line-height: 1.5;
+  color: #a8b6cc;
+}
+
+/* COMING SOON.
+   Text, not a colour or an icon, so it is announced verbatim and understood
+   without sight. Deliberately shaped like a label and not like a control: no
+   pointer cursor, no hover, no focus ring, no toggle. */
+.soon {
+  flex: 0 0 auto;
+  padding: 0.12rem 0.42rem;
+  border-radius: 4px;
+  background: rgba(122, 162, 245, 0.15);
+  border: 1px solid rgba(122, 162, 245, 0.3);
+  color: #9dbcff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.closing {
+  margin: 1.6rem 0 0 0;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: #93a3bd;
+  max-width: 40ch;
+}
+
+@media (max-width: 480px) {
+  .assure {
+    margin-top: 1.6rem;
+    padding-top: 1.4rem;
+  }
+  .assureList {
+    gap: 1.1rem;
+  }
+  .closing {
+    margin-top: 1.35rem;
+  }
+}
+
+/* ── Note 43: the empty navy block above the signup panel ─────────────────
+ *
+ * THE CAUSE, and it is two rules working together rather than one.
+ *
+ *   1. `.aside` sets `justify-content: center` from 1024px up, so its content
+ *      is centred in whatever height the column ends up with.
+ *   2. `.root` is a grid with `min-height: 100vh`, so BOTH columns are as tall
+ *      as the TALLER one. The signup form — lockup, heading, four fields, the
+ *      requirements block, consent and footer — is taller than a laptop
+ *      viewport, so the row grows past 100vh.
+ *
+ * The panel's much shorter content was therefore centred inside a row sized by
+ * the form, which is what pushed the heading down and left a large empty navy
+ * area above it. Centring in a 100vh column would have been nearly harmless;
+ * centring in a column sized by a taller sibling is what produced the gap.
+ *
+ * THE FIX is to stop centring — not to pull the content up with a negative
+ * margin, which would leave the real rule in place and break again the moment
+ * the form's height changed.
+ *
+ * `asideTop` is applied ONLY by SignupAside. /login shares this stylesheet and
+ * its panel is not in scope, so its centring is untouched.
+ *
+ * The padding-top is calculated, not guessed: the form column has 3rem of top
+ * padding, then the lockup (34px tall) and its 1.1rem bottom margin, before
+ * "Create your account" begins. Matching that sum starts the panel heading at
+ * the same height as the form heading.
+ */
+@media (min-width: 1024px) {
+  .asideTop {
+    justify-content: flex-start;
+    padding-top: calc(3rem + 34px + 1.1rem);
+  }
+  /* The journey is the panel's substance and the queue is its evidence, so
+     they belong closer together than the heading block is to either. Pulling
+     the card up also keeps it inside a 900px-tall viewport without scrolling
+     once the panel is no longer centred. */
+  .asideTop .card {
+    margin-top: 1.5rem;
+  }
+}
+
+/* At 1280px+ the lockup is unchanged, so the same calculation still holds and
+   only the horizontal padding differs — inherited from the block above. */
+
+@media (max-width: 1023px) {
+  /* Stacked under the form. Keeps the same vertical rhythm — the journey is
+     still a sequence, just narrower. */
+  .journeyText {
+    max-width: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .journey {
+    gap: 1rem;
+  }
+  .journeyStep {
+    grid-template-columns: 26px minmax(0, 1fr);
+    column-gap: 0.65rem;
+  }
+  .journeyIcon {
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+  }
+  .journeyConnector {
+    left: 13px;
+    top: 26px;
+    height: calc(1rem + 1px);
+  }
+  .journeyText {
+    font-size: 0.82rem;
+    padding-top: 0.2rem;
+  }
+}

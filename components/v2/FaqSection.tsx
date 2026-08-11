@@ -10,33 +10,47 @@
  * default. All questions start closed.
  *
  * Product truth. Every answer is limited to what the code actually does:
- * approval-only sending, email as the single channel, ServiceSignal as the
- * sender with the business named in the message, no payment processing, no
- * payment detection, no accounting integration. No answer mentions SMS,
- * WhatsApp, tracking, delivery, opens, clicks, monitored replies, launch
- * dates or pricing.
+ * approval-only sending, ServiceSignal as the sending service with the
+ * business named inside the message, Reply-To pointed at the account email,
+ * no payment processing, no payment detection, no accounting integration.
+ * No answer claims delivery, open, read or click tracking, a monitored reply
+ * inbox, a launch date or pricing.
+ *
+ * ON THE CHANNEL QUESTION. SMS is the intended primary channel and is NOT
+ * implemented: there is no SMS transport anywhere in the codebase, and
+ * invoices.customer_phone is stored and displayed but never messaged. The
+ * answer below therefore uses the future-tense, staged-rollout wording and
+ * states plainly which channel works today. Present-tense SMS availability
+ * must not appear here until a send path exists.
  */
 
 const FAQS = [
   {
+    // First deliberately: "how does it actually reach my customer" is the
+    // question a trade asks before any other, and getting it wrong by omission
+    // would be the page's biggest credibility risk.
+    q: "Will reminders be sent by SMS or email?",
+    a: "ServiceSignal is being built around SMS-first reminders, with email for more detailed follow-up. Channels are being introduced in stages during the founding beta, and email reminders are what you can send today. Either way, you review and approve every reminder before anything is sent.",
+  },
+  {
     q: "Does ServiceSignal send reminders automatically?",
-    a: "No. ServiceSignal prepares each email reminder and holds it for you. Nothing sends until you review and approve it.",
+    a: "No. ServiceSignal prepares the reminder and holds it. Nothing is sent until you have read it and approved it yourself.",
   },
   {
     q: "Will my customer know who the reminder is from?",
-    a: "Yes. The email is sent by ServiceSignal, while your business name appears in the subject, message and sign-off. Replies go to the email address connected to your ServiceSignal account.",
+    a: "Yes. Your business name appears in the subject, the message and the sign-off, and ServiceSignal is named as the sending service. It does not go out from your own mailbox — but replies come back to the email address connected to your ServiceSignal account.",
   },
   {
     q: "What happens when my customer pays?",
-    a: "You mark the invoice as paid and any remaining reminders stop. ServiceSignal does not process payments, hold your money or monitor your bank account.",
+    a: "Your customer pays you directly, through whatever payment method you already use. ServiceSignal does not process or detect the payment — you mark the invoice as paid, and any remaining reminders stop.",
   },
   {
     q: "Do I need to connect accounting software?",
-    a: "No. You add the customer, invoice amount and due date directly. ServiceSignal is not accounting software — it focuses on following up overdue invoices.",
+    a: "No. You enter the customer, invoice amount and due date directly. ServiceSignal is not accounting software — it does one thing, which is following up overdue invoices.",
   },
   {
     q: "Do I need to add a payment link?",
-    a: "No. You can send a reminder without one. When you add a payment link, the email can include a Pay Now button pointing to your chosen payment page. ServiceSignal never handles the payment.",
+    a: "No — a payment link is optional. When you add one, the reminder can include a Pay Now button pointing to your chosen payment page. ServiceSignal never handles the payment.",
   },
 ];
 
@@ -49,7 +63,8 @@ export default function FaqSection() {
             Straight answers before you join.
           </h2>
           <p className="v2-faq-sub">
-            Approval, payments, setup and what ServiceSignal deliberately does not do.
+            Channels, approval, payments, setup and what ServiceSignal
+            deliberately does not do.
           </p>
         </div>
 

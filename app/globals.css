@@ -1350,9 +1350,15 @@ body {
   background: var(--v2-green-soft); color: var(--v2-green);
   font-weight: 700; font-size: 1.05rem;
 }
+/* "Check your inbox" is the heading of this state, so it is given the weight
+   of one. Previously it inherited 400 and sat at 0.95rem, which left it no
+   stronger than the sentence beneath it — and once the destination address is
+   emphasised below, an unweighted heading would be the smaller signal on the
+   card. Hierarchy now reads heading → address → supporting detail. */
 .v2-beta-done-t {
   margin: 0.85rem auto 0; max-width: 34ch;
-  font-size: 0.95rem; line-height: 1.6; color: var(--v2-ink);
+  font-size: 1.02rem; font-weight: 650; letter-spacing: -0.01em;
+  line-height: 1.5; color: var(--v2-ink);
 }
 
 /* ── Tour step 3: the reminder email, compact inside the modal ── */
@@ -1607,16 +1613,41 @@ html { scroll-behavior: smooth; }
   font-weight: 700; line-height: 1.2; letter-spacing: -0.02em;
   color: var(--v2-ink); max-width: 24ch;
 }
-.v2-out-list { margin-top: 2rem; display: grid; gap: 1.75rem; }
+
+/* Tightened from 2rem/2.5rem. The band was reading as three items adrift
+   below a heading; pulling the row up and the columns together makes it read
+   as one group without making the section cramped. `align-items: start` keeps
+   the three accent rules on a single line whatever the copy length does. */
+.v2-out-list { margin-top: 1.6rem; display: grid; gap: 1.5rem; }
 @media (min-width: 760px) {
-  .v2-out-list { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2.5rem; }
+  .v2-out-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 2.25rem;
+    align-items: start;
+    margin-top: 1.9rem;
+  }
 }
+
+/* Slightly stronger: 28×3 rather than 22×2, and fully rounded. Enough to
+   register as a deliberate accent at 1440px without becoming a graphic. */
 .v2-out-marker {
-  display: block; width: 22px; height: 2px; border-radius: 2px;
-  background: var(--v2-blue); margin-bottom: 0.8rem;
+  display: block; width: 28px; height: 3px; border-radius: 999px;
+  background: var(--v2-blue); margin-bottom: 0.85rem;
 }
-.v2-out-t { font-weight: 650; font-size: 0.98rem; color: var(--v2-ink); line-height: 1.35; }
-.v2-out-l { margin-top: 0.35rem; color: var(--v2-muted); font-size: 0.89rem; line-height: 1.6; max-width: 34ch; }
+.v2-out-t {
+  font-weight: 650; font-size: 1rem; letter-spacing: -0.01em;
+  color: var(--v2-ink); line-height: 1.3;
+}
+/* No measure cap in the single-column layout: at 390px a 32ch cap would leave
+   roughly a third of the line box empty and make the band look unfinished.
+   The cap exists to balance the three columns, so it belongs with them. */
+.v2-out-l { margin-top: 0.4rem; color: var(--v2-muted); font-size: 0.89rem; line-height: 1.6; }
+@media (min-width: 760px) {
+  /* 34ch let the middle column run a line longer than its neighbours at
+     1440px; 32ch balances the three and still wraps "overdue-invoice"
+     cleanly at 1024px. */
+  .v2-out-l { max-width: 32ch; }
+}
 
 /* ══════════════════════════════════════════════════════════════════
    Section 5 — FAQ. Split: framing left, one accordion surface right.
@@ -1833,6 +1864,52 @@ html { scroll-behavior: smooth; }
 /* Confirmation supporting line + inline link (beta access states). */
 .v2-beta-done-s { margin-top: 0.55rem; color: var(--v2-muted); font-size: 0.86rem; line-height: 1.6; }
 
+/* The destination address inside the confirmation.
+   Lifted out of the muted body colour and given a touch more weight so it
+   reads as the thing to CHECK, but deliberately not bolder or larger than the
+   "Check your inbox" heading above it.
+   `anywhere` rather than `break-word`: a long unbroken local part (no spaces,
+   no hyphens) has no break opportunity, so only `anywhere` will actually stop
+   it widening the card on a 390px screen. */
+.v2-beta-done-email {
+  color: var(--v2-ink);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Typo recovery. Quiet by design — the primary path is the inbox, and this
+   must be findable without competing with it. A real <button>: it performs a
+   client-side state change, not a navigation, so it must not be an anchor. */
+.v2-beta-done-alt {
+  display: inline-block;
+  margin-top: 1.15rem;
+  padding: 0.35rem 0.15rem;
+  background: none;
+  border: none;
+  color: var(--v2-muted);
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 550;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: rgba(148, 163, 184, 0.55);
+  cursor: pointer;
+  transition: color 160ms ease, text-decoration-color 160ms ease;
+}
+.v2-beta-done-alt:hover {
+  color: var(--v2-blue);
+  text-decoration-color: currentColor;
+}
+.v2-beta-done-alt:focus-visible {
+  outline: 2px solid var(--v2-blue);
+  outline-offset: 3px;
+  border-radius: 5px;
+  color: var(--v2-blue);
+}
+@media (hover: none) { .v2-beta-done-alt:hover { color: var(--v2-muted); } }
+@media (prefers-reduced-motion: reduce) { .v2-beta-done-alt { transition: none; } }
+
 /* Beta success primary CTA — same weight and shape as the form submit button,
    so the next step reads as an action rather than a footnote. */
 .v2-beta-cta {
@@ -1868,3 +1945,727 @@ html { scroll-behavior: smooth; }
   .v2-legal-close-msg { text-align: left; max-width: 30ch; font-size: 0.78rem; }
 }
 @media (prefers-reduced-motion: reduce) { .v2-legal-close-alt { transition: none; } }
+
+/* ── Shared invoice-form field styling ──────────────────────────────────
+   Moved here from a runtime <style> element inside InvoiceFields.
+
+   WHY THIS IS A REAL FIX, NOT A RELOCATION.
+
+   The rules below were previously rendered as a JSX <style>{`...`}</style>
+   inside a client component. Three of them set font-family: 'DM Sans' —
+   and React escapes apostrophes when serialising a text child on the
+   server, while the browser parses <style> as a RAW TEXT element and does
+   not unescape it. The server text node and the first client render
+   therefore differed, producing:
+
+     "Text content does not match server-rendered HTML"
+
+   with the overlay printing .section-legend, .field-label and .opt — the
+   exact three rules containing apostrophes.
+
+   As a stylesheet, Next.js emits a <link> and there is no text node to
+   hydrate, so the mismatch cannot occur. Selectors and specificity are
+   unchanged: these class names were already global via the <style> tag,
+   so both the dashboard drawer and onboarding render identically. */
+.section-legend {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: #0f172a;
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.85rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+.field-label {
+  display: block;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #0f172a;
+  margin-bottom: 0.4rem;
+}
+.opt {
+  font-family: 'DM Sans', sans-serif;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  color: #64748b;
+}
+.field-err {
+  font-size: 0.78rem;
+  color: #dc2626;
+  margin-top: 0.25rem;
+}
+/* ── Due date: ONE field with the calendar button inside it ──────────
+   The native date input is visually hidden rather than laid out beside
+   the text input: two visible date controls is exactly the confusion
+   this avoids. It stays in the DOM (not display:none) because a
+   detached input cannot open a picker. */
+.ss-date {
+  position: relative;
+}
+.ss-date-text {
+  width: 100%;
+  padding-right: 2.5rem;
+}
+.ss-date-btn {
+  position: absolute;
+  top: 50%;
+  right: 0.25rem;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 36px square — comfortably above the 24px minimum touch target and
+     large enough to hit on a phone without magnifying the field. */
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+}
+.ss-date-btn:hover {
+  color: #0f172a;
+  background: #f1f5f9;
+}
+.ss-date-btn:focus-visible {
+  outline: 2px solid #2a5fe3;
+  outline-offset: 1px;
+}
+.ss-date-native {
+  position: absolute;
+  right: 0.6rem;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  border: 0;
+  padding: 0;
+}
+/* ── Optional-field disclosure ("+ Add a job description") ────────────────
+   Deliberately still lightweight — these are optional extras and must not
+   compete with the required fields above them. The refinement is only that
+   they now read as controls rather than as stray links: a properly sized
+   glyph, a real hover state, and a focus ring that matches the inputs.
+   Shared by onboarding and the dashboard invoice drawer; visual only, no
+   behaviour change to either. */
+.opt-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.55rem 0.4rem 0.4rem;
+  margin-left: -0.4rem; /* keeps the label optically flush with the fields */
+  background: none;
+  border: none;
+  border-radius: 8px;
+  color: #2a5fe3;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+.opt-add-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  border: 1px solid #c7d6f5;
+  background: #f2f6fe;
+  font-size: 0.9rem;
+  line-height: 1;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+.opt-add:hover { background: #f2f6fe; }
+.opt-add:hover .opt-add-icon { background: #e3ecfd; border-color: #a9c2f0; }
+.opt-add:focus-visible {
+  outline: 2px solid #2a5fe3;
+  outline-offset: 2px;
+}
+@media (hover: none) { .opt-add:hover { background: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .opt-add, .opt-add-icon { transition: none; }
+}
+
+.field-help {
+  font-size: 0.75rem;
+  color: #64748b;
+  margin-top: 0.25rem;
+  line-height: 1.45;
+}
+    
+/* ── Reminder review page ────────────────────────────────────────────────
+   Key/value rows for the recipient, invoice and reminder panels. Grid rather
+   than a table: these are description pairs, and <dl> carries the semantics. */
+.ss-review-head {
+  margin: 0;
+  padding: 0.9rem 1rem;
+  background: #f8fafc;
+  border: 1px solid var(--dash-border, #e5e7eb);
+  border-radius: 10px;
+  display: grid;
+  gap: 0.45rem;
+}
+.ss-review-row {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: baseline;
+}
+.ss-review-key {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.ss-review-val {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--dash-text, #0f172a);
+  overflow-wrap: anywhere;
+}
+/* pre-wrap preserves the composer's paragraph breaks without rendering markup. */
+.ss-review-body {
+  padding: 1.1rem 1rem 1.25rem;
+  border: 1px solid var(--dash-border, #e5e7eb);
+  border-radius: 10px;
+  background: #ffffff;
+  font-size: 0.9rem;
+  line-height: 1.65;
+  color: var(--dash-text, #1e293b);
+  white-space: pre-wrap;
+}
+
+@media (max-width: 480px) {
+  .ss-review-row {
+    grid-template-columns: 1fr;
+    gap: 0.1rem;
+  }
+}
+
+/* ── Overview: section rhythm ─────────────────────────────────────────────
+   The attention and Coming-up cards are lists, not panels. p-6 gave a single
+   row roughly as much padding as content, which read as an empty card with
+   something small in it. Slightly tighter, and the padding no longer grows
+   with the card. */
+.dash-section {
+  padding: 1.15rem 1.25rem 1.25rem;
+}
+
+/* ── Overview: "Needs your attention" rows ────────────────────────────────
+   One row per invoice, each a single link to that invoice's actual next
+   action. Deliberately a row rather than a card: five cards would look like
+   five problems, where the point of this section is that each line is one
+   short job. */
+.dash-attn-list {
+  margin-top: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.dash-attn-row {
+  display: grid;
+  /* Fixed first column so the state words stack into a readable column
+     instead of ragging in and out with their own lengths. */
+  grid-template-columns: 7.75rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 10px;
+  /* The tone as a quiet rule rather than a loud badge. Colour carries no
+     meaning on its own here — the tag text says the same thing. */
+  border-left: 3px solid var(--attn-tone, var(--dash-border-strong));
+  background: var(--dash-card-muted, #f8fafc);
+  transition: background-color 140ms ease, box-shadow 140ms ease;
+}
+.dash-attn-row:hover {
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 0.07);
+}
+.dash-attn-row:focus-visible {
+  outline: 2px solid var(--dash-accent-strong, #2a5fe3);
+  outline-offset: 2px;
+  background: #ffffff;
+}
+
+/* The state, as a WORD not just a colour. Downgraded in pass 2 from a filled
+   700-weight block: it was the loudest thing in a row whose subject is the
+   customer. It now reads as a label beside the name, not a headline. */
+.dash-attn-tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.735rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--attn-tone, var(--dash-text-muted));
+  white-space: normal;
+}
+
+.dash-attn-body { display: block; min-width: 0; }
+
+/* Promoted in pass 2. The customer is the subject of the row. */
+.dash-attn-who {
+  display: block;
+  font-size: 0.985rem;
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--dash-text);
+  overflow-wrap: anywhere;
+}
+
+/* Reference · amount · urgency · what state it is in — one quiet line, so the
+   eye lands on the name first and only reads the detail if it needs to. */
+.dash-attn-meta {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.795rem;
+  line-height: 1.45;
+  color: var(--dash-text-muted);
+  overflow-wrap: anywhere;
+}
+.dash-attn-amount { font-weight: 600; color: var(--dash-text); }
+
+/* A specific verb, always visible — not a chevron that only appears on hover,
+   which a touch user never sees at all. */
+.dash-attn-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.855rem;
+  font-weight: 650;
+  color: var(--dash-accent-strong, #2a5fe3);
+  white-space: nowrap;
+}
+
+/* ── Overview: "Coming up" rows ───────────────────────────────────────────
+   Not links. Nothing here is actionable yet — that is the entire distinction
+   between this section and the one above it, and making these clickable would
+   blur it. */
+.dash-up-list {
+  margin-top: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.dash-up-row {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.9rem;
+  padding: 0.55rem 0;
+  border-top: 1px solid var(--dash-border);
+}
+.dash-up-list > .dash-up-row:first-child { border-top: 0; padding-top: 0.15rem; }
+
+.dash-up-date { display: block; }
+.dash-up-day {
+  display: block;
+  font-size: 0.855rem;
+  font-weight: 650;
+  color: var(--dash-text);
+  white-space: nowrap;
+}
+.dash-up-rel {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--dash-text-soft);
+  white-space: nowrap;
+}
+
+.dash-up-body { display: block; min-width: 0; }
+.dash-up-who {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--dash-text);
+  overflow-wrap: anywhere;
+}
+.dash-up-what {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: 0.795rem;
+  color: var(--dash-text-muted);
+}
+
+.dash-up-more {
+  margin-top: 0.65rem;
+  font-size: 0.795rem;
+  color: var(--dash-text-soft);
+}
+
+.dash-up-note {
+  margin-top: 0.9rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--dash-border);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--dash-text-soft);
+}
+
+@media (max-width: 640px) {
+  /* Stack rather than crush: at 390px a three-column row would squeeze the
+     customer name to a few characters. The action moves under the detail and
+     stays a full-width tap target. */
+  .dash-attn-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.3rem;
+    padding: 0.8rem 0.85rem;
+  }
+  .dash-attn-tag { justify-self: start; order: -1; }
+  .dash-attn-action { justify-self: start; margin-top: 0.15rem; }
+
+  /* The date keeps its own column — it is short, and losing it would make
+     every row start with a name and bury the thing being scanned for. */
+  .dash-up-row { grid-template-columns: 4.5rem minmax(0, 1fr); gap: 0.7rem; }
+}
+
+@media (prefers-reduced-motion: reduce) { .dash-attn-row { transition: none; } }
+
+/* ── Founding-beta allowance panel (top chrome) ───────────────────────────
+   A compact account-usage panel, not a tag. Two rows — one line of text, one
+   4px bar — inside the existing 68px header, so the header does not grow.
+
+   The Add Invoice button must stay the stronger action: this is tinted rather
+   than filled, 0.8rem against its 0.9rem, and 600 against its 600 on a filled
+   accent. Larger in area, quieter in weight. */
+.ss-beta-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  /* ~6px: the line and the bar must not touch, but 46px of height with a
+     0.45rem gap left the pair floating in the middle of an empty box. */
+  gap: 0.375rem;
+  height: 44px;
+  padding: 0 0.85rem;
+  border-radius: 10px;
+  /* May give way if a very long email address squeezes the row — it degrades
+     to an ellipsis rather than pushing anything off the header. */
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.ss-beta-panel--light {
+  /* ── WHY THIS IS QUIETER THAN IT WAS ──────────────────────────────────
+     #f2fafd inside a 1px #cde9f2 border is, structurally, an input. A pale
+     fill bounded by a clearly visible even-weight edge is the shape the eye
+     has been trained to read as "type here", and at 0 / 10 — empty bar, low
+     numbers — that reading won.
+
+     The border drops roughly two steps in contrast so it delineates without
+     outlining, and the fill moves a shade toward the header background so the
+     panel sits ON the bar rather than floating above it. What remains as
+     identity is the bar: it is now the most saturated thing in the component,
+     which is correct, because it is the part that carries the information. */
+  background: #f5fbfd;
+  border: 1px solid #e3eff4;
+  /* Navy primary text: this is a figure to read, not a caption. */
+  color: var(--dash-text);
+}
+
+.ss-beta-panel--dark {
+  /* A tinted fill would read as a bright sticker on the navy mobile bar, so
+     the dark variant is a hairline outline instead. */
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #e2e8f0;
+  height: 34px;
+  padding: 0 0.6rem;
+  gap: 0.3rem;
+}
+
+.ss-beta-panel-text {
+  display: block;
+  /* 14px. The 0.8rem of the previous pass was readable but thin for a panel
+     this size, and the figures are the point of the component. */
+  font-size: 0.875rem;
+  font-weight: 550;
+  line-height: 1.3;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ss-beta-panel--dark .ss-beta-panel-text { font-size: 0.75rem; }
+
+/* "Founding beta" names the thing; the fraction is the thing. One step apart,
+   so the eye lands on the figures without the label shouting. */
+.ss-beta-prefix { font-weight: 650; }
+.ss-beta-detail { font-weight: 550; }
+
+/* Thin, smoothly rounded, and subordinate to the wording. Never red: at 10/10
+   it is simply full. The refusal happens at the point of action, with words. */
+.ss-beta-track {
+  display: block;
+  height: 4px;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.ss-beta-panel--light .ss-beta-track { background: #d8edf5; }
+.ss-beta-panel--dark .ss-beta-track { background: rgba(255, 255, 255, 0.16); }
+
+.ss-beta-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--dash-accent-strong);
+}
+.ss-beta-panel--dark .ss-beta-fill { background: #38bdf8; }
+
+/* ── Which wording shows ──────────────────────────────────────────────────
+   display:none removes the hidden variants from the accessibility tree too,
+   so the announced text always matches the visible text. */
+.ss-beta-t-full,
+.ss-beta-t-compact,
+.ss-beta-t-mini { display: none; }
+
+/* Default for the light panel is the COMPACT form. The full sentence plus a
+   400px panel only fits once the viewport clears 1280: at 1024 the header
+   already carries Add Invoice, the bell, an avatar and up to 200px of email
+   address, and there is not room for both. */
+/* 768–1023. The header here holds Add Invoice, the bell, an avatar and an
+   email address inside roughly 456px; a 220px panel would not fit even with
+   the address truncated, so the shortest wording is used rather than shrinking
+   the type. */
+.ss-beta-panel--light { width: 120px; }
+.ss-beta-panel--light .ss-beta-t-mini { display: inline; }
+
+@media (min-width: 1024px) {
+  .ss-beta-panel--light { width: 220px; }
+  .ss-beta-panel--light .ss-beta-t-mini { display: none; }
+  .ss-beta-panel--light .ss-beta-t-compact { display: inline; }
+}
+
+@media (min-width: 1280px) {
+  .ss-beta-panel--light { width: 390px; }
+  .ss-beta-panel--light .ss-beta-t-compact { display: none; }
+  .ss-beta-panel--light .ss-beta-t-full { display: inline; }
+}
+
+/* The mobile bar carries a logo, a wordmark and Sign out already, so the dark
+   panel keeps the shortest wording at every width and sizes to its content. */
+.ss-beta-panel--dark { width: auto; min-width: 6.5rem; }
+.ss-beta-panel--dark .ss-beta-t-mini { display: inline; }
+
+/* ── Overview: first run (zero invoices) ──────────────────────────────────
+   One card, deliberately not full-bleed and not tall. The confident amount of
+   whitespace around it is the design; a bigger card would be a bigger way of
+   saying the same short thing. */
+.ss-firstrun {
+  padding: 2rem 2rem 1.75rem;
+  max-width: 46rem;
+}
+
+.ss-firstrun-h {
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+  color: var(--dash-text);
+}
+
+.ss-firstrun-sub {
+  margin-top: 0.5rem;
+  /* ~54ch keeps the sentence to two comfortable lines at desktop instead of
+     one very long one. */
+  max-width: 54ch;
+  font-size: 0.925rem;
+  line-height: 1.6;
+  color: var(--dash-text-muted);
+}
+
+.ss-firstrun-cta {
+  margin-top: 1.35rem;
+  padding: 0.65rem 1.25rem;
+  font-size: 0.95rem;
+}
+
+/* The steps sit BELOW a rule, quieter than the action above them: they are
+   reassurance about what happens next, not a second thing to do. */
+.ss-firstrun-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.5rem;
+  margin-top: 1.85rem;
+  padding-top: 1.6rem;
+  border-top: 1px solid var(--dash-border);
+  list-style: none;
+}
+
+.ss-firstrun-step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.7rem;
+}
+
+.ss-firstrun-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 999px;
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: var(--dash-accent-soft);
+  color: var(--dash-accent-strong);
+}
+
+.ss-firstrun-step-body { display: block; min-width: 0; }
+
+.ss-firstrun-step-title {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--dash-text);
+}
+
+.ss-firstrun-step-text {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.83rem;
+  line-height: 1.5;
+  color: var(--dash-text-muted);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  /* Three columns crush "ServiceSignal writes the SMS and the email" to two
+     words a line well before the mobile breakpoint. */
+  .ss-firstrun-steps {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.15rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .ss-firstrun { padding: 1.5rem 1.25rem 1.35rem; }
+  .ss-firstrun-h { font-size: 1.12rem; }
+  /* Full-width tap target rather than a shrunken one. */
+  .ss-firstrun-cta { width: 100%; justify-content: center; }
+}
+
+/* ── Invoice row management menu ──────────────────────────────────────────
+   Review / Dismiss / Mark Paid stay as buttons; edit and remove live behind
+   one discreet control so the row does not grow two more. */
+.ss-rowmenu { position: relative; display: inline-flex; flex-shrink: 0; }
+
+.ss-rowmenu-trigger {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--dash-border);
+  background: #ffffff;
+  color: var(--dash-text-muted);
+  cursor: pointer;
+}
+.ss-rowmenu-trigger:hover { background: var(--dash-card-muted); color: var(--dash-text); }
+/* Always visible, never hover-only: a hover-revealed control does not exist
+   for a touch or keyboard user. */
+.ss-rowmenu-trigger:focus-visible {
+  outline: 2px solid var(--dash-accent-strong); outline-offset: 2px;
+}
+
+.ss-rowmenu-list,
+.ss-rowmenu-confirm {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 40;
+  background: #ffffff;
+  border: 1px solid var(--dash-border-strong);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgb(15 23 42 / 0.12);
+}
+
+.ss-rowmenu-list { min-width: 11rem; padding: 0.3rem; }
+
+.ss-rowmenu-item {
+  display: block; width: 100%; text-align: left;
+  padding: 0.5rem 0.65rem;
+  border: 0; border-radius: 7px; background: transparent;
+  font-size: 0.875rem; font-weight: 550; color: var(--dash-text);
+  white-space: nowrap; cursor: pointer;
+}
+.ss-rowmenu-item:hover:not(:disabled) { background: var(--dash-card-muted); }
+.ss-rowmenu-item:focus-visible { outline: 2px solid var(--dash-accent-strong); outline-offset: -2px; }
+.ss-rowmenu-item:disabled { opacity: 0.5; cursor: default; }
+
+/* Destructive is distinguished by its WORD first — "Delete invoice" — with
+   colour as reinforcement, never as the only signal. */
+.ss-rowmenu-item--destructive { color: var(--dash-red); }
+.ss-rowmenu-item--destructive:hover:not(:disabled) { background: var(--dash-red-soft); }
+
+.ss-rowmenu-note {
+  padding: 0.45rem 0.65rem;
+  font-size: 0.8rem; line-height: 1.4;
+  color: var(--dash-text-muted);
+  max-width: 15rem;
+}
+
+.ss-rowmenu-confirm { width: 20rem; padding: 0.9rem; }
+.ss-rowmenu-confirm-title { font-size: 0.9rem; font-weight: 650; color: var(--dash-text); }
+.ss-rowmenu-confirm-body {
+  margin-top: 0.35rem; font-size: 0.825rem; line-height: 1.5; color: var(--dash-text-muted);
+}
+.ss-rowmenu-confirm-actions {
+  display: flex; gap: 0.5rem; margin-top: 0.85rem;
+}
+
+.ss-btn-destructive {
+  padding: 0.5rem 0.9rem;
+  border: 0; border-radius: 9px;
+  background: var(--dash-red); color: #ffffff;
+  font-family: "DM Sans", sans-serif; font-size: 0.875rem; font-weight: 600;
+  cursor: pointer;
+}
+.ss-btn-destructive:hover:not(:disabled) { background: #b91c1c; }
+.ss-btn-destructive:disabled { opacity: 0.55; cursor: default; }
+.ss-btn-destructive:focus-visible { outline: 2px solid var(--dash-red); outline-offset: 2px; }
+
+@media (max-width: 640px) {
+  /* Anchored left at narrow widths so a right-anchored panel cannot run off
+     the screen edge. */
+  .ss-rowmenu-list, .ss-rowmenu-confirm { right: auto; left: 0; }
+  .ss-rowmenu-confirm { width: min(20rem, calc(100vw - 3rem)); }
+}
+
+/* ── Archived invoices ────────────────────────────────────────────────────
+   Same row language as Needs your attention: one line per invoice, the
+   customer first, the detail quiet. Read only — no actions. */
+.ss-archived-list { display: flex; flex-direction: column; margin-top: 0.85rem; }
+.ss-archived-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "who tag" "meta tag";
+  align-items: center;
+  gap: 0 0.9rem;
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--dash-border);
+}
+.ss-archived-list > .ss-archived-row:first-child { border-top: 0; padding-top: 0.15rem; }
+.ss-archived-who {
+  grid-area: who;
+  font-size: 0.95rem; font-weight: 650; color: var(--dash-text);
+  overflow-wrap: anywhere;
+}
+.ss-archived-meta {
+  grid-area: meta; margin-top: 0.15rem;
+  font-size: 0.8rem; color: var(--dash-text-muted); overflow-wrap: anywhere;
+}
+.ss-archived-tag {
+  grid-area: tag;
+  padding: 0.2rem 0.5rem; border-radius: 6px;
+  font-size: 0.72rem; font-weight: 650; white-space: nowrap;
+}
+/* The word carries the meaning; the tint only reinforces it. */
+.ss-archived-tag--paid { background: var(--dash-green-soft); color: var(--dash-green); }
+.ss-archived-tag--unpaid { background: var(--dash-card-muted); color: var(--dash-text-muted); }

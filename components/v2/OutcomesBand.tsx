@@ -4,23 +4,30 @@
  * A narrow band translating the product into everyday language. Three plain
  * columns with small markers — deliberately not three boxed SaaS cards.
  *
+ * The copy is written to be unusable by any other product. "Start from a
+ * prepared reminder instead of rewriting the same overdue-invoice message"
+ * could only describe this one; "save time and stay organised" could describe
+ * anything, which is what made the earlier version the weakest passage on the
+ * page. Each line names the specific thing that changes.
+ *
  * Product truth. No hours saved, no faster payment, no cashflow percentage,
  * no guaranteed reduction in stress and no claim of complete automation.
- * Every line describes something the software demonstrably does.
+ * Channel-neutral throughout: these three things are true whichever channel a
+ * reminder eventually goes out on.
  */
 
 const OUTCOMES = [
   {
-    title: "Less repetitive admin",
-    line: "No rewriting the same overdue-invoice email from scratch every time.",
+    title: "Less repetitive chasing",
+    line: "Start from a prepared reminder instead of rewriting the same overdue-invoice message.",
   },
   {
     title: "Professional every time",
-    line: "The customer, amount, due date and business name stay clear and consistent.",
+    line: "Customer, invoice and business details stay clear and consistent in every reminder.",
   },
   {
     title: "Still your decision",
-    line: "You review every reminder and decide whether it should be sent.",
+    line: "Review and approve every reminder before anything is sent.",
   },
 ];
 

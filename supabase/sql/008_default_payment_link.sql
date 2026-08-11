@@ -1,0 +1,63 @@
+-- =============================================================================
+-- ServiceSignal — account-level default payment link
+-- Adds one nullable column to the existing profiles table.
+-- NOT RUN AUTOMATICALLY. Review and run manually in the Supabase SQL editor.
+-- =============================================================================
+--
+-- WHAT THIS SOLVES
+--
+-- A payment link is per-invoice today (invoices.payment_link), so a trade
+-- retypes the same URL on every invoice. This stores it once on the account
+-- and prefills it, while leaving the per-invoice column exactly as it is —
+-- which is what makes an invoice-specific override possible without the
+-- override ever touching the account default.
+--
+-- The two are deliberately separate columns, not one shared field:
+--   profiles.default_payment_link  — the account default. Changed only from
+--                                    Settings, or by explicitly ticking
+--                                    "Save as my default" on an invoice.
+--   invoices.payment_link          — what THIS invoice actually used. Already
+--                                    exists; unchanged by this migration.
+--
+-- Editing an invoice's link therefore cannot silently rewrite the default, and
+-- changing the default cannot retroactively alter invoices already sent.
+--
+-- WHY BANK DETAILS ARE NOT HERE
+--
+-- Note 32 asked for sort code and account number as well. That is deliberately
+-- NOT in this migration. A URL a customer clicks is a fundamentally different
+-- class of data from bank credentials: bank details need masking on read,
+-- exclusion from logs and error payloads, an explicit confirmation before they
+-- are placed in a customer-facing email, and a considered answer on whether a
+-- beta should hold them at all. Bolting them onto this column to satisfy the
+-- note would be the insecure half-build the brief warned against. See the
+-- report for the proposed Phase 2 design.
+
+alter table public.profiles
+  add column if not exists default_payment_link text null;
+
+-- ── RLS ──────────────────────────────────────────────────────────────────
+--
+-- No policy changes needed, and that is a real property rather than an
+-- omission. profiles already carries insert_own_profile / select_own_profile /
+-- update_own_profile, every one of them scoped to auth.uid() = user_id. RLS is
+-- enforced per ROW, so a column added to that row inherits the same isolation:
+-- one authenticated user cannot read or write another's default_payment_link
+-- through PostgREST, because they cannot reach the row at all.
+--
+-- This is the same reasoning migration 003 relied on for the terms columns.
+--
+-- NULLABLE, and no backfill. Every existing account has no default; NULL means
+-- "none saved", which is distinct from "" and is what the UI checks for.
+--
+-- NO INDEX. The column is only ever read as part of a profile row already
+-- located by user_id.
+--
+-- =============================================================================
+-- ROLLBACK
+-- =============================================================================
+--
+-- Discards saved defaults only. Invoices keep their own payment_link values,
+-- so no reminder that has already been prepared or sent is affected.
+--
+--   alter table public.profiles drop column if exists default_payment_link;

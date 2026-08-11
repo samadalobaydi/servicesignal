@@ -1,0 +1,123 @@
+/*
+ * Verification outcome page.
+ *
+ * A CSS Module for the same reason the auth split and onboarding shell are:
+ * these names cannot collide with .lp-*, .dash-* or .v2-*. Single centred
+ * card — this page has one message and at most one action.
+ */
+
+.root {
+  min-height: 100vh;
+  background: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2.5rem 1.25rem;
+}
+
+.shell {
+  width: 100%;
+  max-width: 460px;
+  background: #ffffff;
+  border: 1px solid #e6ebf2;
+  border-radius: 16px;
+  padding: 2.25rem 1.75rem 2.5rem;
+  text-align: center;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 32px rgba(15, 23, 42, 0.06);
+}
+
+.lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.75rem;
+}
+.mark {
+  height: 28px;
+  width: auto;
+  display: block;
+}
+.word {
+  font-weight: 700;
+  font-size: 1.15rem;
+  letter-spacing: -0.015em;
+  color: #0f172a;
+}
+.wordB {
+  color: #2a5fe3;
+}
+
+.iconOk,
+.iconNeutral {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 1.1rem;
+  border-radius: 999px;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+.iconOk {
+  background: #ecfdf5;
+  color: #059669;
+}
+/* Amber, not red: an expired or already-used link is an ordinary situation,
+   not a failure the user caused. */
+.iconNeutral {
+  background: #fffbeb;
+  color: #d97706;
+}
+
+.title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+  line-height: 1.25;
+}
+.body {
+  margin-top: 0.7rem;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: #475569;
+}
+
+.primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1.75rem;
+  padding: 0.75rem 1.5rem;
+  border-radius: 10px;
+  background: #2a5fe3;
+  color: #ffffff;
+  font-size: 0.92rem;
+  font-weight: 650;
+  text-decoration: none;
+  transition: background 160ms ease;
+}
+.primary:hover {
+  background: #1f4fc8;
+}
+.primary:focus-visible {
+  outline: 2px solid #2a5fe3;
+  outline-offset: 3px;
+}
+
+@media (max-width: 480px) {
+  .shell {
+    padding: 1.75rem 1.15rem 2rem;
+    border-radius: 14px;
+  }
+  .title {
+    font-size: 1.2rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .primary {
+    transition: none;
+  }
+}

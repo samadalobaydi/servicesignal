@@ -40,7 +40,7 @@ export default function SettingsCard({ profile, userEmail, onUpdated }: Settings
           Reminder Settings
         </h2>
         <p className="text-sm mt-1" style={{ color: "var(--dash-text-muted)" }}>
-          Controls how reminder emails identify your business.
+          Controls how your business is identified in reminders.
         </p>
       </div>
 
@@ -51,7 +51,7 @@ export default function SettingsCard({ profile, userEmail, onUpdated }: Settings
             Business name
           </label>
           <p className="text-sm mb-2.5" style={{ color: "var(--dash-text-muted)" }}>
-            Shown to customers in reminder emails. Falls back to{" "}
+            Shown to customers as the sender name on your reminders. Falls back to{" "}
             <span style={{ color: "var(--dash-text)", fontWeight: 500 }}>{userEmail}</span> if left blank.
           </p>
           <div className="flex gap-2">
@@ -74,29 +74,86 @@ export default function SettingsCard({ profile, userEmail, onUpdated }: Settings
           </div>
         </div>
 
-        {/* Sending behaviour — approval-only during the founding beta.
-            The Auto Mode chooser is not offered: it is disabled server-side,
-            so presenting it (even greyed out) would advertise something no
-            user can turn on. */}
+        {/* Sending behaviour.
+            Both modes are shown so the direction is visible, but Auto Mode is
+            genuinely inert: it is not an input, carries no name or value, and
+            cannot be focused or activated. There is no toggle to "fail" and no
+            state it can write — reminder_mode is never set to 'auto' from here,
+            and BETA_APPROVAL_ONLY gates sending server-side regardless. */}
         <div>
-          <label className="block text-sm mb-2" style={{ color: "var(--dash-text)", fontWeight: 600 }}>
+          <p className="block text-sm mb-2" style={{ color: "var(--dash-text)", fontWeight: 600 }}>
             Sending mode
-          </label>
-          <div
-            className="p-4 rounded-xl border"
-            style={{
-              background: "var(--dash-accent-soft)",
-              borderColor: "var(--dash-accent)",
-              boxShadow: "0 0 0 1px var(--dash-accent)",
-            }}
-          >
-            <p className="text-sm" style={{ fontWeight: 650, color: "var(--dash-accent-strong)" }}>
-              Approval Mode
-            </p>
-            <p className="text-sm mt-1" style={{ color: "var(--dash-text-muted)", lineHeight: 1.45 }}>
-              Reminders are detected and prepared for you automatically, then wait
-              in your queue. Nothing is sent to a customer until you approve it.
-            </p>
+          </p>
+
+          <div className="space-y-2.5">
+            {/* Active mode. */}
+            <div
+              className="p-4 rounded-xl border"
+              style={{
+                background: "var(--dash-accent-soft)",
+                borderColor: "var(--dash-accent)",
+                boxShadow: "0 0 0 1px var(--dash-accent)",
+              }}
+            >
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-sm" style={{ fontWeight: 650, color: "var(--dash-accent-strong)" }}>
+                  Approval Mode
+                </p>
+                {/* Real text, not colour alone. */}
+                <span
+                  className="text-xs px-1.5 py-0.5 rounded"
+                  style={{
+                    background: "#ffffff",
+                    color: "var(--dash-accent-strong)",
+                    border: "1px solid var(--dash-accent)",
+                    fontWeight: 650,
+                  }}
+                >
+                  Active
+                </span>
+              </div>
+              <p className="text-sm mt-1" style={{ color: "var(--dash-text-muted)", lineHeight: 1.45 }}>
+                ServiceSignal prepares each reminder for your review. Nothing is sent
+                until you approve it.
+              </p>
+            </div>
+
+            {/* Planned mode.
+                A plain <div>, deliberately: not a radio, not a button, not
+                disabled-but-focusable. Nothing here is in the tab order, so a
+                keyboard user cannot select it, and aria-disabled would imply a
+                control exists at all. The "Coming soon" text carries the state
+                for screen readers — the muted styling is decoration on top of
+                it, never the only signal. */}
+            <div
+              className="p-4 rounded-xl border"
+              style={{
+                background: "var(--dash-card-muted, #f8fafc)",
+                borderColor: "var(--dash-border)",
+                borderStyle: "dashed",
+              }}
+            >
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-sm" style={{ fontWeight: 650, color: "var(--dash-text-muted)" }}>
+                  Auto Mode
+                </p>
+                <span
+                  className="text-xs px-1.5 py-0.5 rounded"
+                  style={{
+                    background: "#ffffff",
+                    color: "#64748b",
+                    border: "1px solid var(--dash-border-strong, #cbd5e1)",
+                    fontWeight: 650,
+                  }}
+                >
+                  Coming soon
+                </span>
+              </div>
+              <p className="text-sm mt-1" style={{ color: "var(--dash-text-muted)", lineHeight: 1.45 }}>
+                Reminders will send automatically according to your chosen schedule.
+                This isn&rsquo;t available yet and can&rsquo;t be selected.
+              </p>
+            </div>
           </div>
         </div>
 

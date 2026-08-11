@@ -1,0 +1,380 @@
+-- =============================================================================
+-- ServiceSignal — invoice table privileges for browser roles
+--
+-- ⚠⚠ DO NOT APPLY UNTIL THE NEW APPLICATION IS DEPLOYED AND VERIFIED. ⚠⚠
+--
+-- This migration REMOVES capabilities the currently deployed application still
+-- uses. Applying it early breaks Mark Paid for every customer, immediately,
+-- until the new deploy lands.
+--
+-- MIGRATION 013 of 2 — RESTRICTIVE. Apply LAST.
+--
+-- NOT RUN AUTOMATICALLY. Review and run manually in the Supabase SQL editor.
+-- NOT YET APPLIED TO ANY REMOTE PROJECT.
+--
+-- ⚠ .env.local currently points at the project identified as "main — PRODUCTION".
+-- =============================================================================
+--
+-- ── DEPLOYMENT ORDER ───────────────────────────────────────────────────────
+--
+--   1. Apply 012_invoice_lifecycle.sql               (additive, safe first)
+--   2. Deploy the application branch                 (new lifecycle APIs)
+--   3. Manually verify existing AND new operations   ← the gate for this file
+--   4. Apply THIS migration (013)
+--   5. Run the verification queries at the bottom
+--
+-- Step 3 is not a formality. Before running this, confirm by hand that Mark
+-- Paid, invoice actions, reminder approval, Edit, Delete and Archive all work
+-- on the deployed build. Every one of them must already be going through a
+-- server route — because after this file runs, the browser can no longer
+-- UPDATE or DELETE invoices directly, and creation is restricted to the ten
+-- approved INSERT columns. Authenticated browser creation remains intentionally
+-- allowed; it is edits and deletions that must already be going through a
+-- server route.
+--
+-- ── VERIFIED PRODUCTION STATE BEFORE THIS MIGRATION ────────────────────────
+--
+--   anon           SELECT INSERT UPDATE DELETE REFERENCES TRIGGER TRUNCATE
+--   authenticated  SELECT INSERT UPDATE DELETE REFERENCES TRIGGER TRUNCATE
+--   PUBLIC         (none)
+--
+--   RLS policies, all `auth.uid() = user_id`:
+--     select_own_invoices, insert_own_invoices,
+--     update_own_invoices, delete_own_invoices
+--
+--   — verified by read-only query on main — PRODUCTION.
+--
+-- ── WHY RLS IS NOT ENOUGH ──────────────────────────────────────────────────
+--
+-- RLS answers "whose row". It does not answer "which columns, and with what
+-- consequences". On their OWN rows, a customer could today set status = 'paid',
+-- rewrite reminders_sent, blank archived_at, or DELETE an invoice carrying
+-- dispatched history — straight from the browser console, bypassing every
+-- lifecycle rule in migration 012.
+--
+-- RLS is NOT removed here. It stays as the row-ownership layer beneath the
+-- narrowed privileges: SELECT and INSERT remain RLS-scoped to the owner.
+-- =============================================================================
+
+-- ── anon ───────────────────────────────────────────────────────────────────
+--
+-- No unauthenticated ServiceSignal flow reads or creates invoices. Every
+-- invoice surface sits behind the dashboard, which requires a session; the
+-- landing page, signup and onboarding touch invoices only after authentication.
+-- Audited across the repository: there is no anon invoice path.
+--
+-- These grants exist because Supabase issues them by default on new tables,
+-- not because anything asked for them.
+
+revoke all privileges on table public.invoices from anon;
+
+-- ── authenticated ──────────────────────────────────────────────────────────
+--
+-- Everything is revoked first, then exactly what the browser genuinely needs
+-- is granted back. Starting from zero means a privilege cannot survive because
+-- nobody remembered it was there.
+
+revoke all privileges on table public.invoices from authenticated;
+
+-- SELECT: the dashboard reads invoices with the browser client
+-- (lib/invoices.ts fetchInvoices → DashboardProvider, and
+-- fetchArchivedInvoices for the Archived view). RLS scopes both to the owner.
+grant select on table public.invoices to authenticated;
+
+-- ── COLUMN-SCOPED INSERT ───────────────────────────────────────────────────
+--
+-- Add Invoice creates rows from the browser (lib/invoices.ts insertInvoice,
+-- called by DashboardProvider.handleAddInvoice), and onboarding creates them
+-- through app/api/onboarding/invoices — which uses getSupabaseServer(), so it
+-- ALSO runs as `authenticated` and is bound by everything below. Creation stays
+-- allowed: making a new invoice cannot make an existing prepared reminder
+-- stale, so it carries none of the risk UPDATE and DELETE do.
+--
+-- Whole-table INSERT is too broad: it would let a caller supply id, user_id,
+-- created_at, status, reminders_sent, escalation_status, paid_at or
+-- archived_at at creation time.
+--
+-- ── THE TEN CREATION FIELDS ────────────────────────────────────────────────
+--
+-- Exactly what a customer legitimately supplies. Everything else is defaulted
+-- by the database or set by a later trusted transition.
+--
+-- ── VERIFIED PRODUCTION DEFAULTS (read-only query, main — PRODUCTION) ──────
+--
+--   id                 gen_random_uuid()
+--   user_id            auth.uid()
+--   created_at         now()
+--   status             'unpaid'
+--   reminders_sent     empty text[]
+--   escalation_status  'active'
+--   reminder_tone      'firm'
+--   reminder_schedules empty text[]
+--
+--   nullable: paid_at, customer_phone, payment_link,
+--             invoice_reference, job_description
+--
+-- Those defaults are what make this grant safe to narrow. The client used to
+-- send status = 'unpaid' and reminders_sent = '{}' — duplicating the database
+-- default and thereby claiming authority over lifecycle state it has no
+-- business choosing. Both have been removed from the executable payload
+-- (components/dashboard/DashboardProvider.tsx and lib/invoice-write.ts).
+--
+-- reminder_tone and reminder_schedules also have defaults, but they REMAIN in
+-- the whitelist: the Add Invoice form always supplies them and they are
+-- user-chosen configuration, not lifecycle state.
+
+grant insert (
+  customer_name,
+  customer_email,
+  customer_phone,
+  amount,
+  due_date,
+  payment_link,
+  invoice_reference,
+  job_description,
+  reminder_tone,
+  reminder_schedules
+) on table public.invoices to authenticated;
+
+-- ── WHY `revoke all privileges`, NOT `revoke insert on table` ──────────────
+--
+-- The revoke above is deliberately the ALL PRIVILEGES form. `REVOKE INSERT ON
+-- TABLE ... ` removes the table-level privilege, but its interaction with a
+-- separately-held COLUMN-level grant is the subtler case — and this file must
+-- be safe to re-run after a partial application, where a column grant may
+-- already exist. `REVOKE ALL PRIVILEGES ON TABLE` unambiguously clears both,
+-- which is why every revoke here takes that form.
+--
+-- ── HOW THIS INTERACTS WITH `insert_own_invoices` ──────────────────────────
+--
+-- Privileges and RLS are INDEPENDENT checks, and both must pass. Privileges are
+-- evaluated first — a column the role cannot INSERT is refused before any
+-- policy runs.
+--
+-- Column-level INSERT privilege is required only for columns the statement
+-- NAMES. Columns omitted from the statement take their defaults without the
+-- role needing any privilege on them. That is precisely what makes this grant
+-- work: the client never names user_id, so it needs no privilege on it, and
+-- DEFAULT auth.uid() fills it.
+--
+-- The insert_own_invoices policy's WITH CHECK is then evaluated against the
+-- FINAL row, after defaults have been applied — so user_id is already
+-- auth.uid() by the time `auth.uid() = user_id` is tested, and it passes.
+--
+-- The two layers answer different questions and neither replaces the other:
+-- RLS answers "whose row", the column grant answers "which columns".
+--
+-- ── EXPLICITLY NOT GRANTED ─────────────────────────────────────────────────
+--
+--   id                 gen_random_uuid()
+--   user_id            DEFAULT auth.uid(); ownership is never client-chosen
+--   created_at         database clock, not the caller's
+--   status             DEFAULT 'unpaid'; later transitions are server-owned
+--   reminders_sent     DEFAULT '{}'; written only by the send path
+--   escalation_status  DEFAULT 'active'; set only by /api/invoices/actions
+--   paid_at            set only by the Mark Paid server route
+--   archived_at        set only by archive_invoice_safely (migration 012)
+--
+-- A column added to this table in future is NOT granted by default, which is
+-- the correct direction: new columns start closed.
+
+-- ── Verification (run manually after applying) ─────────────────────────────
+--
+--   -- 1. Table-level privileges.
+--   --
+--   --    TWO DIFFERENT FUNCTIONS, AND THE DIFFERENCE MATTERS HERE:
+--   --
+--   --      has_table_privilege()       — the TABLE-level grant only. It does
+--   --                                    NOT become true because the role holds
+--   --                                    the privilege on some columns.
+--   --      has_any_column_privilege()  — true if the privilege comes from the
+--   --                                    whole table OR from at least one column.
+--   --
+--   --    013 deliberately revokes table-level INSERT and grants INSERT on ten
+--   --    columns instead. So the CORRECT post-013 result is
+--   --    has_table_privilege(...,'INSERT') = FALSE. That is the migration
+--   --    working, not a broken deploy — do not "fix" it.
+--   --
+--   --      select
+--   --        has_table_privilege('authenticated', 'public.invoices', 'SELECT')          as sel_table,
+--   --        has_table_privilege('authenticated', 'public.invoices', 'INSERT')          as ins_table,
+--   --        has_any_column_privilege('authenticated', 'public.invoices', 'INSERT')     as ins_any_col,
+--   --        has_table_privilege('authenticated', 'public.invoices', 'UPDATE')          as upd,
+--   --        has_table_privilege('authenticated', 'public.invoices', 'DELETE')          as del,
+--   --        has_table_privilege('authenticated', 'public.invoices', 'REFERENCES')      as refs,
+--   --        has_table_privilege('authenticated', 'public.invoices', 'TRIGGER')         as trg,
+--   --        has_table_privilege('authenticated', 'public.invoices', 'TRUNCATE')        as trunc;
+--   --
+--   --      -- EXPECT: sel_table    t   (SELECT is granted table-wide)
+--   --      --         ins_table    f   ← CORRECT. Table-level INSERT is revoked.
+--   --      --         ins_any_col  t   ← the ten column grants, seen properly
+--   --      --         upd f | del f | refs f | trg f | trunc f
+--   --
+--   --    ins_table = t would mean whole-table INSERT survived and the column
+--   --    scoping is NOT in force. ins_any_col = f would mean Add Invoice is
+--   --    broken. Queries 2 and 3 below are the exact per-column proof; this one
+--   --    only establishes the shape.
+--
+--   -- 2. THE TEN PERMITTED CREATION COLUMNS — each must be TRUE.
+--   --      select
+--   --        has_column_privilege('authenticated','public.invoices','customer_name','INSERT')      as customer_name,
+--   --        has_column_privilege('authenticated','public.invoices','customer_email','INSERT')     as customer_email,
+--   --        has_column_privilege('authenticated','public.invoices','customer_phone','INSERT')     as customer_phone,
+--   --        has_column_privilege('authenticated','public.invoices','amount','INSERT')             as amount,
+--   --        has_column_privilege('authenticated','public.invoices','due_date','INSERT')           as due_date,
+--   --        has_column_privilege('authenticated','public.invoices','payment_link','INSERT')       as payment_link,
+--   --        has_column_privilege('authenticated','public.invoices','invoice_reference','INSERT')  as invoice_reference,
+--   --        has_column_privilege('authenticated','public.invoices','job_description','INSERT')    as job_description,
+--   --        has_column_privilege('authenticated','public.invoices','reminder_tone','INSERT')      as reminder_tone,
+--   --        has_column_privilege('authenticated','public.invoices','reminder_schedules','INSERT') as reminder_schedules;
+--   --      -- EXPECT: all t
+--
+--   -- 3. THE EIGHT DENIED INTERNAL COLUMNS — each must be FALSE.
+--   --      select
+--   --        has_column_privilege('authenticated','public.invoices','user_id','INSERT')           as user_id,
+--   --        has_column_privilege('authenticated','public.invoices','status','INSERT')            as status,
+--   --        has_column_privilege('authenticated','public.invoices','reminders_sent','INSERT')    as reminders_sent,
+--   --        has_column_privilege('authenticated','public.invoices','paid_at','INSERT')           as paid_at,
+--   --        has_column_privilege('authenticated','public.invoices','escalation_status','INSERT') as escalation_status,
+--   --        has_column_privilege('authenticated','public.invoices','archived_at','INSERT')       as archived_at,
+--   --        has_column_privilege('authenticated','public.invoices','id','INSERT')                as id,
+--   --        has_column_privilege('authenticated','public.invoices','created_at','INSERT')        as created_at;
+--   --      -- EXPECT: all f
+--
+--   -- 4. The full granted set, as a list — catches anything not covered above.
+--   --      select column_name
+--   --        from information_schema.column_privileges
+--   --       where table_schema = 'public' and table_name = 'invoices'
+--   --         and grantee = 'authenticated' and privilege_type = 'INSERT'
+--   --       order by column_name;
+--   --      -- EXPECT exactly 10: amount, customer_email, customer_name,
+--   --      --   customer_phone, due_date, invoice_reference, job_description,
+--   --      --   payment_link, reminder_schedules, reminder_tone
+--
+--   -- 5. anon holds nothing.
+--   --      select privilege_type from information_schema.table_privileges
+--   --       where table_schema = 'public' and table_name = 'invoices'
+--   --         and grantee = 'anon';
+--   --      -- EXPECT: zero rows
+--   --      select count(*) from information_schema.column_privileges
+--   --       where table_schema = 'public' and table_name = 'invoices'
+--   --         and grantee = 'anon';
+--   --      -- EXPECT: 0
+--
+--   -- ── BEHAVIOURAL TESTS ────────────────────────────────────────────────
+--   --
+--   -- Run as an ORDINARY LOGGED-IN USER, not service_role, which bypasses all
+--   -- of this. Every one is wrapped in BEGIN/ROLLBACK so nothing persists.
+--
+--   -- 6. A normal Add Invoice still succeeds — the ten permitted columns, with
+--   --    every defaulted column omitted exactly as the client now sends it.
+--   --      begin;
+--   --        insert into public.invoices
+--   --          (customer_name, customer_email, customer_phone, amount, due_date,
+--   --           payment_link, invoice_reference, job_description,
+--   --           reminder_tone, reminder_schedules)
+--   --        values ('Test','t@example.com','07700900000',100,current_date,
+--   --                'https://example.com/pay','INV-1','Job',
+--   --                'firm','{overdue_7_days}');
+--   --      rollback;
+--   --      -- EXPECT: INSERT 0 1
+--   --      -- If this fails, STOP: Add Invoice is broken. Run the 013 rollback.
+--
+--   -- 7. Supplying status = 'paid' at creation is REFUSED.
+--   --      begin;
+--   --        insert into public.invoices
+--   --          (customer_name, customer_email, customer_phone, amount, due_date,
+--   --           payment_link, reminder_tone, reminder_schedules, status)
+--   --        values ('Test','t@example.com','07700900000',100,current_date,
+--   --                'https://example.com/pay','firm','{overdue_7_days}','paid');
+--   --      rollback;
+--   --      -- EXPECT: ERROR permission denied for column status
+--
+--   -- 8. Claiming ownership of another user's data is REFUSED at the privilege
+--   --    layer, before RLS is even consulted.
+--   --      begin;
+--   --        insert into public.invoices
+--   --          (customer_name, customer_email, customer_phone, amount, due_date,
+--   --           payment_link, reminder_tone, reminder_schedules, user_id)
+--   --        values ('Test','t@example.com','07700900000',100,current_date,
+--   --                'https://example.com/pay','firm','{overdue_7_days}',
+--   --                '00000000-0000-0000-0000-000000000000');
+--   --      rollback;
+--   --      -- EXPECT: ERROR permission denied for column user_id
+--
+--   -- 9. Pre-marking reminders as already sent is REFUSED.
+--   --      begin;
+--   --        insert into public.invoices
+--   --          (customer_name, customer_email, customer_phone, amount, due_date,
+--   --           payment_link, reminder_tone, reminder_schedules, reminders_sent)
+--   --        values ('Test','t@example.com','07700900000',100,current_date,
+--   --                'https://example.com/pay','firm','{overdue_7_days}',
+--   --                '{overdue_7_days}');
+--   --      rollback;
+--   --      -- EXPECT: ERROR permission denied for column reminders_sent
+--
+--   -- 10. Creating an invoice already archived is REFUSED.
+--   --      begin;
+--   --        insert into public.invoices
+--   --          (customer_name, customer_email, customer_phone, amount, due_date,
+--   --           payment_link, reminder_tone, reminder_schedules, archived_at)
+--   --        values ('Test','t@example.com','07700900000',100,current_date,
+--   --                'https://example.com/pay','firm','{overdue_7_days}', now());
+--   --      rollback;
+--   --      -- EXPECT: ERROR permission denied for column archived_at
+--
+--   -- 11. UPDATE and DELETE are gone entirely.
+--   --      begin;
+--   --        update public.invoices set amount = 1 where id = '<your invoice>';
+--   --      rollback;   -- EXPECT: ERROR permission denied for table invoices
+--   --
+--   --      begin;
+--   --        delete from public.invoices where id = '<your invoice>';
+--   --      rollback;   -- EXPECT: ERROR permission denied for table invoices
+--
+--   -- 12. The row created in 6 was owned correctly — DEFAULT auth.uid() and the
+--   --     insert_own_invoices policy agreeing, with the client naming neither.
+--   --      begin;
+--   --        insert into public.invoices
+--   --          (customer_name, customer_email, customer_phone, amount, due_date,
+--   --           payment_link, reminder_tone, reminder_schedules)
+--   --        values ('Owner check','t@example.com','07700900000',1,current_date,
+--   --                'https://example.com/pay','firm','{overdue_7_days}')
+--   --        returning user_id = auth.uid() as owned_by_me,
+--   --                  status, reminders_sent, escalation_status;
+--   --      rollback;
+--   --      -- EXPECT: owned_by_me t | unpaid | {} | active
+--
+--   -- 13. RLS is untouched — all four ownership policies still present.
+--   --      select policyname, cmd from pg_policies
+--   --       where schemaname = 'public' and tablename = 'invoices'
+--   --       order by policyname;
+--   --      -- EXPECT: delete_own_invoices, insert_own_invoices,
+--   --      --         select_own_invoices, update_own_invoices
+--   --      -- (update/delete policies remain but are now unreachable for
+--   --      --  browser roles, which hold no UPDATE or DELETE privilege.)
+--
+-- ── Rollback ───────────────────────────────────────────────────────────────
+--
+-- ⚠ THIS DELIBERATELY RE-OPENS THE BROAD BROWSER MUTATION SURFACE.
+--
+-- After running it, any logged-in customer can again UPDATE or DELETE their own
+-- invoice rows directly, bypassing every lifecycle rule in migration 012 — and
+-- `anon` regains a write surface no part of this product needs. It is a
+-- truthful restoration of the pre-013 state, not a desirable resting place.
+-- If you run it, re-apply this migration as soon as the application is ready.
+--
+--   revoke all privileges on table public.invoices from anon;
+--   revoke all privileges on table public.invoices from authenticated;
+--
+--   grant select, insert, update, delete, references, trigger, truncate
+--     on table public.invoices to anon;
+--   grant select, insert, update, delete, references, trigger, truncate
+--     on table public.invoices to authenticated;
+--
+-- The two revokes come first so the column-scoped INSERT grant from this
+-- migration is cleared; granting table-level INSERT on top of a column grant
+-- would otherwise leave both recorded.
+--
+-- Nothing in migration 012 is affected by rolling this back. Each migration
+-- owns its own reversal.

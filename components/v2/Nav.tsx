@@ -20,7 +20,9 @@ export default function Nav() {
 
   /* Deliberately not a table of contents — two waypoints only. Everything
      else is found by scrolling. "Access" is not a text link because it would
-     duplicate the Join the beta button beside it. */
+     duplicate the Join the founding beta button beside it.
+     Every founding-beta CTA on this page — header, mobile menu, hero and the
+     form's own submit — uses the same label and the same #access target. */
   const links = [
     { href: "#tour", label: "How it works" },
     { href: "#faq", label: "FAQ" },
@@ -57,7 +59,7 @@ export default function Nav() {
             Sign in
           </Link>
           <a href="#access" className="lp-btn hidden md:inline-flex" style={{ background: "var(--v2-blue)", padding: "0.5rem 1.15rem", fontSize: "0.9rem" }}>
-            Join the beta
+            Join the founding beta
           </a>
           <button
             className="md:hidden"
@@ -88,7 +90,7 @@ export default function Nav() {
             Sign in
           </Link>
           <a href="#access" className="lp-btn" style={{ background: "var(--v2-blue)" }} onClick={() => setOpen(false)}>
-            Join the beta
+            Join the founding beta
           </a>
         </div>
       )}

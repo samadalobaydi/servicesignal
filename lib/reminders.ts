@@ -46,9 +46,21 @@ export async function fetchReminderHistory(
 }
 
 /** Calls /api/reminders/[id]/approve — sends the email, server enforces ownership via RLS */
-export async function approveReminder(id: string): Promise<{ success: boolean; message: string }> {
+export async function approveReminder(
+  id: string,
+  /**
+   * The server-SIGNED review authorisation issued when the page rendered.
+   * Opaque to the browser: it cannot be forged, retargeted at another reminder
+   * or account, or made to outlive its expiry.
+   */
+  reviewToken: string
+): Promise<{ success: boolean; message: string; state?: string }> {
   try {
-    const res = await fetch(`/api/reminders/${id}/approve`, { method: "POST" });
+    const res = await fetch(`/api/reminders/${id}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ review_token: reviewToken }),
+    });
     return await res.json();
   } catch {
     return { success: false, message: "Network error. Please try again." };
@@ -113,4 +125,48 @@ export async function fetchLatestSentMap(
     }
   }
   return map;
+}
+
+/**
+ * How many founding-beta reminders this user has consumed.
+ *
+ * ── ONE DEFINITION, NOT THREE ────────────────────────────────────────────
+ *
+ * This counts `reminder_allowance_slots` — the exact rows the enforcement
+ * function creates and deletes. It does NOT re-derive usage from
+ * reminder_logs statuses, which is what it did while the banner was
+ * display-only.
+ *
+ * That change is the point. Before, "used" existed in two places: a status
+ * filter for display, and (had it been built that way) a separate rule for
+ * enforcement. Two rules that must agree eventually disagree, and the failure
+ * mode is a customer told they have credits the server will refuse to spend.
+ * Now the banner reads the enforcement ledger directly, so the number on the
+ * screen is the number the server will act on, by construction.
+ *
+ * The slot table is still LOGICAL-reminder-level counting: its primary key is
+ * reminder_log_id. Channels live in reminder_channel_messages and are not
+ * countable here.
+ *
+ * `head: true` with an exact count transfers no rows — a COUNT(*), not a
+ * fetch-then-length. Scoped by the table's RLS select policy to the caller's
+ * own slots.
+ *
+ * Returns null on error rather than 0 — including while migration 011 is
+ * unapplied and the table does not exist. Zero is a meaningful, reassuring
+ * number; showing it because a query failed would tell a customer at their
+ * limit that they had ten reminders left. The banner hides instead.
+ */
+export async function fetchAllowanceUsed(
+  supabase: SupabaseClient
+): Promise<number | null> {
+  const { count, error } = await supabase
+    .from("reminder_allowance_slots")
+    .select("reminder_log_id", { count: "exact", head: true });
+
+  if (error) {
+    console.error("fetchAllowanceUsed error:", error.message);
+    return null;
+  }
+  return count ?? null;
 }

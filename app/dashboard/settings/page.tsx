@@ -2,6 +2,7 @@
 
 import { useDashboard } from "@/components/dashboard/DashboardProvider";
 import SettingsCard from "@/components/dashboard/SettingsCard";
+import { PaymentMethodCard } from "@/components/dashboard/PaymentMethodCard";
 import { BETA_APPROVAL_ONLY } from "@/lib/beta-capabilities";
 
 export default function SettingsPage() {
@@ -29,7 +30,12 @@ export default function SettingsPage() {
         {/* Main settings card */}
         <div className="lg:col-span-2">
           {profile ? (
-            <SettingsCard profile={profile} userEmail={userEmail} onUpdated={setProfile} />
+            <div className="space-y-6">
+              <SettingsCard profile={profile} userEmail={userEmail} onUpdated={setProfile} />
+              {/* Phase 1: payment link only. Bank transfer is staged — see
+                  supabase/sql/008_default_payment_link.sql. */}
+              <PaymentMethodCard profile={profile} onUpdated={setProfile} />
+            </div>
           ) : (
             <div className="dash-card p-6">
               <p className="text-sm" style={{ color: "var(--dash-text-muted)" }}>Loading your settings…</p>
@@ -86,9 +92,9 @@ export default function SettingsPage() {
           </div>
 
           <div className="dash-card p-5" style={{ background: "var(--dash-accent-soft)", border: "1px solid #bae6fd" }}>
-            <p className="text-sm" style={{ color: "var(--dash-text)", fontWeight: 600 }}>How reminders work</p>
+            <p className="text-sm" style={{ color: "var(--dash-text)", fontWeight: 600 }}>How Approval Mode works</p>
             <p className="text-sm mt-1.5" style={{ color: "var(--dash-text-muted)", lineHeight: 1.5 }}>
-              In Approval Mode, ServiceSignal prepares reminders and waits for you to send them. In Auto Mode, they send on schedule automatically.
+              ServiceSignal prepares reminders for your review. Nothing is sent until you approve it.
             </p>
           </div>
         </div>

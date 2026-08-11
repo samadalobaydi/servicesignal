@@ -1,4 +1,4 @@
-import type { Invoice, InvoiceStatus, InvoiceInsert, ReminderSchedule } from "@/types";
+import type { Invoice, InvoiceStatus, InvoiceInsert, ReminderSchedule, InvoiceFormData } from "@/types";
 import { getDaysFromDue, getDueStatusLabelShort } from "./date-status";
 
 // ── Pure utility functions (no data fetching) ─────────────────────────────
@@ -94,6 +94,9 @@ export async function fetchInvoices(
   const { data, error } = await supabase
     .from("invoices")
     .select("*")
+    // Archived invoices are not operational. Filtering here means every
+    // dashboard surface excludes them by construction — see lib/invoice-live.ts.
+    .is("archived_at", null)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -122,50 +125,113 @@ export async function insertInvoice(
   return data as Invoice;
 }
 
+/**
+ * Marks an invoice paid through the trusted server route.
+ *
+ * ── WHY THIS IS NO LONGER A DIRECT TABLE WRITE ──────────────────────────
+ *
+ * It used to be `supabase.from("invoices").update({ status: "paid", ... })`
+ * from the browser, which worked only because `authenticated` held table-level
+ * UPDATE on invoices. Migration 012 revokes that: RLS answered "whose row",
+ * never "which columns, with what consequences", so an owner could set any
+ * lifecycle column straight from the console.
+ *
+ * The signature keeps its unused client argument so every call site and the
+ * provider stay unchanged.
+ */
 export async function markInvoicePaid(
-  supabase: SupabaseClient,
+  _supabase: SupabaseClient,
   id: string
 ): Promise<boolean> {
-  const { error } = await supabase
-    .from("invoices")
-    .update({ status: "paid", paid_at: new Date().toISOString() })
-    .eq("id", id);
-  // RLS UPDATE policy enforces auth.uid() = user_id — no cross-user update possible
-
-  if (error) {
-    console.error("markInvoicePaid error:", error.message);
+  try {
+    const res = await fetch(`/api/invoices/${id}/paid`, { method: "POST" });
+    const body = await res.json();
+    return body.success === true;
+  } catch {
     return false;
   }
-
-  // ── Kill switch: stop future chasing for this invoice ─────────────────────
-  // Dismiss any reminders still awaiting approval so they leave the queue and
-  // can never be sent. Historical logs (sent/failed) are left untouched.
-  // RLS (update_own_reminder_logs) scopes this to the caller's own rows.
-  const { error: dismissError } = await supabase
-    .from("reminder_logs")
-    .update({ status: "dismissed" })
-    .eq("invoice_id", id)
-    .eq("status", "pending");
-
-  if (dismissError) {
-    // Non-fatal: the invoice IS paid, and the queue also filters paid
-    // invoices defensively, plus Send Now blocks paid invoices server-side.
-    console.error("markInvoicePaid: failed to dismiss pending reminders:", dismissError.message);
-  }
-
-  return true;
 }
 
+/**
+ * Deletes an invoice through the lifecycle API.
+ *
+ * ── THIS REPLACED A LIFECYCLE BYPASS ────────────────────────────────────
+ *
+ * It used to be a bare `supabase.from("invoices").delete().eq("id", id)` from
+ * the browser, reachable from the Paid Invoices page. Given the verified
+ * production FK — reminder_logs.invoice_id ON DELETE CASCADE — that button
+ * could erase dispatched message history and, through migration 011's cascade,
+ * REFUND consumed Founding Beta allowance.
+ *
+ * All deletion now goes through DELETE /api/invoices/[id], which proves
+ * ownership, applies the lifecycle rules and returns a typed refusal. The
+ * database guard in migration 012 refuses an ineligible delete regardless.
+ */
 export async function deleteInvoice(
-  supabase: SupabaseClient,
+  _supabase: SupabaseClient,
   id: string
-): Promise<boolean> {
-  const { error } = await supabase.from("invoices").delete().eq("id", id);
-  // RLS DELETE policy enforces auth.uid() = user_id
+): Promise<{ success: boolean; message: string; state?: string; useArchive?: boolean }> {
+  try {
+    const res = await fetch(`/api/invoices/${id}`, { method: "DELETE" });
+    return await res.json();
+  } catch {
+    return { success: false, message: "Network error. Please try again." };
+  }
+}
+
+/** Archives an invoice — preserves everything, removes it from the workflow. */
+export async function archiveInvoice(
+  id: string
+): Promise<{ success: boolean; message: string; state?: string }> {
+  try {
+    const res = await fetch(`/api/invoices/${id}/archive`, { method: "POST" });
+    return await res.json();
+  } catch {
+    return { success: false, message: "Network error. Please try again." };
+  }
+}
+
+/** Saves an invoice edit. `acceptRefresh` acknowledges refreshing an unsent reminder. */
+export async function updateInvoice(
+  id: string,
+  form: InvoiceFormData,
+  acceptRefresh = false
+): Promise<{ success: boolean; message: string; state?: string; requiresRefreshConfirmation?: boolean; ownerEdited?: boolean; errors?: Record<string, string> }> {
+  try {
+    const res = await fetch(`/api/invoices/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...form, accept_refresh: acceptRefresh }),
+    });
+    return await res.json();
+  } catch {
+    return { success: false, message: "Network error. Please try again." };
+  }
+}
+
+/**
+ * Archived invoices — the ONLY read path that returns them.
+ *
+ * fetchInvoices() deliberately excludes archived rows so every dashboard
+ * surface is correct by construction. This is the deliberate exception, and it
+ * is a separate function rather than a flag so an archived row can never
+ * arrive somewhere operational by accident: nothing calls this except the
+ * Archived page.
+ *
+ * RLS scopes it to the caller, exactly as every other read here does.
+ */
+export async function fetchArchivedInvoices(
+  supabase: SupabaseClient
+): Promise<Invoice[]> {
+  const { data, error } = await supabase
+    .from("invoices")
+    .select("*")
+    .not("archived_at", "is", null)
+    .order("archived_at", { ascending: false });
 
   if (error) {
-    console.error("deleteInvoice error:", error.message);
-    return false;
+    console.error("fetchArchivedInvoices error:", error.message);
+    return [];
   }
-  return true;
+  return (data ?? []) as Invoice[];
 }

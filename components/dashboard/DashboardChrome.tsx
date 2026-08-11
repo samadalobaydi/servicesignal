@@ -1,14 +1,22 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useDashboard } from "./DashboardProvider";
 import DashboardSidebar from "./DashboardSidebar";
 import AddInvoiceForm from "./AddInvoiceForm";
 import NotificationBell from "./NotificationBell";
+import { AddInvoiceProvider } from "./AddInvoiceContext";
+import { BetaAllowanceProvider } from "./BetaAllowanceContext";
+import BetaAllowanceIndicator from "./BetaAllowanceIndicator";
 
 export default function DashboardChrome({ children }: { children: React.ReactNode }) {
   const { loading, error, setError, notice, setNotice, handleAddInvoice, userEmail } = useDashboard();
   const [addOpen, setAddOpen] = useState(false);
+
+  // Shared with the page tree so the Overview's first-run CTA opens THIS
+  // modal rather than duplicating the form. Stable identity, so consumers do
+  // not re-render on unrelated chrome state.
+  const openAddInvoice = useCallback(() => setAddOpen(true), []);
 
   // Success notices clear themselves after a few seconds.
   useEffect(() => {
@@ -34,18 +42,41 @@ export default function DashboardChrome({ children }: { children: React.ReactNod
   const initial = (userEmail?.[0] ?? "U").toUpperCase();
 
   return (
+    <AddInvoiceProvider value={openAddInvoice}>
+    <BetaAllowanceProvider>
     <div className="dash-root">
       <DashboardSidebar />
 
       {/* Main content — offset by sidebar width on desktop */}
       <div className="md:pl-[248px]">
         {/* Top bar */}
+        {/*
+          The bar itself stays full-bleed so its background and bottom border
+          run edge to edge. The ROW inside it mirrors <main> exactly —
+          max-w-[1240px] mx-auto with the same px-8 lg:px-10 — so the allowance
+          panel's left edge lands on the same vertical as the Overview heading,
+          the KPI grid and every card below. Without this the header would
+          align only until the viewport passed 1488px and then drift, because
+          <main> is centred and the header was not.
+        */}
         <header
-          className="hidden md:flex items-center justify-end gap-3 h-[68px] px-8 lg:px-10 sticky top-0 z-20"
+          className="hidden md:flex h-[68px] sticky top-0 z-20"
           style={{ background: "rgba(246,248,251,0.85)", backdropFilter: "blur(12px)", borderBottom: "1px solid var(--dash-border)" }}
         >
+          <div className="flex-1 flex items-center justify-between gap-4 px-8 lg:px-10 max-w-[1240px] mx-auto w-full">
+            {/*
+              STATUS on the left, ACTIONS on the right. The wrapper renders
+              even when the panel does not — the allowance is null until its
+              count is verified, and with a single child justify-between would
+              drag the whole action cluster to the left edge.
+            */}
+            <div className="flex items-center min-w-0">
+              <BetaAllowanceIndicator tone="light" />
+            </div>
+
+            <div className="flex items-center gap-3 flex-shrink-0">
           <button
-            onClick={() => setAddOpen(true)}
+            onClick={openAddInvoice}
             className="dash-btn"
           >
             <svg width="15" height="15" fill="none" viewBox="0 0 24 24">
@@ -67,11 +98,13 @@ export default function DashboardChrome({ children }: { children: React.ReactNod
               </span>
             )}
           </div>
+            </div>
+          </div>
         </header>
 
         {/* Mobile Add Invoice floating button */}
         <button
-          onClick={() => setAddOpen(true)}
+          onClick={openAddInvoice}
           className="md:hidden fixed bottom-6 right-6 z-20 dash-btn shadow-lg"
           style={{ padding: "0.7rem 1.2rem", fontSize: "0.95rem", boxShadow: "0 10px 28px rgba(8,145,178,0.35)" }}
         >
@@ -118,5 +151,7 @@ export default function DashboardChrome({ children }: { children: React.ReactNod
         onSave={handleAddInvoice}
       />
     </div>
+    </BetaAllowanceProvider>
+    </AddInvoiceProvider>
   );
 }

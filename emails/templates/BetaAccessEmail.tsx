@@ -1,10 +1,11 @@
-import { Img, Section, Text } from "@react-email/components";
-import { EmailLayout, EmailFooter, PrimaryButton, ContentSection, HelperText, emailBanner } from "../components";
-import { getAppBaseUrl } from "@/lib/app-urls";
+import { Section, Text } from "@react-email/components";
+import { EmailLayout, EmailFooter, PrimaryButton, ContentSection, HelperText, EmailBrandHeader } from "../components";
 
 interface BetaAccessEmailProps {
   /** First name only, already trimmed. Empty string falls back to a neutral greeting. */
   firstName: string;
+  /** The absolute, environment-aware verification URL, token included. */
+  verifyUrl: string;
 }
 
 /**
@@ -12,60 +13,74 @@ interface BetaAccessEmailProps {
  * lib/beta-access-email.ts. Pure presentation; delivery logic lives in the
  * sender, not here.
  *
- * Product truth. The CTA is a plain link to /signup — no token, no invite,
- * nothing gated. Email ownership is verified once, by Supabase, when the
- * account is confirmed. This template therefore makes NO claim about the
- * link expiring, being single-use or being personal to the recipient,
- * because none of those things are implemented.
+ * This is now the VERIFICATION email, and the only one in the journey. It
+ * previously linked straight to /signup, after which Supabase sent its own
+ * generic confirmation — two emails, two competing routes, and a visible
+ * Supabase-branded step. The address is now proven here, once, and the
+ * account is created already-confirmed.
  *
- * The applicant's email address is deliberately NOT placed in the URL:
- * query strings leak into referrer headers, browser history and server logs.
+ * The link carries a single-use token that expires in 48 hours, so unlike the
+ * previous version this template CAN state those properties: they are real.
+ *
+ * The applicant's email address is deliberately NOT placed in the URL — only
+ * the opaque token is. Query strings leak into referrer headers, browser
+ * history and server logs.
  */
-export function BetaAccessEmail({ firstName }: BetaAccessEmailProps) {
+export function BetaAccessEmail({ firstName, verifyUrl }: BetaAccessEmailProps) {
   const name = firstName.trim();
   const greeting = name ? `Hi ${name},` : "Hi,";
-  const signupUrl = `${getAppBaseUrl()}/signup`;
-
   return (
     <EmailLayout
       previewText="You can create your ServiceSignal account now."
       contentPadding="16px 40px 40px 40px"
     >
-      {/* Approved banner asset. Explicit width AND height attributes keep the
-          true 2048x826 aspect ratio in Outlook, which ignores height:auto.
-          Not a CSS background image — those are stripped by most clients. */}
-      <Section style={{ textAlign: "center", marginBottom: 20 }}>
-        <Img
-          src={emailBanner.src}
-          alt={emailBanner.alt}
-          width={emailBanner.width}
-          height={emailBanner.height}
-          style={{ margin: "0 auto", display: "block", height: "auto", maxWidth: "100%" }}
-        />
-      </Section>
+      {/* Current lockup: transparent mark + live "ServiceSignal" text. The
+          dark rectangular banner and its legacy tagline are gone. marginBottom
+          matches the 20px the banner previously left, so surrounding spacing
+          is unchanged. */}
+      <EmailBrandHeader marginBottom={20} />
 
-      <ContentSection heading="Your founding beta access">
+      <ContentSection heading="Verify your email address">
         {greeting}
       </ContentSection>
 
       <Text style={{ fontSize: 15, lineHeight: 1.65, margin: "16px 0 0 0", color: "#0f172a" }}>
-        Thanks for joining the ServiceSignal founding beta. You can create your
-        account now and start setting ServiceSignal up for your business.
+        Thanks for joining the ServiceSignal founding beta. Confirm your email
+        address, then finish creating your account.
       </Text>
 
       <Section style={{ textAlign: "center", margin: "28px 0" }}>
-        <PrimaryButton href={signupUrl}>Create your ServiceSignal account</PrimaryButton>
+        <PrimaryButton href={verifyUrl}>Verify your email</PrimaryButton>
       </Section>
 
+      {/* CHANNEL-NEUTRAL, AND DELIBERATELY SO.
+          This previously read "SMS reminders and supporting emails", which was
+          wrong twice over: it ranked one channel above the other, and it
+          advertised SMS, which the current build does not send. A verification
+          email is not the place to describe a product roadmap — it exists to
+          get one address confirmed — so this states only what is true now and
+          will still be true at launch: reminders are prepared, and nothing
+          leaves without the owner's approval. */}
       <Text style={{ fontSize: 15, lineHeight: 1.65, margin: "0 0 16px 0", color: "#0f172a" }}>
-        ServiceSignal helps you follow up overdue invoices with professional
-        email reminders. Every reminder is prepared for you and waits in your
-        approval queue — nothing is sent to a customer until you review it and
-        decide it should go.
+        ServiceSignal helps you prepare professional invoice reminders, with
+        every message waiting for your review and approval before anything is
+        sent.
       </Text>
 
       <HelperText>
-        If the button doesn&apos;t work, open {signupUrl} in your browser.
+        This link is personal to you, can be used once, and expires in 48 hours.
+        If the button doesn&apos;t work, copy and paste this link into your
+        browser:
+        <br />
+        {/* The fallback URL carries a ~43-character base64url token, so the
+            whole string is roughly 90 characters with no space, hyphen or
+            slash late enough to break on. Left inline in muted body text it
+            pushed past the 560px content width on mobile and in Outlook.
+            Given its own line and explicit break rules it wraps instead.
+            Same string as the button's href — one destination, never two. */}
+        <span style={{ wordBreak: "break-all", overflowWrap: "anywhere", color: "#475569" }}>
+          {verifyUrl}
+        </span>
       </HelperText>
 
       {/* Reason-for-receipt. Required for a legitimate transactional email and
@@ -94,19 +109,21 @@ export function BetaAccessEmail({ firstName }: BetaAccessEmailProps) {
  * in text-only clients and reads as a legitimate transactional email to spam
  * filters, which treat HTML-only mail with more suspicion.
  */
-export function betaAccessEmailText(firstName: string): string {
+export function betaAccessEmailText(firstName: string, verifyUrl: string): string {
   const name = firstName.trim();
   const greeting = name ? `Hi ${name},` : "Hi,";
-  const signupUrl = `${getAppBaseUrl()}/signup`;
-
   return [
     greeting,
     "",
-    "Thanks for joining the ServiceSignal founding beta. You can create your account now and start setting ServiceSignal up for your business.",
+    "Thanks for joining the ServiceSignal founding beta. Confirm your email address, then finish creating your account.",
     "",
-    `Create your ServiceSignal account: ${signupUrl}`,
+    `Verify your email: ${verifyUrl}`,
     "",
-    "ServiceSignal helps you follow up overdue invoices with professional email reminders. Every reminder is prepared for you and waits in your approval queue — nothing is sent to a customer until you review it and decide it should go.",
+    "This link is personal to you, can be used once, and expires in 48 hours.",
+    "",
+    // Kept identical in wording to the HTML version above — a plain-text part
+    // that says something different is a spam-filter signal, not a nicety.
+    "ServiceSignal helps you prepare professional invoice reminders, with every message waiting for your review and approval before anything is sent.",
     "",
     "You received this email because you requested access to the ServiceSignal founding beta.",
     "",

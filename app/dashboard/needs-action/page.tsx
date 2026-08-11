@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import type { Invoice } from "@/types";
 import { useDashboard } from "@/components/dashboard/DashboardProvider";
 import NeedsActionQueue from "@/components/dashboard/NeedsActionQueue";
@@ -8,6 +8,7 @@ import NextStepModal from "@/components/dashboard/NextStepModal";
 import SummaryStrip, { type SummaryStat } from "@/components/dashboard/SummaryStrip";
 import InvoiceSearchInput, { matchesInvoiceSearch, SearchEmptyState } from "@/components/dashboard/InvoiceSearchInput";
 import { formatCurrency } from "@/lib/invoices";
+import { OnboardingHandoff } from "@/components/dashboard/OnboardingHandoff";
 
 export default function NeedsActionPage() {
   const {
@@ -56,6 +57,14 @@ export default function NeedsActionPage() {
 
   return (
     <div className="space-y-6">
+      {/* Onboarding hands off directly to this queue, so the confirmation
+          belongs here. useSearchParams suspends during prerender, hence the
+          boundary. The "Review it" link is suppressed — it would point at
+          this page. */}
+      <Suspense fallback={null}>
+        <OnboardingHandoff showReviewLink={false} />
+      </Suspense>
+
       <div>
         <h1 style={{ fontSize: "1.85rem", fontWeight: 700, color: "var(--dash-text)", letterSpacing: "-0.02em" }}>
           Needs Action

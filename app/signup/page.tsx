@@ -1,337 +1,44 @@
-"use client";
+import { Suspense } from "react";
+import { resolveContinuation } from "@/lib/beta-continuation-server";
+import { SignupForm } from "@/components/auth/SignupForm";
+import { BetaAccessRequired } from "@/components/auth/BetaAccessRequired";
 
-import { Suspense, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
-import { getSupabaseBrowser } from "@/lib/supabase-browser";
-import { getAuthCallbackUrl } from "@/lib/app-urls";
-import { readSignupPrefill, writeSignupPrefill, clearSignupPrefill } from "@/lib/signup-prefill";
-import { cleanBusinessName, BUSINESS_NAME_MESSAGES } from "@/lib/business-name";
-import { SignupAside } from "@/components/auth/SignupAside";
-import splitStyles from "@/components/auth/auth-split.module.css";
-import { updateProfile } from "@/lib/profile";
-import {
-  AuthShell, AuthHeading, AuthError, AuthInput, PasswordInput,
-  SubmitButton, OrDivider, SocialButtons, BRAND_BLUE, ENABLED_OAUTH_PROVIDERS,
-} from "@/components/auth/AuthShell";
+export const metadata = { title: "Create your account — ServiceSignal" };
 
-// ── Live password rules ────────────────────────────────────────────────
-const RULES: { id: string; label: string; test: (p: string) => boolean }[] = [
-  { id: "len",     label: "Minimum 8 characters", test: (p) => p.length >= 8 },
-  { id: "upper",   label: "Uppercase letter",     test: (p) => /[A-Z]/.test(p) },
-  { id: "lower",   label: "Lowercase letter",     test: (p) => /[a-z]/.test(p) },
-  { id: "number",  label: "Number",               test: (p) => /[0-9]/.test(p) },
-  { id: "special", label: "Special character",    test: (p) => /[^A-Za-z0-9]/.test(p) },
-];
+// Reads the continuation cookie, so it must never be statically rendered.
+export const dynamic = "force-dynamic";
 
-const STRENGTH = [
-  { label: "Weak",      color: "#dc2626" },
-  { label: "Weak",      color: "#dc2626" },
-  { label: "Fair",      color: "#d97706" },
-  { label: "Good",      color: "#eab308" },
-  { label: "Strong",    color: "#059669" },
-  { label: "Excellent", color: "#059669" },
-];
+/**
+ * Account setup — gated on a verified founding-beta invitation.
+ *
+ * THE GATE IS SERVER-SIDE AND THE FORM DOES NOT EXIST WITHOUT IT.
+ *
+ * Previously this route rendered the form to anyone and created accounts via
+ * supabase.auth.signUp, which sent Supabase's own generic confirmation email.
+ * That was the second of the two competing funnels: a visitor could reach
+ * account setup without ever proving they owned the address.
+ *
+ * Now the invitation is resolved here, before any markup is produced. Without
+ * one there is no form in the response at all — nothing to re-enable in
+ * devtools, no client flag to flip, and no code path that can call signUp.
+ * The verified email is passed down as a prop, so the form never has to decide
+ * whether it trusts anything.
+ *
+ * This is a founding-beta posture, not a permanent one. Restoring a public
+ * signup path later means adding an `else` branch that renders the form
+ * without a beta invitation — the form itself needs no further change.
+ */
+export default async function SignupPage() {
+  const continuation = await resolveContinuation();
 
-function SignupForm() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const next = searchParams.get("next") ?? "/dashboard";
+  if (!continuation) return <BetaAccessRequired />;
 
-  const [businessName, setBusinessName] = useState("");
-  const [email, setEmail]       = useState("");
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm]   = useState("");
-  const [terms, setTerms]       = useState(false);
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState<string | null>(null);
-  const [success, setSuccess]   = useState(false);
-
-  /**
-   * Prefill from the Founding Beta form, handed over via same-origin
-   * sessionStorage (see lib/signup-prefill.ts).
-   *
-   * Runs in an effect rather than a lazy useState initialiser on purpose:
-   * this component is server-rendered first, where sessionStorage does not
-   * exist, so reading during render would produce a hydration mismatch.
-   *
-   * Only fills a field that is still empty, so anything the visitor has
-   * already typed is never overwritten.
-   *
-   * Reading does NOT clear. The values must survive a refresh, a trip to
-   * Terms or Privacy and back, and a failed account-creation attempt — all
-   * of which remount this page and re-run this effect. Cleanup happens at
-   * exactly one place: a successful supabase.auth.signUp in onSubmit below.
-   * sessionStorage is tab-scoped, so anything not cleared there is discarded
-   * when the tab closes.
-   */
-  useEffect(() => {
-    const prefill = readSignupPrefill();
-    if (!prefill) return;
-
-    if (prefill.businessName.trim()) {
-      setBusinessName((current) => (current ? current : prefill.businessName.trim()));
-    }
-    if (prefill.email.trim()) {
-      setEmail((current) => (current ? current : prefill.email.trim()));
-    }
-  }, []);
-
-  const passed = RULES.filter((r) => r.test(password)).length;
-  const allRulesPass = passed === RULES.length;
-  const strength = STRENGTH[passed];
-
-  /**
-   * Snapshot taken just before a legal document opens.
-   *
-   * Saves ONLY the business name and email — never the password, the
-   * confirmation field or the consent checkbox — and only at this moment,
-   * never on every keystroke. If the visitor later lands on a fresh instance
-   * of this page (typically by reloading the original tab), the prefill effect
-   * above restores what they had actually typed rather than the older values
-   * carried over from the beta form.
-   */
-  const snapshotBeforeLegal = () => {
-    writeSignupPrefill({ businessName, email });
-  };
-
-  const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-
-    // Weak passwords are blocked client-side before any auth call.
-    // Business name is validated FIRST: it is the only field whose absence
-    // silently degrades what the customer eventually receives, and until now
-    // it was the only field with no validation at all.
-    const business = cleanBusinessName(businessName);
-    if (business.error) {
-      setError(BUSINESS_NAME_MESSAGES[business.error]);
-      return;
-    }
-
-    if (!allRulesPass) {
-      setError("Please choose a stronger password — all requirements must be met.");
-      return;
-    }
-    if (password !== confirm) {
-      setError("Passwords do not match.");
-      return;
-    }
-    if (!terms) {
-      setError("Please agree to the Terms of Service and Privacy Policy.");
-      return;
-    }
-
-    setLoading(true);
-    const supabase = getSupabaseBrowser();
-
-    // Unchanged auth call from the previous version, plus a durable
-    // acceptance signal. terms_accepted travels in user_metadata, which
-    // Supabase's own auth server stores on auth.users immediately — even
-    // when email confirmation is required and no session exists yet. The
-    // actual version numbers and timestamp are NOT trusted from the
-    // client: app/api/profile/route.ts reads its own LEGAL_CONFIG
-    // constants and the database's own now() when it durably persists
-    // this to the profiles row.
-    const { data, error: authError } = await supabase.auth.signUp({
-      email: email.trim().toLowerCase(),
-      password,
-      options: {
-        emailRedirectTo: getAuthCallbackUrl(),
-        // business_name travels in user_metadata so it SURVIVES email
-        // confirmation. With confirmation enabled signUp returns no session,
-        // so the profile write below never runs — previously the name the
-        // user typed was simply discarded. Supabase stores user_metadata on
-        // auth.users immediately, before confirmation, so GET /api/profile
-        // can seed the profile from it whenever the user first arrives.
-        data: { terms_accepted: true, business_name: business.value },
-      },
-    });
-
-    if (authError) {
-      // Account creation failed. The prefill is deliberately LEFT IN PLACE so
-      // a retry — including one after a full page reload — still starts from
-      // the details the visitor already gave us.
-      setError(authError.message);
-      setLoading(false);
-      return;
-    }
-
-    // ── The one cleanup point ────────────────────────────────────────────────
-    // signUp returned without error, so the account exists. This single call
-    // covers both branches below (immediate session, and the confirmation-
-    // required path), which is why it sits here rather than being duplicated.
-    // Anything not cleared here dies with the tab.
-    clearSignupPrefill();
-
-    // If email confirmation is disabled in Supabase, session is created immediately
-    if (data.session) {
-      // Save the business name via the EXISTING profile endpoint.
-      // Bug found and fixed during this audit: this previously called
-      // fetch(..., { method: "PATCH" }) directly, but app/api/profile's
-      // update handler is PUT, not PATCH — lib/profile.ts's own
-      // updateProfile() already uses the correct method; this now reuses
-      // it instead of a second, inconsistent ad-hoc call.
-      // Fast path only. The authoritative write is the metadata seed in
-      // GET /api/profile, which covers BOTH branches; this just avoids a
-      // one-render gap when there is already a session. Same cleaned value,
-      // so the two can never disagree.
-      try {
-        await updateProfile({ business_name: business.value });
-      } catch {
-        // Non-fatal — the seed will still populate it on first profile read.
-      }
-      router.push(next);
-      router.refresh();
-      return;
-    }
-
-    // Email confirmation is enabled — tell the user to check inbox
-    setSuccess(true);
-    setLoading(false);
-  };
-
-  if (success) {
-    return (
-      <AuthShell aside={<SignupAside />}>
-        <div className="text-center py-4">
-          <div className="w-14 h-14 rounded-full mx-auto mb-5 flex items-center justify-center" style={{ background: "#ecfdf5", border: "2px solid #059669" }}>
-            <svg width="24" height="24" fill="none" viewBox="0 0 24 24"><path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke="#059669" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-          </div>
-          <h1 style={{ fontSize: "1.35rem", fontWeight: 700, color: "#0f172a" }}>Check your inbox</h1>
-          <p className="text-sm mt-2" style={{ color: "#64748b", lineHeight: 1.6 }}>
-            We&apos;ve sent a confirmation link to <span style={{ fontWeight: 600, color: "#0f172a" }}>{email}</span>.
-            Click it to activate your account, then sign in.
-          </p>
-          <Link href="/login" className="inline-block mt-6 text-sm" style={{ color: BRAND_BLUE, fontWeight: 600 }}>
-            Go to sign in →
-          </Link>
-        </div>
-      </AuthShell>
-    );
-  }
-
-  return (
-    <AuthShell
-      aside={<SignupAside />}
-      footer={
-        <>
-          {/* Sign-in leads; returning to the landing page is a quieter
-              secondary route beneath it — mirrors /login's footer hierarchy. */}
-          <p className={splitStyles.footerPrimary}>
-            Already have an account?{" "}
-            <Link href="/login" style={{ color: BRAND_BLUE, fontWeight: 600 }}>Sign in</Link>
-          </p>
-          {/* REVIEW BRANCH: points at the /v2 preview. Change back to "/" when v2 becomes the root landing page. */}
-          <Link href="/v2" className={splitStyles.footerSecondary}>← Back to landing page</Link>
-        </>
-      }
-    >
-      <AuthHeading title="Create your account" subtitle="Follow up overdue invoices with professional email reminders you approve before they send." />
-      <AuthError message={error} />
-
-      <form onSubmit={handleSignup} noValidate className="space-y-5">
-        <AuthInput id="business" label="Business Name" value={businessName} onChange={setBusinessName} autoComplete="organization" placeholder="e.g. Morrison Plumbing Ltd" />
-        <AuthInput id="email" label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" placeholder="you@example.com" />
-        <PasswordInput id="password" label="Password" value={password} onChange={setPassword} autoComplete="new-password" />
-
-        {/* Live requirements + strength */}
-        {password.length > 0 && (
-          <div className="rounded-lg p-3.5" style={{ background: "#f8fafc", border: "1px solid #e5e7eb" }}>
-            <div className="flex items-center gap-2.5 mb-2.5">
-              <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: "#e5e7eb" }}>
-                <div className="h-full rounded-full transition-all" style={{ width: `${(passed / RULES.length) * 100}%`, background: strength.color }} />
-              </div>
-              <span className="text-xs whitespace-nowrap" style={{ color: strength.color, fontWeight: 650 }}>{strength.label}</span>
-            </div>
-            <ul className="space-y-1" aria-label="Password requirements">
-              {RULES.map((r) => {
-                const ok = r.test(password);
-                return (
-                  <li key={r.id} className="flex items-center gap-2 text-xs" style={{ color: ok ? "#059669" : "#64748b" }}>
-                    {ok ? (
-                      <svg width="12" height="12" fill="none" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 13l4 4L19 7" stroke="#059669" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                    ) : (
-                      <span className="w-3 h-3 rounded-full inline-block" style={{ border: "1.5px solid #cbd5e1" }} aria-hidden="true" />
-                    )}
-                    {r.label}
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        )}
-
-        <PasswordInput id="confirm" label="Confirm Password" value={confirm} onChange={setConfirm} autoComplete="new-password" />
-        {confirm.length > 0 && password !== confirm && (
-          <p className="text-xs -mt-3" style={{ color: "#dc2626" }}>Passwords do not match yet.</p>
-        )}
-
-        {/* Both legal links open in a new tab so this form — including anything
-            already typed, and any prefill carried from the Founding Beta form —
-            is never unmounted mid-signup. rel="noopener" severs the new tab's
-            window.opener reference; "noreferrer" additionally withholds the
-            Referer header.
-
-            Each link carries a visually hidden "(opens in a new tab)" suffix.
-            WCAG technique G201 asks for advance warning before a new window
-            opens; putting the warning inside the link makes the accessible
-            name "Terms of Service (opens in a new tab)" for screen-reader
-            users while adding nothing to the visible line. It is a suffix
-            rather than an aria-label so the visible text is not replaced.
-
-            stopPropagation keeps a click on either link from toggling the
-            surrounding checkbox label. */}
-        <label className="flex items-start gap-2.5 cursor-pointer select-none">
-          <input type="checkbox" checked={terms} onChange={(e) => setTerms(e.target.checked)} className="w-4 h-4 rounded mt-0.5" style={{ accentColor: BRAND_BLUE }} />
-          <span className="text-sm" style={{ color: "#0f172a", lineHeight: 1.5 }}>
-            I agree to the{" "}
-            <Link
-              href="/terms?from=signup"
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => { e.stopPropagation(); snapshotBeforeLegal(); }}
-              style={{ fontWeight: 600, color: BRAND_BLUE }}
-            >
-              Terms of Service
-              <span className="sr-only"> (opens in a new tab)</span>
-            </Link>{" "}
-            and{" "}
-            <Link
-              href="/privacy?from=signup"
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => { e.stopPropagation(); snapshotBeforeLegal(); }}
-              style={{ fontWeight: 600, color: BRAND_BLUE }}
-            >
-              Privacy Policy
-              <span className="sr-only"> (opens in a new tab)</span>
-            </Link>
-            .
-          </span>
-        </label>
-
-        <SubmitButton loading={loading} idleText="Create Account" loadingText="Creating your account…" />
-      </form>
-
-      {/* The divider is only meaningful when there is something below it.
-          ENABLED_OAUTH_PROVIDERS is empty until a provider is confirmed in
-          Supabase, so both are hidden together rather than leaving a stranded
-          "OR". Signup's layout is otherwise unchanged. */}
-      {ENABLED_OAUTH_PROVIDERS.length > 0 && (
-        <>
-          <OrDivider />
-          <SocialButtons next={next} />
-        </>
-      )}
-    </AuthShell>
-  );
-}
-
-export default function SignupPage() {
   return (
     <Suspense>
-      <SignupForm />
+      <SignupForm
+        betaEmail={continuation.email}
+        betaBusinessName={continuation.businessName}
+      />
     </Suspense>
   );
 }

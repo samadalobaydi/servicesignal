@@ -1,15 +1,88 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 
 import { useDashboard } from "@/components/dashboard/DashboardProvider";
 import ActiveChasingList from "@/components/dashboard/ActiveChasingList";
 import SummaryStrip, { type SummaryStat } from "@/components/dashboard/SummaryStrip";
 import InvoiceSearchInput, { matchesInvoiceSearch, SearchEmptyState } from "@/components/dashboard/InvoiceSearchInput";
 import { formatCurrency } from "@/lib/invoices";
+import { OnboardingHandoff } from "@/components/dashboard/OnboardingHandoff";
+import { SentConfirmation } from "@/components/dashboard/SentConfirmation";
+import AddInvoiceForm from "@/components/dashboard/AddInvoiceForm";
+import { updateInvoice } from "@/lib/invoices";
+import { formatAmount, isoToUkDate } from "@/lib/invoice-input";
+import type { Invoice, InvoiceFormData } from "@/types";
 
 export default function ChasingPage() {
-  const { buckets, pendingReminderInvoiceIds, reminders, handlePrepareReminder, handleMarkPaid } = useDashboard();
+  const {
+    buckets, pendingReminderInvoiceIds, reminders, reminderHistory,
+    handlePrepareReminder, handleMarkPaid, handleDeleteInvoice, handleArchiveInvoice,
+    refreshAll, setError, setNotice,
+  } = useDashboard();
+
+  /**
+   * invoice_id → every reminder status. Delete-vs-archive eligibility is a
+   * per-INVOICE question ("has anything ever been dispatched?"), so pending
+   * and history are merged; one historic sent reminder forces archive for ever.
+   */
+  const reminderStatusesByInvoice = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const r of [...reminders, ...reminderHistory]) {
+      (map[r.invoice_id] ??= []).push(r.status);
+    }
+    return map;
+  }, [reminders, reminderHistory]);
+
+  const [editing, setEditing] = useState<Invoice | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const editInitial: InvoiceFormData | undefined = editing
+    ? {
+        invoice_reference: editing.invoice_reference ?? "",
+        job_description: editing.job_description ?? "",
+        customer_name: editing.customer_name,
+        customer_email: editing.customer_email,
+        customer_phone: editing.customer_phone,
+        amount: formatAmount(editing.amount),
+        due_date: isoToUkDate(editing.due_date),
+        payment_link: editing.payment_link ?? "",
+        reminder_tone: editing.reminder_tone,
+        reminder_schedules: editing.reminder_schedules,
+      }
+    : undefined;
+
+  /**
+   * Two-phase save. The first attempt does NOT acknowledge refreshing an
+   * unsent reminder, so the server refuses and tells us what it would cost;
+   * the warning is shown and the second attempt carries the acknowledgement.
+   *
+   * The confirmation is therefore enforced by the server, not by this dialog —
+   * a direct API call cannot skip it either.
+   */
+  const saveEdit = async (data: InvoiceFormData) => {
+    if (!editing) return;
+    setSaving(true);
+    const first = await updateInvoice(editing.id, data, warning !== null);
+    setSaving(false);
+
+    if (first.requiresRefreshConfirmation) {
+      setWarning(
+        first.ownerEdited
+          ? "This reminder has been edited. Saving these invoice changes will regenerate the unsent SMS and email and replace those edits."
+          : "This invoice has reminders ready for review. Saving these changes will refresh the unsent SMS and email so they match the updated invoice."
+      );
+      return;
+    }
+
+    if (!first.success) { setError(first.message); return; }
+
+    setEditing(null);
+    setWarning(null);
+    setNotice(first.state === "updated" ? "Invoice updated." : first.message);
+    await refreshAll();
+  };
 
   const [search, setSearch] = useState("");
   const active = buckets.chasing;
@@ -52,6 +125,21 @@ export default function ChasingPage() {
 
   return (
     <div className="space-y-6">
+      {/* Onboarding now hands off HERE, not to Needs Action. A brand-new
+          invoice is ordinary active work, not an exception needing a decision.
+          useSearchParams suspends during prerender, hence the boundary. The
+          "Review it" link is suppressed — the invoice is on this page. */}
+      <Suspense fallback={null}>
+        <OnboardingHandoff showReviewLink={false} />
+      </Suspense>
+
+      {/* Success confirmation after a send, carried in the URL by the review
+          page. role="status" so it is announced without stealing focus, and it
+          clears on the next navigation because the query string does. */}
+      <Suspense fallback={null}>
+        <SentConfirmation />
+      </Suspense>
+
       <div>
         <h1 style={{ fontSize: "1.85rem", fontWeight: 700, color: "var(--dash-text)", letterSpacing: "-0.02em" }}>
           Active Chasing
@@ -73,8 +161,21 @@ export default function ChasingPage() {
           pendingReminderInvoiceIds={pendingReminderInvoiceIds}
           onPrepareReminder={handlePrepareReminder}
           onMarkPaid={handleMarkPaid}
+          reminderStatusesByInvoice={reminderStatusesByInvoice}
+          onEditInvoice={(inv) => { setWarning(null); setEditing(inv); }}
+          onDeleteInvoice={async (inv) => handleDeleteInvoice(inv.id)}
+          onArchiveInvoice={async (inv) => handleArchiveInvoice(inv.id)}
         />
       )}
+      <AddInvoiceForm
+        open={editing !== null}
+        mode="edit"
+        initial={editInitial}
+        consequenceWarning={warning}
+        saving={saving}
+        onClose={() => { setEditing(null); setWarning(null); }}
+        onSave={saveEdit}
+      />
     </div>
   );
 }

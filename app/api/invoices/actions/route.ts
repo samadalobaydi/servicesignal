@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServer } from "@/lib/supabase-server";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import {
+  markInvoicePaidForOwner, setEscalationForOwner, dismissPendingForOwner,
+} from "@/lib/invoice-owner-writes";
 import { escalationStatusForAction } from "@/lib/escalation";
 import type { InvoiceActionType } from "@/types";
 
@@ -81,13 +85,26 @@ export async function POST(request: NextRequest) {
   }
 
   // 2. Apply any state change implied by the action.
-  if (actionType === "marked_paid") {
-    const { error: paidError } = await supabase
-      .from("invoices")
-      .update({ status: "paid", paid_at: new Date().toISOString() })
-      .eq("id", body.invoice_id);
+  //
+  // These invoice writes go through the SERVICE-ROLE client, because migration
+  // 012 revokes UPDATE on invoices from `authenticated`. service_role bypasses
+  // RLS, so the ownership guarantee RLS used to provide is replaced by an
+  // explicit `.eq("user_id", user.id)` inside every helper — with user.id taken
+  // from the session verified above, never from the request body.
+  const admin = getSupabaseAdmin();
+  if (!admin) {
+    return NextResponse.json(
+      { success: true, message: "Action recorded, but the status change failed.", partial: true },
+      { status: 200 }
+    );
+  }
 
-    if (paidError) {
+  if (actionType === "marked_paid") {
+    const paid = await markInvoicePaidForOwner(
+      admin, body.invoice_id, user.id, new Date().toISOString()
+    );
+
+    if (!paid.ok || !paid.matched) {
       return NextResponse.json(
         { success: true, message: "Action recorded, but marking paid failed.", partial: true },
         { status: 200 }
@@ -96,20 +113,13 @@ export async function POST(request: NextRequest) {
 
     // Kill switch: dismiss any reminders still awaiting approval for this
     // invoice so future chasing stops. Historical sent logs are untouched.
-    await supabase
-      .from("reminder_logs")
-      .update({ status: "dismissed" })
-      .eq("invoice_id", body.invoice_id)
-      .eq("status", "pending");
+    await dismissPendingForOwner(admin, body.invoice_id, user.id);
   } else {
     const newEscalation = escalationStatusForAction(actionType);
     if (newEscalation) {
-      const { error: escError } = await supabase
-        .from("invoices")
-        .update({ escalation_status: newEscalation })
-        .eq("id", body.invoice_id);
+      const esc = await setEscalationForOwner(admin, body.invoice_id, user.id, newEscalation);
 
-      if (escError) {
+      if (!esc.ok || !esc.matched) {
         return NextResponse.json(
           { success: true, message: "Action recorded, but status update failed.", partial: true },
           { status: 200 }

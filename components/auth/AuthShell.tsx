@@ -195,6 +195,15 @@ export function PasswordInput(props: {
   onChange: (v: string) => void;
   autoComplete?: string;
   labelRight?: React.ReactNode;
+  /**
+   * Optional accessibility wiring, added for the signup password fields.
+   *
+   * Both default to undefined/false, so /login, /forgot-password and
+   * /reset-password render byte-identically to before — they simply pass
+   * neither, and no attribute appears.
+   */
+  describedBy?: string;
+  invalid?: boolean;
 }) {
   const [show, setShow] = useState(false);
   return (
@@ -212,13 +221,19 @@ export function PasswordInput(props: {
           value={props.value}
           onChange={(e) => props.onChange(e.target.value)}
           autoComplete={props.autoComplete}
+          aria-describedby={props.describedBy}
+          aria-invalid={props.invalid || undefined}
           required
         />
+        {/* Each PasswordInput owns its own `show` state, so the two fields on
+            the signup form toggle independently. type="button" keeps it out of
+            the form's submit path. */}
         <button
           type="button"
           onClick={() => setShow((s) => !s)}
           aria-label={show ? "Hide password" : "Show password"}
-          className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center justify-center"
+          aria-pressed={show}
+          className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center justify-center rounded"
           style={{ color: "#64748b", width: 24, height: 24 }}
         >
           {show ? (

@@ -16,6 +16,10 @@ interface BuildReminderEmailParams {
   amount: number;
   dueDate: string;        // ISO date
   paymentLink?: string;
+  /** Migration 007. Absent on every invoice created before it. */
+  invoiceReference?: string | null;
+  /** Migration 007. Optional context, e.g. "Boiler repair at 18 King Street". */
+  jobDescription?: string | null;
 }
 
 /**
@@ -29,16 +33,39 @@ function resolveDueStatus(dueDate: string): DueStatus {
   return getInvoiceDueStatus(dueDate);
 }
 
-// ── Tone-specific greeting / closing (unchanged) ────────────────────────────
+// ── Greeting ────────────────────────────────────────────────────────────────
+
+/**
+ * The name to greet by: the first whitespace-separated token.
+ *
+ * "Abdul Alobaydi" reads better as "Hi Abdul" than "Hi Abdul Alobaydi", which
+ * sounds like a form letter. Deliberately NOT clever — no title stripping, no
+ * name-order detection, no library. Those get non-Western names wrong in ways
+ * that are worse than being slightly formal.
+ *
+ * Falls back to the whole string when there is no space, which is what keeps
+ * company names ("Oakfield Plumbing Ltd" -> "Oakfield") from being mangled
+ * beyond recognition — and a single-word name is returned untouched.
+ *
+ * KNOWN LIMITATION, accepted: "Dr Smith" greets as "Dr". Rare enough, and the
+ * alternative is a title list that will always be incomplete.
+ */
+export function greetingName(customerName: string): string {
+  const trimmed = customerName.trim();
+  if (!trimmed) return "there";
+  const first = trimmed.split(/\s+/)[0];
+  return first || trimmed;
+}
 
 function toneOpening(tone: ReminderTone, customerName: string): string {
+  const name = greetingName(customerName);
   switch (tone) {
     case "friendly":
-      return `Hi ${customerName}, just a friendly note from us.`;
+      return `Hi ${name},`;
     case "firm":
-      return `Hi ${customerName},`;
+      return `Hi ${name},`;
     case "final":
-      return `Dear ${customerName},`;
+      return `Dear ${name},`;
   }
 }
 
@@ -75,55 +102,110 @@ function subjectLine(
 }
 
 /**
- * The core sentence describing the invoice's status. Always derived from the
- * live due-status and the actual due date — never from the schedule name.
+ * The opening line that names WHAT is being chased.
+ *
+ * Previously the invoice reference sat on its own orphaned line — "Invoice
+ * INV-001 (kitchen work)" — floating between a redundant "This is a reminder
+ * from X" sentence and the amount. Reading it back, the message was obviously
+ * three database fields stacked up rather than something a person wrote.
+ *
+ * It now opens the sentence instead, so the reference and job description are
+ * carried by grammar. Every combination of null reference and null job
+ * description still produces a clean sentence with no dangling punctuation —
+ * that is what the branching below is for, not decoration.
  */
-function statusSentence(
+function subjectSentence(
+  tone: ReminderTone,
+  reference: string | null,
+  job: string | null
+): string {
+  const lead =
+    tone === "friendly"
+      ? "Just following up on"
+      : tone === "final"
+      ? "This is a final notice regarding"
+      : "I'm following up on";
+
+  if (reference && job) return `${lead} invoice ${reference} for ${job}.`;
+  if (reference) return `${lead} invoice ${reference}.`;
+  if (job) return `${lead} your invoice for ${job}.`;
+  return `${lead} your unpaid invoice.`;
+}
+
+/**
+ * The balance-and-date sentence, derived from the LIVE due status — never from
+ * the schedule name, which only records when the reminder was queued.
+ */
+function balanceSentence(
   tone: ReminderTone,
   status: DueStatus,
   amountStr: string,
   dueStr: string
 ): string {
-  // Final reminder, overdue: spell out the exact days overdue.
-  if (tone === "final" && status.kind === "overdue") {
-    return `This is a final notice. Your invoice for ${amountStr} is now ${status.days} ${status.days === 1 ? "day" : "days"} overdue. It was originally due on ${dueStr} and remains unpaid.`;
-  }
+  const days = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
 
   switch (status.kind) {
     case "upcoming":
-      return `Your invoice for ${amountStr} is due in ${status.days} ${status.days === 1 ? "day" : "days"} (${dueStr}).`;
+      return `The balance of ${amountStr} is due on ${dueStr}.`;
     case "due_today":
-      return `Your invoice for ${amountStr} is due today (${dueStr}).`;
+      return `The balance of ${amountStr} is due today, ${dueStr}.`;
     case "overdue":
-      return `Your invoice for ${amountStr} is now ${status.days} ${status.days === 1 ? "day" : "days"} overdue. It was due on ${dueStr} and remains unpaid. Please arrange payment as soon as possible.`;
+      // Final states the age explicitly; the others keep it lighter. All three
+      // name the amount and the original due date, which is the evidence the
+      // recipient actually needs.
+      return tone === "final"
+        ? `The outstanding balance of ${amountStr} was due on ${dueStr} and is now ${days(status.days)} overdue.`
+        : `The outstanding balance of ${amountStr} was due on ${dueStr}.`;
   }
 }
 
-/** Wraps the status sentence with light tone-specific framing. */
-function toneBody(
-  tone: ReminderTone,
-  status: DueStatus,
-  amountStr: string,
-  dueStr: string
-): string {
-  const core = statusSentence(tone, status, amountStr, dueStr);
+/**
+ * The closing request. This is where the three tones genuinely differ — if
+ * they all asked in the same words, the tone setting would be decorative.
+ *
+ * None of them threaten, invoke legal process, or invent urgency. "Final" is
+ * firmer and more explicit about the delay; it does not become a demand.
+ */
+function requestSentence(tone: ReminderTone, status: DueStatus, hasPayment: boolean): string {
+  // NO-PAYMENT-LINK WORDING.
+  //
+  // This previously read "using your usual payment method", which asserts that
+  // ServiceSignal knows how this business is paid. It does not: when no payment
+  // link is stored, the product holds no payment information of any kind. The
+  // customer may also have no idea what the "usual" method is — a first-time
+  // customer certainly does not.
+  //
+  // The replacement asks for payment without claiming knowledge, and offers the
+  // one thing that is always true: replying reaches the business, because
+  // Reply-To is set to the owner's account address on every send.
+  // Leading space, empty when there is no link, so every sentence below reads
+  // correctly with or without it and none needs a second variant.
+  const how = hasPayment ? " using the link below" : "";
 
-  // Final tone already reads as a complete notice.
-  if (tone === "final") return core;
+  // Offered only when no link exists: it is the one route to payment details
+  // that is always true, because Reply-To is set to the owner's own account
+  // address on every send.
+  const replyOffer = hasPayment
+    ? ""
+    : " If you need the payment details resent, just reply to this email.";
 
-  // The overdue sentence already ends with a payment request, so don't
-  // append a second one — just add a light friendly softener if applicable.
-  if (status.kind === "overdue") {
-    return tone === "friendly"
-      ? `${core} If it's already on its way, please ignore this note.`
-      : core;
+  if (status.kind === "upcoming") {
+    switch (tone) {
+      case "friendly":
+        return `No action needed yet — just a heads-up so it doesn't catch you out.`;
+      case "firm":
+      case "final":
+        return `Please arrange payment${how} by the due date.${replyOffer}`;
+    }
   }
 
   switch (tone) {
     case "friendly":
-      return `${core} No stress if it's already on its way — this is just a gentle reminder in case it slipped through.`;
+      return `Please arrange payment${how} when you get a moment. If it's already on its way, please ignore this note.${replyOffer}`;
     case "firm":
-      return `${core} Please arrange payment at your earliest convenience.`;
+      return `Please arrange payment${how} at your earliest convenience.${replyOffer}`;
+    case "final":
+      return `Please arrange payment${how} as soon as possible so we can close this off.${replyOffer}`;
   }
 }
 
@@ -131,6 +213,12 @@ function toneBody(
 
 export function buildReminderEmail(params: BuildReminderEmailParams): ReminderEmailContent {
   const { tone, customerName, businessName, amount, dueDate, paymentLink } = params;
+
+  // Both optional by construction: invoices predating migration 007 have
+  // neither, and the reminder must read correctly without them rather than
+  // printing an empty reference or a dangling "for ".
+  const reference = params.invoiceReference?.trim() || null;
+  const job = params.jobDescription?.trim() || null;
 
   const amountStr = formatCurrency(amount);
   const dueStr = formatDate(dueDate);
@@ -140,17 +228,26 @@ export function buildReminderEmail(params: BuildReminderEmailParams): ReminderEm
   const status = resolveDueStatus(dueDate);
 
   const opening = toneOpening(tone, customerName);
-  const body = toneBody(tone, status, amountStr, dueStr);
   const closing = toneClosing(tone, businessName);
   const subject = subjectLine(tone, status, businessName);
 
-  const fromLine = `This is a reminder from ${businessName}.`;
+  // ── One flowing paragraph, not stacked fields ──────────────────────────
+  //
+  // The old message opened with "This is a reminder from <business>." — which
+  // the sign-off already says, and which the From line already says. It has
+  // been dropped: repeating the sender three times is what made the message
+  // read as machine-assembled.
+  const bodyParagraph = [
+    subjectSentence(tone, reference, job),
+    balanceSentence(tone, status, amountStr, dueStr),
+    requestSentence(tone, status, !!paymentLink),
+  ].join(" ");
 
   const paymentLine = paymentLink
-    ? `\n\nYou can pay securely using this link: ${paymentLink}`
+    ? `\n\nPay here: ${paymentLink}`
     : "";
 
-  const text = `${opening}\n\n${fromLine}\n\n${body}${paymentLine}\n\n${closing}`;
+  const text = `${opening}\n\n${bodyParagraph}${paymentLine}\n\n${closing}`;
 
   const paymentHtml = paymentLink
     ? `<p style="margin:20px 0 12px 0;font-size:15px;color:#1a1a1a;line-height:1.6;">You can pay securely using the button below.</p>
@@ -169,8 +266,7 @@ export function buildReminderEmail(params: BuildReminderEmailParams): ReminderEm
             <tr>
               <td style="padding:32px;">
                 <p style="margin:0 0 16px 0;font-size:15px;color:#1a1a1a;">${escapeHtml(opening)}</p>
-                <p style="margin:0 0 16px 0;font-size:13px;color:#666666;">${escapeHtml(fromLine)}</p>
-                <p style="margin:0 0 8px 0;font-size:15px;color:#1a1a1a;line-height:1.6;">${escapeHtml(body)}</p>
+                <p style="margin:0 0 8px 0;font-size:15px;color:#1a1a1a;line-height:1.6;">${escapeHtml(bodyParagraph)}</p>
                 ${paymentHtml}
                 <p style="margin:24px 0 0 0;font-size:15px;color:#1a1a1a;white-space:pre-line;">${escapeHtml(closing)}</p>
               </td>

@@ -14,17 +14,24 @@ import { TourShell, ActiveChasingScene, PreparedScene, EmailReviewScene, Approva
  * instant with no loading, no layout shift and no blank frame.
  */
 
+/**
+ * The four steps describe the WORKFLOW, so they are channel-neutral: this is
+ * what happens whichever channel a reminder goes out on. The panel below them
+ * shows a real email, and the email-specific language lives there — in the
+ * From/Subject rows and the "Email reminder" summary — where it is describing
+ * something visible on screen rather than defining the product.
+ */
 const STEPS = [
   { n: "01", label: "Find invoices", blurb: "See overdue invoices and reminders that are ready for attention." },
-  { n: "02", label: "Reminder prepared", blurb: "ServiceSignal prepares a professional email reminder and holds it for your review." },
-  { n: "03", label: "Review email", blurb: "Read the subject and message exactly as your customer will receive them." },
-  { n: "04", label: "Approve and send", blurb: "You make the final decision. The email sends only after your approval." },
+  { n: "02", label: "Reminder prepared", blurb: "ServiceSignal prepares a professional reminder and holds it for your review." },
+  { n: "03", label: "Review reminder", blurb: "Read the full message exactly as your customer will receive it." },
+  { n: "04", label: "Approve and send", blurb: "You make the final decision. Nothing is sent until you approve it." },
 ] as const;
 
 const A11Y = [
-  "ServiceSignal Active Chasing workspace. Invoice INV-1042 for Alex Turner, £1,240, 12 days overdue, marked Overdue with a reminder Ready for review and a Send now action awaiting your approval.",
+  "ServiceSignal Active Chasing workspace. Invoice INV-1042 for Alex Turner, £1,240, 12 days overdue, marked Overdue with a reminder Ready for review and a Review reminder action awaiting your decision.",
   "Reminder prepared for INV-1042: Alex Turner, £1,240, 12 days overdue. An email reminder is ready for review. Nothing has been sent.",
-  "Review the email for INV-1042. From ServiceSignal at reminders@servicesignal.app, subject Overdue invoice reminder from Oakfield Plumbing, signed off by Oakfield Plumbing. Nothing has been sent.",
+  "Review the reminder for INV-1042. It is an email from ServiceSignal at reminders@servicesignal.app, subject Overdue invoice reminder from Oakfield Plumbing, signed off by Oakfield Plumbing. Nothing has been sent.",
   "Approve and send INV-1042: Alex Turner, £1,240, email reminder awaiting your approval. Once approved, the email is sent.",
 ];
 

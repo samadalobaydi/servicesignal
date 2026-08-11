@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, Fragment } from "react";
+import Link from "next/link";
+import InvoiceRowMenu from "./InvoiceRowMenu";
 import type { Invoice, ReminderLog } from "@/types";
 import { formatCurrency, formatDate, daysOverdueLabel } from "@/lib/invoices";
 import { getDueStatusLabel } from "@/lib/date-status";
@@ -8,10 +10,12 @@ import { prepareEligibility } from "@/lib/reminder-schedule";
 import InvoiceActivityLog, { HistoryToggle } from "./InvoiceActivityLog";
 import { useDashboard } from "./DashboardProvider";
 import ChannelPickerModal from "./ChannelPickerModal";
-import { approveReminder, dismissReminder } from "@/lib/reminders";
+import { dismissReminder } from "@/lib/reminders";
 
 function reminderStateLabel(invoice: Invoice, hasPending: boolean): { text: string; color: string; pill?: boolean } {
-  if (hasPending) return { text: "Ready to send", color: "var(--dash-amber)", pill: true };
+  // "Ready for review", not "ready to send": the owner has not seen the
+  // message yet, and the row no longer offers a way to send without doing so.
+  if (hasPending) return { text: "Ready for review", color: "var(--dash-amber)", pill: true };
   const sentCount = invoice.reminders_sent?.length ?? 0;
   const total = invoice.reminder_schedules?.length ?? 0;
   if (total === 0) return { text: "No reminders set", color: "var(--dash-text-muted)" };
@@ -47,9 +51,15 @@ interface ActiveChasingListProps {
   pendingReminderInvoiceIds: Set<string>;
   onPrepareReminder: (invoiceId: string) => Promise<{ success: boolean; message: string }>;
   onMarkPaid: (id: string) => void;
+  /** invoice_id → every reminder_logs.status, for delete/archive eligibility. */
+  reminderStatusesByInvoice: Record<string, string[]>;
+  onEditInvoice: (invoice: Invoice) => void;
+  onDeleteInvoice: (invoice: Invoice) => Promise<boolean>;
+  onArchiveInvoice: (invoice: Invoice) => Promise<boolean>;
 }
 
-function ChaseRowAction({ invoice, hasPending, pendingReminder, onRequestPrepare, onMarkPaid, onAfterAction }: {
+function ChaseRowAction({ invoice, hasPending, pendingReminder, onRequestPrepare, onMarkPaid, onAfterAction, menu }: {
+  menu?: React.ReactNode;
   invoice: Invoice;
   hasPending: boolean;
   pendingReminder: ReminderLog | null;
@@ -81,28 +91,13 @@ function ChaseRowAction({ invoice, hasPending, pendingReminder, onRequestPrepare
    */
   const isStale = (message: string) => message.toLowerCase().includes("already");
 
-  // Same send/dismiss endpoints as the Overview Awaiting Approval card.
-  const sendNow = async () => {
-    if (!pendingReminder) return;
-    setBusy(true); setNote(null);
-    const r = await approveReminder(pendingReminder.id);
-    if (r.success) {
-      setNote(null);
-      await onAfterAction();          // row updates to sent state; history/bell refresh
-    } else if (isStale(r.message)) {
-      setNote(null);
-      await onAfterAction();          // resync the row; no blocked-state message
-    } else {
-      // Keep Send Now visible — failed reminders are retryable server-side.
-      const detail = r.message.replace(/^Failed to send email:\s*/i, "");
-      setNote({
-        title: "Email failed to send. You can retry.",
-        detail: detail && detail !== r.message ? detail : (r.message.startsWith("Email service") ? r.message : undefined),
-      });
-    }
-    setBusy(false);
-  };
-
+  // sendNow() has been REMOVED. This row previously called approveReminder()
+  // directly, which sent a real email to a real customer from a single click
+  // without the owner ever seeing the message. Sending now lives only on
+  // /dashboard/reminders/[id]/review, beside the content it will send.
+  //
+  // dismiss() stays: discarding a reminder sends nothing, and forcing a page
+  // navigation to throw something away would be friction with no safety gain.
   const dismiss = async () => {
     if (!pendingReminder) return;
     setBusy(true); setNote(null);
@@ -126,9 +121,15 @@ function ChaseRowAction({ invoice, hasPending, pendingReminder, onRequestPrepare
         )}
         {hasPending && pendingReminder && (
           <>
-            <button onClick={sendNow} disabled={busy} className="dash-btn whitespace-nowrap" style={{ padding: "0.5rem 0.9rem", opacity: busy ? 0.6 : 1 }}>
-              {busy ? "..." : "Send Now"}
-            </button>
+            {/* A LINK, not a button with a handler. It navigates and sends
+                nothing, so it is safe to middle-click or open in a new tab. */}
+            <Link
+              href={`/dashboard/reminders/${pendingReminder.id}/review`}
+              className="dash-btn whitespace-nowrap"
+              style={{ padding: "0.5rem 0.9rem" }}
+            >
+              Review reminder
+            </Link>
             <button onClick={dismiss} disabled={busy} className="dash-btn-ghost whitespace-nowrap" style={{ padding: "0.5rem 0.9rem", opacity: busy ? 0.6 : 1 }}>
               Dismiss
             </button>
@@ -137,6 +138,8 @@ function ChaseRowAction({ invoice, hasPending, pendingReminder, onRequestPrepare
         <button onClick={() => onMarkPaid(invoice.id)} className="dash-btn-ghost whitespace-nowrap" style={{ padding: "0.5rem 0.9rem", color: "var(--dash-green)", borderColor: "#a7f3d0" }}>
           Mark Paid
         </button>
+        {/* Management actions, far right and discreet — see InvoiceRowMenu. */}
+        {menu}
       </div>
       {noteVisible && (
         <div
@@ -151,7 +154,10 @@ function ChaseRowAction({ invoice, hasPending, pendingReminder, onRequestPrepare
   );
 }
 
-export default function ActiveChasingList({ invoices, pendingReminderInvoiceIds, onPrepareReminder, onMarkPaid }: ActiveChasingListProps) {
+export default function ActiveChasingList({
+  invoices, pendingReminderInvoiceIds, onPrepareReminder, onMarkPaid,
+  reminderStatusesByInvoice, onEditInvoice, onDeleteInvoice, onArchiveInvoice,
+}: ActiveChasingListProps) {
   const [openLogId, setOpenLogId] = useState<string | null>(null);
   const toggleLog = (id: string) => setOpenLogId((cur) => (cur === id ? null : id));
   const { reminders, refetchAfterReminderAction } = useDashboard();
@@ -209,7 +215,15 @@ export default function ActiveChasingList({ invoices, pendingReminderInvoiceIds,
               ) : (
                 <p className="text-sm" style={{ color: rs.color, fontWeight: 600 }}>{rs.text}</p>
               )}
-              <ChaseRowAction invoice={inv} hasPending={pendingReminderInvoiceIds.has(inv.id)} pendingReminder={pendingFor(inv.id)} onRequestPrepare={() => setPickerInvoice(inv)} onMarkPaid={onMarkPaid} onAfterAction={refetchAfterReminderAction} />
+              <ChaseRowAction invoice={inv} hasPending={pendingReminderInvoiceIds.has(inv.id)} pendingReminder={pendingFor(inv.id)} onRequestPrepare={() => setPickerInvoice(inv)} onMarkPaid={onMarkPaid} onAfterAction={refetchAfterReminderAction} menu={
+                <InvoiceRowMenu
+                  invoice={inv}
+                  reminderStatuses={reminderStatusesByInvoice[inv.id] ?? []}
+                  onEdit={onEditInvoice}
+                  onDelete={onDeleteInvoice}
+                  onArchive={onArchiveInvoice}
+                />
+              } />
               <HistoryToggle open={openLogId === inv.id} onClick={() => toggleLog(inv.id)} />
               {openLogId === inv.id && <InvoiceActivityLog invoiceId={inv.id} />}
             </div>
@@ -257,7 +271,15 @@ export default function ActiveChasingList({ invoices, pendingReminderInvoiceIds,
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2 justify-end flex-nowrap">
-                      <ChaseRowAction invoice={inv} hasPending={pendingReminderInvoiceIds.has(inv.id)} pendingReminder={pendingFor(inv.id)} onRequestPrepare={() => setPickerInvoice(inv)} onMarkPaid={onMarkPaid} onAfterAction={refetchAfterReminderAction} />
+                      <ChaseRowAction invoice={inv} hasPending={pendingReminderInvoiceIds.has(inv.id)} pendingReminder={pendingFor(inv.id)} onRequestPrepare={() => setPickerInvoice(inv)} onMarkPaid={onMarkPaid} onAfterAction={refetchAfterReminderAction} menu={
+                <InvoiceRowMenu
+                  invoice={inv}
+                  reminderStatuses={reminderStatusesByInvoice[inv.id] ?? []}
+                  onEdit={onEditInvoice}
+                  onDelete={onDeleteInvoice}
+                  onArchive={onArchiveInvoice}
+                />
+              } />
                       <HistoryToggle open={openLogId === inv.id} onClick={() => toggleLog(inv.id)} />
                     </div>
                   </td>

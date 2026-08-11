@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { useDashboard } from "./DashboardProvider";
+import BetaAllowanceIndicator from "./BetaAllowanceIndicator";
 
 interface NavItem {
   href: string;
@@ -56,6 +57,15 @@ const NAV_GROUPS: { heading: string; items: NavItem[] }[] = [
         icon: (
           <svg width="19" height="19" fill="none" viewBox="0 0 24 24">
             <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        ),
+      },
+      {
+        href: "/dashboard/archived",
+        label: "Archived",
+        icon: (
+          <svg width="19" height="19" fill="none" viewBox="0 0 24 24">
+            <path d="M4 7h16M6 7v12a1 1 0 001 1h10a1 1 0 001-1V7M9 11h6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         ),
       },
@@ -188,9 +198,16 @@ export default function DashboardSidebar() {
               Service<span style={{ color: "#38bdf8" }}>Signal</span>
             </span>
           </div>
-          <button onClick={handleLogout} className="text-sm" style={{ color: "#94a3b8", fontWeight: 500 }}>
-            Sign out
-          </button>
+          {/* The desktop header is `hidden md:flex`, so without this the
+              allowance would simply disappear below 768px — a regression on
+              the page-level banner it replaces. Short form only; this row is
+              already tight at 390px. */}
+          <div className="flex items-center gap-3 min-w-0">
+            <BetaAllowanceIndicator tone="dark" />
+            <button onClick={handleLogout} className="text-sm flex-shrink-0" style={{ color: "#94a3b8", fontWeight: 500 }}>
+              Sign out
+            </button>
+          </div>
         </div>
         <nav className="flex gap-1.5 px-3 pb-2.5 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
           {ALL_ITEMS.map((item) => {

@@ -1,0 +1,51 @@
+-- =============================================================================
+-- ServiceSignal — invoice reference and job description
+-- Adds two nullable columns to the existing invoices table.
+-- NOT RUN AUTOMATICALLY. Review and run manually in the Supabase SQL editor.
+-- =============================================================================
+--
+-- WHY THESE COLUMNS DID NOT EXIST
+--
+-- The invoices table was built to carry the minimum a reminder needs: who to
+-- chase, how much, when it was due. Neither an invoice reference nor a job
+-- description was stored anywhere, so both had to be added rather than mapped
+-- onto an existing field — there is no column either could honestly occupy.
+--
+-- invoice_reference  the number the customer recognises ("INV-1042"). Without
+--                    it a reminder can only describe the amount and date,
+--                    which is weaker evidence for the person receiving it.
+-- job_description    optional context ("Boiler repair at 18 King Street").
+--                    Gives a reminder something concrete to refer to.
+--
+-- BOTH NULLABLE, DELIBERATELY.
+--
+-- Every invoice that already exists predates these columns and has no value
+-- for either. A NOT NULL column would need a backfill, and any value invented
+-- for an existing invoice would be a fabricated reference number appearing in
+-- a real customer's reminder. The onboarding form requires a reference in the
+-- UI; the database stays permissive so existing rows remain valid and the
+-- dashboard form is unaffected.
+
+alter table public.invoices
+  add column if not exists invoice_reference text null,
+  add column if not exists job_description   text null;
+
+-- No RLS policy changes needed. invoices' existing row-level policies already
+-- govern these columns as part of the same row — RLS applies per-row, not
+-- per-column.
+--
+-- No index. Neither column is queried or filtered on; both are read as part of
+-- a row already located by id or user.
+--
+-- =============================================================================
+-- ROLLBACK
+-- =============================================================================
+--
+-- Discards every stored reference and description. Reminders prepared
+-- afterwards simply omit them, exactly as they did before this migration, so
+-- nothing else breaks.
+--
+--   begin;
+--   alter table public.invoices drop column if exists job_description;
+--   alter table public.invoices drop column if exists invoice_reference;
+--   commit;

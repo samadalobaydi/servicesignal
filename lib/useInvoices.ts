@@ -62,6 +62,11 @@ export function useInvoices() {
       const now = new Date().toISOString();
       const newInvoice: Invoice = {
         id: `inv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        // Migration 007 columns. This module stores invoices in localStorage
+        // and collects neither field, so null is the truthful value — the same
+        // thing the database holds for any invoice created without them.
+        invoice_reference: null,
+        job_description: null,
         customer_name: data.customer_name.trim(),
         customer_email: data.customer_email.trim(),
         customer_phone: data.customer_phone.trim(),
