@@ -39,6 +39,12 @@
   --dash-accent-soft: #ecfeff;
   --dash-green: #059669;
   --dash-green-soft: #ecfdf5;
+  /* Light navy / slate-blue. The dashboard's quiet structural accent: used
+     where something needs to be delineated or labelled WITHOUT claiming to be
+     a warning. Amber and red stay reserved for states that have genuinely
+     gone wrong. */
+  --dash-navy: #475569;
+  --dash-navy-soft: #eef2f7;
   --dash-amber: #d97706;
   --dash-amber-soft: #fffbeb;
   --dash-red: #dc2626;
@@ -2428,6 +2434,21 @@ html { scroll-behavior: smooth; }
 }
 .ss-beta-panel--dark .ss-beta-panel-text { font-size: 0.75rem; }
 
+/* ── The wording and the badge share ONE line ──────────────────────────────
+   The panel itself is a fixed-height column: wording, then bar. This row is
+   what stops the badge becoming a third row in a 44px box and colliding with
+   the wording, which is exactly what Preview showed.
+
+   The badge never shrinks; the wording yields. So "Limit reached" is always
+   fully visible and the label ellipsises gracefully when space is short. */
+.ss-beta-topline {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.ss-beta-topline .ss-beta-panel-text { flex: 0 1 auto; min-width: 0; }
+
 /* "Founding beta" names the thing; the fraction is the thing. One step apart,
    so the eye lands on the figures without the label shouting. */
 .ss-beta-prefix { font-weight: 650; }
@@ -2727,7 +2748,7 @@ html { scroll-behavior: smooth; }
    first, because the fraction is recoverable from the bar and the STATE is
    not. */
 .ss-beta-badge {
-  flex-shrink: 0;
+  flex: 0 0 auto;
   white-space: nowrap;
   font-size: 0.68rem;
   font-weight: 700;
@@ -2735,12 +2756,18 @@ html { scroll-behavior: smooth; }
   line-height: 1;
   padding: 0.2rem 0.4rem;
   border-radius: 5px;
-  background: var(--dash-amber-soft, #fef3c7);
-  color: var(--dash-amber, #b45309);
+  /* Light navy, not amber. The cap is a FACT about the account, not a fault:
+     nothing has gone wrong, a known limit has been reached. Amber here made
+     the header read as an alert and pulled a warning colour into the page's
+     structure. The words carry the meaning; the badge only frames them. */
+  background: var(--dash-navy-soft);
+  color: var(--dash-navy);
+  border: 1px solid var(--dash-border-strong);
 }
 .ss-beta-panel--dark .ss-beta-badge {
-  background: rgba(251, 191, 36, 0.18);
-  color: #fbbf24;
+  background: rgba(255, 255, 255, 0.12);
+  color: #e2e8f0;
+  border-color: rgba(255, 255, 255, 0.18);
 }
 /* The usage line yields space to the badge, never the other way round. */
 .ss-beta-panel--spent .ss-beta-panel-text {

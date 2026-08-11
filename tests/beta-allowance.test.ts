@@ -174,10 +174,19 @@ test("[static] the progress fill stays teal at the cap", () => {
   assert.equal(/\.ss-beta-fill[^{]*\{[^}]*amber/.test(css), false,
     "no amber may reach the progress fill");
 
-  // ...and the badge is where the amber lives.
-  const badge = css.slice(css.indexOf(".ss-beta-badge {"));
-  assert.match(badge.slice(0, badge.indexOf("}")), /--dash-amber/,
-    "the restrained amber belongs to the badge");
+  // ...and the badge is a light-navy label, not a warning. The cap is a fact
+  // about the account, not a fault: amber in the header read as an alert and
+  // pulled a warning colour into the page's structure.
+  // Comments stripped FIRST: this block's own comment explains that it is
+  // "light navy, not amber", and asserting on the raw text would read that
+  // explanation as the colour it forbids.
+  const cssCode = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const badge = cssCode.slice(cssCode.indexOf(".ss-beta-badge {"));
+  const badgeBlock = badge.slice(0, badge.indexOf("}"));
+  assert.match(badgeBlock, /--dash-navy-soft/, "badge surface is light navy");
+  assert.match(badgeBlock, /--dash-navy\)/, "badge text is light navy");
+  assert.equal(/amber|--dash-red/.test(badgeBlock), false,
+    "no warning colour in the badge");
 });
 
 test("the cap state is its own short string, never appended to the sentence", () => {
@@ -558,4 +567,47 @@ test("[static] status sits left, actions sit right, aligned with the content bel
   assert.ok(addBtn > -1 && addBtn < bell && bell < avatar, "Add Invoice, bell, account — unmoved");
   assert.match(right, /className="dash-btn"/);
   assert.match(right, /max-w-\[200px\]/);
+});
+
+test("[static] the badge shares the wording's line and can never overlap it", () => {
+  // ── THE OVERLAP ─────────────────────────────────────────────────────────
+  //
+  // .ss-beta-panel is a fixed-height (44px) COLUMN flex with two rows: the
+  // wording, then the 4px bar. The badge was added as a direct child, so it
+  // became a THIRD row in a box with no room for one, and Preview showed it
+  // sitting over the allowance text.
+  //
+  // The fix is structural: a row that holds the wording and the badge
+  // together, keeping the panel at two rows and the header at its height.
+  const css = readFileSync(join(ROOT, "app/globals.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const chip = readFileSync(join(ROOT, "components/dashboard/BetaAllowanceIndicator.tsx"), "utf8");
+
+  const topline = css.slice(css.indexOf(".ss-beta-topline {"));
+  const toplineBlock = topline.slice(0, topline.indexOf("}"));
+  assert.match(toplineBlock, /display:\s*flex;/, "the wording and badge must sit on one row");
+  assert.match(toplineBlock, /align-items:\s*center;/);
+
+  // The panel stays a two-row column of fixed height: the header must not grow.
+  const panel = css.slice(css.indexOf(".ss-beta-panel {"));
+  const panelBlock = panel.slice(0, panel.indexOf("}"));
+  assert.match(panelBlock, /flex-direction:\s*column;/);
+  assert.match(panelBlock, /height:\s*44px;/, "the header height must not change");
+
+  // The badge never shrinks; the wording yields. "Limit reached" must stay
+  // fully readable while the label ellipsises.
+  const badge = css.slice(css.indexOf(".ss-beta-badge {"));
+  const badgeBlock = badge.slice(0, badge.indexOf("}"));
+  assert.match(badgeBlock, /flex:\s*0 0 auto;/, "the badge must never shrink");
+  assert.match(badgeBlock, /white-space:\s*nowrap;/, "the badge must never wrap");
+  assert.match(css, /\.ss-beta-topline \.ss-beta-panel-text \{[^}]*flex:\s*0 1 auto;/,
+    "the wording is the element that yields");
+
+  // Structural: the badge must be INSIDE the topline, not a sibling of it —
+  // which is precisely what caused the collision.
+  const toplineStart = chip.indexOf('<span className="ss-beta-topline">');
+  const toplineEnd = chip.indexOf('className="ss-beta-track"');
+  assert.ok(toplineStart > -1 && toplineEnd > toplineStart);
+  const badgeAt = chip.indexOf("ss-beta-badge");
+  assert.ok(badgeAt > toplineStart && badgeAt < toplineEnd,
+    "the badge must render inside the topline row, before the progress track");
 });

@@ -251,16 +251,25 @@ export default function OverviewPage() {
                           // place, so a tone can never be half-applied. Muted
                           // when every visible row shares a state: the colour
                           // has nothing left to distinguish.
-                          // AMBER, not red, when every row shares a state: the
-                          // colour distinguishes nothing between rows, so it
-                          // marks "unresolved" rather than shouting. The one
-                          // exception is a failed send — that is a genuine
-                          // error, not a task, and keeps its own tone even when
-                          // uniform.
+                          // LIGHT NAVY when every row shares a state — no
+                          // amber, and no red either.
+                          //
+                          // A warning colour repeated down three identical
+                          // rows stops being a signal and becomes layout
+                          // decoration, which is what made the page feel
+                          // alarming. The heading already says what these are
+                          // and why they need attention; the rail's only job
+                          // left is to delineate the row.
+                          //
+                          // This applies to send_failed too. An earlier pass
+                          // kept red for it; three red rails is exactly the
+                          // blanket treatment being removed, and the summary
+                          // line states the failure in words.
+                          //
+                          // Mixed states keep TONE_COLOUR, because there the
+                          // colour genuinely distinguishes one row from another.
                           ["--attn-tone" as string]:
-                            uniformKind && uniformKind !== "send_failed"
-                              ? "var(--dash-amber)"
-                              : TONE_COLOUR[tone],
+                            uniformKind ? "var(--dash-text-soft)" : TONE_COLOUR[tone],
                         }}
                       >
                         {!uniformKind && (

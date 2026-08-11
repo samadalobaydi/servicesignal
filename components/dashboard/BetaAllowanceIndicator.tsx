@@ -74,27 +74,37 @@ export default function BetaAllowanceIndicator({ tone }: { tone: AllowanceTone }
         others from the accessibility tree as well as the layout, so a screen
         reader reads exactly what is on screen.
       */}
-      <span className="ss-beta-panel-text">
-        {/* Two spans, one source: allowanceUsageLabel() is composed from these
-            same two pieces, so weighting the prefix cannot make the rendered
-            line diverge from the canonical string. */}
-        <span className="ss-beta-t-full">
-          <span className="ss-beta-prefix">{ALLOWANCE_LABEL_PREFIX}</span>
-          {" \u2014 "}
-          <span className="ss-beta-detail">{allowanceUsageDetail(allowance)}</span>
-        </span>
+      {/* ── ONE HORIZONTAL LINE ────────────────────────────────────────
+          The panel is a fixed-height COLUMN flex (44px, two rows: wording,
+          then bar). The badge was previously a direct child, so it became a
+          THIRD row in a box with no room for one — which is why it collided
+          with the wording in Preview.
+
+          It belongs on the wording's line, so this row exists to hold both.
+          The panel is back to exactly two rows and the header does not grow. */}
+      <span className="ss-beta-topline">
+        <span className="ss-beta-panel-text">
+          {/* Two spans, one source: allowanceUsageLabel() is composed from these
+              same two pieces, so weighting the prefix cannot make the rendered
+              line diverge from the canonical string. */}
+          <span className="ss-beta-t-full">
+            <span className="ss-beta-prefix">{ALLOWANCE_LABEL_PREFIX}</span>
+            {" \u2014 "}
+            <span className="ss-beta-detail">{allowanceUsageDetail(allowance)}</span>
+          </span>
         <span className="ss-beta-t-compact">{allowanceUsageLabelCompact(allowance)}</span>
         <span className="ss-beta-t-mini">{allowanceUsageLabelMini(allowance)}</span>
       </span>
 
-      {/* A SEPARATE element, not more words on the end of the sentence above.
-          Appended, it was the part that got truncated away; beside it, it has
-          its own box and cannot be clipped by the usage line's length.
+      {/* Beside the wording, never over it. The badge never shrinks and the
+          wording yields first, so "Limit reached" stays fully readable while
+          the label ellipsises gracefully.
           Still no upgrade CTA — there is no billing destination to send
           anyone to, so this states the fact and stops. */}
       {exhausted && (
         <span className="ss-beta-badge">{ALLOWANCE_LIMIT_BADGE}</span>
       )}
+      </span>
 
       {/*
         Real progress semantics, since there is now a real progress element.

@@ -485,16 +485,16 @@ test("[static] identical rows are calmed by the heading, not repeated per row", 
   assert.match(code, /const uniformKind =/);
   assert.match(code, /visibleAttention\.every\(\(i\) => i\.kind === visibleAttention\[0\]\.kind\)/);
   assert.match(code, /\{UNIFORM_SUMMARY\[uniformKind\]\}/);
-  // Amber, not red, when the colour distinguishes nothing between rows — but a
-  // failed send keeps its own tone, because that is an error rather than a
-  // task waiting to be done.
-  assert.match(code, /uniformKind && uniformKind !== "send_failed"/,
-    "a uniform failed-send list must not be downgraded to amber");
-  assert.match(code, /\? "var\(--dash-amber\)"/,
-    "the unresolved accent must use the existing amber token");
-  assert.match(code, /: TONE_COLOUR\[tone\]/);
-  assert.equal(/var\(--dash-red\)"\s*:\s*TONE_COLOUR/.test(code), false,
-    "no return to a blanket red treatment");
+  // ── NO WARNING COLOUR AS DECORATION ─────────────────────────────────
+  //
+  // When every visible row shares a state the rail distinguishes nothing, so
+  // it is light navy — the dashboard's quiet structural accent. Amber and red
+  // are reserved for things that have genuinely gone wrong; repeated down
+  // three identical rows either one stops being a signal and becomes layout.
+  assert.match(code, /uniformKind \? "var\(--dash-text-soft\)" : TONE_COLOUR\[tone\]/,
+    "the uniform rail must be the light-navy structural accent");
+  assert.equal(/uniformKind[^:]*\?\s*"var\(--dash-(amber|red)\)"/.test(code), false,
+    "no warning colour may be used as a uniform row accent");
   assert.match(code, /\{!uniformKind && \(/, "the per-row tag is dropped when uniform");
   assert.match(code, /\{!uniformKind && <>\{" · "\}\{attentionDescription\(item\)\}<\/>\}/,
     "the repeated explanation is dropped when uniform");
