@@ -112,8 +112,11 @@ function ChaseRowAction({ invoice, hasPending, pendingReminder, onRequestPrepare
   };
 
   return (
-    <div className="flex flex-col items-end gap-1.5">
-      <div className="flex items-center gap-2 justify-end">
+    <div className="flex flex-col items-end gap-1.5 w-full">
+      {/* flex-wrap here too. This is the group that actually holds the four
+          controls, so wrapping at THIS level is what lets the column narrow;
+          wrapping only on the cell above would have left this row rigid. */}
+      <div className="flex items-center gap-2 justify-end flex-wrap">
         {!hasPending && canPrepare && (
           <button onClick={onRequestPrepare} disabled={busy} className="dash-btn whitespace-nowrap" style={{ padding: "0.5rem 0.9rem", opacity: busy ? 0.6 : 1 }}>
             Prepare Reminder
@@ -232,12 +235,33 @@ export default function ActiveChasingList({
       </div>
 
       {/* Desktop table */}
-      <div className="hidden md:block dash-card overflow-hidden">
-        <table className="w-full">
+      {/* NOT overflow-hidden.
+          Two separate things were being clipped by it: the actions column when
+          the row menu made that column wider than the space left over, and the
+          row menu's own dropdown, which is position:absolute and cannot escape
+          an ancestor's overflow clip no matter what its z-index is. A scroll
+          container would fix the first and keep breaking the second, so the
+          card no longer clips at all and the table is made to fit instead.
+          The rounded corners the clip used to provide are applied to the
+          header cells directly. */}
+      <div className="hidden md:block dash-card">
+        {/* table-fixed, so column widths come from the header rather than from
+            each column's widest unbreakable word. Under the previous auto
+            layout a single long customer email set a floor for the Customer
+            column, the actions column asked for the width of five nowrap
+            controls, and the sum simply exceeded the card. */}
+        <table className="w-full table-fixed">
           <thead>
             <tr style={{ background: "var(--dash-card-muted)", borderBottom: "1px solid var(--dash-border)" }}>
-              {["Customer", "Amount", "Due", "Status", "Reminder state", ""].map((h, i) => (
-                <th key={h} className={`${i === 5 ? "text-right" : "text-left"} px-6 py-3.5 text-xs uppercase`} style={{ color: "var(--dash-text-muted)", fontWeight: 600, letterSpacing: "0.05em" }}>{h}</th>
+              {[
+                // Explicit widths, because table-fixed distributes by these.
+                // The actions column is sized for its real contents — Review
+                // reminder + Dismiss + Mark Paid + the menu — instead of
+                // competing with the text columns for whatever is left.
+                ["Customer", "w-[26%]"], ["Amount", "w-[10%]"], ["Due", "w-[13%]"],
+                ["Status", "w-[11%]"], ["Reminder state", "w-[15%]"], ["", "w-[25%]"],
+              ].map(([h, w], i) => (
+                <th key={h || "actions"} className={`${i === 5 ? "text-right" : "text-left"} ${w} px-6 py-3.5 text-xs uppercase ${i === 0 ? "rounded-tl-[14px]" : ""} ${i === 5 ? "rounded-tr-[14px]" : ""}`} style={{ color: "var(--dash-text-muted)", fontWeight: 600, letterSpacing: "0.05em" }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -248,8 +272,11 @@ export default function ActiveChasingList({
                 <Fragment key={inv.id}>
                 <tr style={{ borderTop: "1px solid var(--dash-border)" }}>
                   <td className="px-6 py-4">
-                    <p className="text-base" style={{ fontWeight: 600, color: "var(--dash-text)" }}>{inv.customer_name}</p>
-                    <p className="text-sm" style={{ color: "var(--dash-text-muted)" }}>{inv.customer_email}</p>
+                    {/* truncate + title: a long email is one unbreakable word,
+                        so without this it would still force the column wide.
+                        The full value stays available on hover. */}
+                    <p className="text-base truncate" title={inv.customer_name} style={{ fontWeight: 600, color: "var(--dash-text)" }}>{inv.customer_name}</p>
+                    <p className="text-sm truncate" title={inv.customer_email} style={{ color: "var(--dash-text-muted)" }}>{inv.customer_email}</p>
                     {inv.payment_link && (
                       <p className="text-xs mt-0.5" style={{ color: "var(--dash-accent-strong)", fontWeight: 500 }}>Payment link added</p>
                     )}
@@ -270,7 +297,14 @@ export default function ActiveChasingList({
                     )}
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex items-center gap-2 justify-end flex-nowrap">
+                    {/* flex-wrap, not flex-nowrap. Wrapping is what actually
+                        removes the overflow: it drops the group's min-content
+                        width to the widest SINGLE control instead of the sum of
+                        all of them, so a narrow desktop viewport reflows to a
+                        second line rather than pushing Mark Paid and the menu
+                        out of the card. justify-end keeps rows with fewer
+                        actions aligned with rows that have all of them. */}
+                    <div className="flex items-center gap-2 justify-end flex-wrap">
                       <ChaseRowAction invoice={inv} hasPending={pendingReminderInvoiceIds.has(inv.id)} pendingReminder={pendingFor(inv.id)} onRequestPrepare={() => setPickerInvoice(inv)} onMarkPaid={onMarkPaid} onAfterAction={refetchAfterReminderAction} menu={
                 <InvoiceRowMenu
                   invoice={inv}

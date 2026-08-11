@@ -620,7 +620,7 @@ export function OnboardingFlow({
             <div className={styles.fields}>
               <InvoiceFields
                 state={invoiceState}
-                onboarding
+                variant="onboarding"
                 savedPaymentLink={savedPaymentLink}
                 saveAsDefault={saveAsDefault}
                 onSaveAsDefaultChange={setSaveAsDefault}

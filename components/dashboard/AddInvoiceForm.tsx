@@ -125,7 +125,11 @@ export default function AddInvoiceForm({
 
         <div className="flex-1 overflow-y-auto px-6 py-5">
           <form id="add-invoice-form" onSubmit={handleSubmit} noValidate>
-            <InvoiceFields state={state} />
+            {/* EXPLICIT, and required by the type. The previous `onboarding` boolean
+                defaulted to false, so omitting it here silently selected the
+                legacy layout — which is how the pre-refactor form reached a
+                production Preview with every gate green. */}
+            <InvoiceFields state={state} variant="dashboard" />
           </form>
         </div>
 

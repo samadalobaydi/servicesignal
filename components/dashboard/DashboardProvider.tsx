@@ -160,6 +160,12 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const handleAddInvoice = useCallback(async (data: InvoiceFormData) => {
     const supabase = getSupabaseBrowser();
     const inserted = await insertInvoice(supabase, {
+      // Migration 007 columns, now collected by the dashboard form too.
+      // Spread so an unset field is ABSENT from the insert rather than an
+      // explicit null on every row — matching lib/invoice-write.ts, and
+      // matching the nullable columns verified in production.
+      ...(data.invoice_reference.trim() ? { invoice_reference: data.invoice_reference.trim() } : {}),
+      ...(data.job_description.trim() ? { job_description: data.job_description.trim() } : {}),
       customer_name:      data.customer_name.trim(),
       customer_email:     data.customer_email.trim(),
       customer_phone:     data.customer_phone.trim(),

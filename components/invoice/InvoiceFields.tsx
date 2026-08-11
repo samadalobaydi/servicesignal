@@ -128,23 +128,39 @@ function SettingSummary({
   );
 }
 
+/**
+ * Which surface is collecting the invoice.
+ *
+ * A union, not a boolean: adding a third surface later extends this without
+ * anyone having to guess what `false` meant.
+ */
+export type InvoiceFieldsVariant = "dashboard" | "onboarding";
+
 // ── Main ────────────────────────────────────────────────────────────────────
 
 export function InvoiceFields({
   state,
   showCustomerSection = true,
-  /**
-   * Onboarding requires a reference and a mobile number, and says so in the
-   * labels. The dashboard keeps its existing, looser form.
-   */
-  onboarding = false,
+  variant,
   savedPaymentLink = null,
   saveAsDefault = false,
   onSaveAsDefaultChange,
 }: {
   state: InvoiceFormState;
   showCustomerSection?: boolean;
-  onboarding?: boolean;
+  /**
+   * WHICH SURFACE IS RENDERING THIS — required, with no default.
+   *
+   * This replaced an `onboarding?: boolean` that defaulted to false. That
+   * default was the whole bug: the dashboard passed nothing, silently selected
+   * the legacy branch, and shipped the pre-refactor form to production while
+   * every gate stayed green. A boolean named after ONE caller cannot describe
+   * two surfaces, and an optional prop lets a caller forget to choose.
+   *
+   * Both variants now render the SAME modern layout. The variant no longer
+   * selects a design — it selects only the genuine rule differences below.
+   */
+  variant: InvoiceFieldsVariant;
   /** The account default from profiles.default_payment_link, if any. */
   savedPaymentLink?: string | null;
   /** Whether this invoice's link should become the account default. */
@@ -153,8 +169,24 @@ export function InvoiceFields({
 }) {
   const { form, errors, preset, setField, toggleSchedule, selectPreset } = state;
 
+  // ── THE ONLY THINGS THE VARIANT CHANGES ────────────────────────────────
+  //
+  // Layout, labels and the reminder-plan presentation are now identical on
+  // both surfaces. What legitimately differs is which fields are MANDATORY,
+  // and those flags mirror validateInvoiceForm's `requireOnboardingFields`
+  // exactly — see lib/invoice-form.ts. If they ever disagree, the form marks a
+  // field required that nothing enforces (or vice versa), which is the defect
+  // this pass exists to prevent.
+  //
+  // The dashboard deliberately does NOT require a reference or a phone number:
+  // invoices without either already exist in production, and rejecting them
+  // would be a regression, not a tightening.
+  const isOnboarding = variant === "onboarding";
+  const requireReference = isOnboarding;
+  const requirePhone = isOnboarding;
+
   const pickerRef = useRef<HTMLInputElement>(null);
-  const [toneOpen, setToneOpen] = useState(false);
+  const [toneOpen, setToneOpen] = useState(false);   // summary + Change, both surfaces
   const [scheduleOpen, setScheduleOpen] = useState(false);
 
   // The amount is held as typed while focused and formatted on blur, so
@@ -183,11 +215,11 @@ export function InvoiceFields({
     <div className="space-y-6">
       {showCustomerSection && (
         <div>
-          <p className="section-legend">{onboarding ? "Customer" : "Customer Details"}</p>
+          <p className="section-legend">{"Customer"}</p>
           <div className="space-y-3">
             <div>
               <label className="field-label" htmlFor="inv-customer-name">
-                {onboarding ? "Customer name *" : "Customer Name *"}
+                {"Customer name *"}
               </label>
               <input
                 id="inv-customer-name" type="text" className="dash-input" placeholder="Dave Morrison"
@@ -219,7 +251,7 @@ export function InvoiceFields({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="field-label" htmlFor="inv-customer-phone">
-                {onboarding ? "Mobile number *" : <>Phone Number <span className="opt">(optional)</span></>}
+                {requirePhone ? "Mobile number *" : <>Mobile number <span className="opt">(optional)</span></>}
               </label>
               <input
                 id="inv-customer-phone" type="tel" inputMode="tel" className="dash-input"
@@ -233,16 +265,16 @@ export function InvoiceFields({
               />
               {err("customer_phone") ? (
                 <p id="inv-customer-phone-err" className="field-err">{err("customer_phone")}</p>
-              ) : onboarding ? (
+              ) : (
                 <p id="inv-customer-phone-help" className="field-help">
                   Used for SMS reminders.
                 </p>
-              ) : null}
+              )}
             </div>
 
             <div>
               <label className="field-label" htmlFor="inv-customer-email">
-                {onboarding ? "Email address *" : "Email Address *"}
+                {"Email address *"}
               </label>
               <input
                 id="inv-customer-email" type="email" inputMode="email" className="dash-input"
@@ -256,11 +288,11 @@ export function InvoiceFields({
               />
               {err("customer_email") ? (
                 <p id="inv-customer-email-err" className="field-err">{err("customer_email")}</p>
-              ) : onboarding ? (
+              ) : (
                 <p id="inv-customer-email-help" className="field-help">
                   Used for email reminders.
                 </p>
-              ) : null}
+              )}
             </div>
             </div>
           </div>
@@ -268,11 +300,13 @@ export function InvoiceFields({
       )}
 
       <div>
-        <p className="section-legend">{onboarding ? "Invoice" : "Invoice Details"}</p>
+        <p className="section-legend">{"Invoice"}</p>
         <div className="space-y-3">
-          {onboarding && (
+          
             <div>
-              <label className="field-label" htmlFor="inv-reference">Invoice reference *</label>
+              <label className="field-label" htmlFor="inv-reference">
+                {requireReference ? "Invoice reference *" : <>Invoice reference <span className="opt">(optional)</span></>}
+              </label>
               <input
                 id="inv-reference" type="text" className="dash-input" placeholder="INV-1042"
                 value={form.invoice_reference}
@@ -284,14 +318,13 @@ export function InvoiceFields({
                 <p id="inv-reference-err" className="field-err">{err("invoice_reference")}</p>
               )}
             </div>
-          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="field-label" htmlFor="inv-amount">
-                Amount {onboarding ? "*" : "(£) *"}
+                Amount *
               </label>
-              {onboarding ? (
+              
                 <input
                   id="inv-amount"
                   // TEXT, not number. A number input strips the comma in
@@ -317,27 +350,16 @@ export function InvoiceFields({
                   aria-describedby={err("amount") ? "inv-amount-err" : "inv-amount-help"}
                   aria-invalid={!!err("amount")}
                 />
-              ) : (
-                /* Dashboard: unchanged from before this work. */
-                <input
-                  id="inv-amount" type="number" min="0.01" step="0.01" className="dash-input"
-                  placeholder="0.00"
-                  value={form.amount}
-                  onChange={(e) => setField("amount", e.target.value)}
-                  aria-invalid={!!err("amount")}
-                  aria-describedby={err("amount") ? "inv-amount-err" : undefined}
-                />
-              )}
               {err("amount") ? (
                 <p id="inv-amount-err" className="field-err">{err("amount")}</p>
-              ) : onboarding ? (
+              ) : (
                 <p id="inv-amount-help" className="field-help">In pounds (GBP).</p>
-              ) : null}
+              )}
             </div>
 
             <div>
               <label className="field-label" htmlFor="inv-due-date">Due date *</label>
-              {onboarding ? (
+              
                 /* ONE field, not two.
                    A single text input owns dd/mm/yyyy. The calendar button
                    sits INSIDE it and opens the browser's own picker via
@@ -398,27 +420,20 @@ export function InvoiceFields({
                     onChange={(e) => setField("due_date", e.target.value)}
                   />
                 </div>
-              ) : (
-                /* Dashboard: unchanged from before this work. */
-                <input
-                  id="inv-due-date" type="date" className="dash-input" value={form.due_date}
-                  onChange={(e) => setField("due_date", e.target.value)}
-                  style={{ colorScheme: "dark" }}
-                  aria-invalid={!!err("due_date")}
-                  aria-describedby={err("due_date") ? "inv-due-date-err" : undefined}
-                />
-              )}
               {err("due_date") ? (
                 <p id="inv-due-date-err" className="field-err">{err("due_date")}</p>
-              ) : onboarding ? (
+              ) : (
                 <p id="inv-due-date-help" className="field-help">
-                  Type dd/mm/yyyy or use the calendar. Must already be overdue.
+                  {/* The overdue requirement is a real onboarding rule
+                      (checkOnboardingDueDate), not styling — so this sentence
+                      stays variant-specific while the field itself does not. */}
+                  Type dd/mm/yyyy or use the calendar.{isOnboarding ? " Must already be overdue." : ""}
                 </p>
-              ) : null}
+              )}
             </div>
           </div>
 
-          {onboarding && (
+          
           <Collapsible label="Add a job description">
             <label className="field-label" htmlFor="inv-job">
               Job description <span className="opt">(optional)</span>
@@ -439,9 +454,8 @@ export function InvoiceFields({
               </p>
             )}
           </Collapsible>
-          )}
 
-          {onboarding ? (
+          
           <Collapsible
             label={savedPaymentLink ? "Payment link" : "Add a payment link"}
             defaultOpen={!!savedPaymentLink}
@@ -492,35 +506,13 @@ export function InvoiceFields({
                 </label>
               )}
           </Collapsible>
-          ) : (
-            /* Dashboard: the payment link stays a permanent field, exactly as
-               it was before this work. */
-            <div>
-              <label className="field-label" htmlFor="inv-payment-link">
-                Payment link <span className="opt">(optional)</span>
-              </label>
-              <p className="text-xs mb-1.5" style={{ color: "#64748b" }}>
-                Paste a Stripe, GoCardless, PayPal, SumUp or bank payment link so customers can pay from the reminder.
-              </p>
-              <input
-                id="inv-payment-link" type="url" className="dash-input" placeholder="https://pay.stripe.com/..."
-                value={form.payment_link}
-                onChange={(e) => setField("payment_link", e.target.value)}
-                aria-invalid={!!err("payment_link")}
-                aria-describedby={err("payment_link") ? "inv-payment-link-err" : undefined}
-              />
-              {err("payment_link") && (
-                <p id="inv-payment-link-err" className="field-err">{err("payment_link")}</p>
-              )}
-            </div>
-          )}
         </div>
       </div>
 
       <div>
-        <p className="section-legend">{onboarding ? "Reminder plan" : "Reminder Settings"}</p>
+        <p className="section-legend">{"Reminder plan"}</p>
         <div className="space-y-3">
-          {onboarding && (
+          
           <SettingSummary
             label="Tone"
             value={toneLabel}
@@ -528,8 +520,7 @@ export function InvoiceFields({
             onToggle={() => setToneOpen((v) => !v)}
             controls="inv-tone-panel"
           />
-          )}
-          {(!onboarding || toneOpen) && (
+          {toneOpen && (
             <div id="inv-tone-panel" className="grid grid-cols-3 gap-2" role="group" aria-label="Reminder tone">
               {TONE_OPTIONS.map((opt) => {
                 const active = form.reminder_tone === opt.value;
@@ -564,7 +555,7 @@ export function InvoiceFields({
               overdue on Standard receives exactly one. See
               lib/onboarding-schedule.ts. Falls back to the shared summary until
               a due date has been entered. */}
-          {onboarding && (
+          
           <SettingSummary
             label="Schedule"
             value={activePreset?.key === "custom" ? "Custom" : `${activePreset?.title ?? "Standard"}`}
@@ -577,8 +568,7 @@ export function InvoiceFields({
             onToggle={() => setScheduleOpen((v) => !v)}
             controls="inv-schedule-panel"
           />
-          )}
-          {(!onboarding || scheduleOpen) && (
+          {scheduleOpen && (
             <div id="inv-schedule-panel">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" role="group" aria-label="Reminder schedule">
                 {PRESETS.map((p) => {
