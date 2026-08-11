@@ -400,3 +400,113 @@ test("[static] the subtitle no longer announces the name of a section below it",
   // appears.
   assert.match(code, /Needs your attention/);
 });
+
+// ── Overview triage: ranking, cap, and deduplication ───────────────────────
+
+test("equal-priority items prefer the larger amount, then more days overdue", () => {
+  // THE PRODUCT RULE: when two invoices need the SAME decision, the money is
+  // what separates them. Previously days-overdue came first, so a £150 invoice
+  // could sit above a £1,200 one for the sake of two days.
+  const items = buildAttentionItems({
+    invoices: [
+      invoice({ id: "small-older", amount: 150, due_date: daysAgo(40) }),
+      invoice({ id: "large-newer", amount: 1200, due_date: daysAgo(9) }),
+      invoice({ id: "large-older", amount: 1200, due_date: daysAgo(30) }),
+    ],
+    pendingReminders: [],
+    reminderHistory: [],
+    needsDecisionInvoiceIds: new Set(),
+  });
+
+  // All three are the same kind, so amount decides, then days overdue.
+  assert.deepEqual(items.map((i) => i.invoiceId),
+    ["large-older", "large-newer", "small-older"]);
+});
+
+test("attention KIND still outranks money", () => {
+  // Urgency must not be reducible to amount: a broken send on a small invoice
+  // is a different problem from a large one merely sitting overdue.
+  const failed: ReminderLog = {
+    id: "rem-failed", invoice_id: "tiny", status: "failed",
+  } as ReminderLog;
+
+  const items = buildAttentionItems({
+    invoices: [
+      invoice({ id: "tiny", amount: 20, due_date: daysAgo(1) }),
+      invoice({ id: "huge", amount: 9999, due_date: daysAgo(60) }),
+    ],
+    pendingReminders: [],
+    reminderHistory: [failed],
+    needsDecisionInvoiceIds: new Set(),
+  });
+
+  assert.equal(items[0].invoiceId, "tiny", "a failed send outranks a larger overdue invoice");
+  assert.equal(items[0].kind, "send_failed");
+});
+
+test("one invoice appears once, even when it qualifies several ways", () => {
+  // Dedup is what the precedence model exists for. An invoice that is overdue
+  // AND has a pending reminder AND needs a decision is ONE row.
+  const pending: ReminderLog = {
+    id: "rem-p", invoice_id: "inv-1", status: "pending",
+  } as ReminderLog;
+
+  const items = buildAttentionItems({
+    invoices: [invoice({ id: "inv-1", due_date: daysAgo(30) })],
+    pendingReminders: [pending],
+    reminderHistory: [pending],
+    needsDecisionInvoiceIds: new Set(["inv-1"]),
+  });
+
+  assert.equal(items.length, 1, "one invoice must produce one row");
+  assert.equal(items.filter((i) => i.invoiceId === "inv-1").length, 1);
+});
+
+test("[static] Overview caps attention at 3 and defers the rest to Needs Action", () => {
+  const page = readFileSync(join(ROOT, "app/dashboard/page.tsx"), "utf8");
+  const code = page.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+  assert.match(code, /const MAX_ATTENTION_ROWS = 3;/,
+    "five near-identical rows made this a table, not triage");
+  assert.match(code, /attention\.slice\(0, MAX_ATTENTION_ROWS\)/);
+
+  // The link must carry the FULL queue length, not the visible slice, and must
+  // go to the page that owns the queue.
+  assert.match(code, /attention\.length > MAX_ATTENTION_ROWS/);
+  assert.match(code, /View all \{attention\.length\}/);
+  assert.match(code, /href="\/dashboard\/needs-action"/);
+});
+
+test("[static] identical rows are calmed by the heading, not repeated per row", () => {
+  const page = readFileSync(join(ROOT, "app/dashboard/page.tsx"), "utf8");
+  const code = page.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+  // One shared state => say it once, and stop painting every row red.
+  assert.match(code, /const uniformKind =/);
+  assert.match(code, /visibleAttention\.every\(\(i\) => i\.kind === visibleAttention\[0\]\.kind\)/);
+  assert.match(code, /\{UNIFORM_SUMMARY\[uniformKind\]\}/);
+  assert.match(code, /uniformKind \? "var\(--dash-text-muted\)" : TONE_COLOUR\[tone\]/,
+    "tone colour must be muted when it distinguishes nothing");
+  assert.match(code, /\{!uniformKind && \(/, "the per-row tag is dropped when uniform");
+  assert.match(code, /\{!uniformKind && <>\{" · "\}\{attentionDescription\(item\)\}<\/>\}/,
+    "the repeated explanation is dropped when uniform");
+
+  // Deep links must still be per-item, never a generic fallback.
+  assert.match(code, /href=\{item\.href\}/,
+    "the row CTA must open the exact invoice/action, not a generic page");
+});
+
+test("[static] Recent activity is not reintroduced, and Invoice Status is gone", () => {
+  const page = readFileSync(join(ROOT, "app/dashboard/page.tsx"), "utf8");
+  // Comments stripped first. The page docblock RECORDS why Recent activity was
+  // removed, and that history is worth keeping — asserting on the raw file
+  // would forbid explaining the decision.
+  const code = page.replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+  assert.equal(/Recent activity/i.test(code), false, "Recent activity was removed deliberately");
+  assert.equal(/InvoiceStatusChart/.test(code), false,
+    "the empty full-width status card no longer belongs on Overview");
+  // ...and the explanation must survive, so the next reader does not "restore" it.
+  assert.match(page, /Recent activity/i, "the rationale must stay documented");
+});

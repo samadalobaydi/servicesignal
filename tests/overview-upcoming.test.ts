@@ -342,9 +342,41 @@ test("[static] Coming up describes preparation for review, never sending", () =>
   const page = readFileSync(join(ROOT, "app/dashboard/page.tsx"), "utf8");
   const code = page.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
-  // The claim, made once.
-  assert.match(code, /prepares the SMS and email on the date shown and holds/);
-  assert.match(code, /Nothing is sent without your approval\./);
+  // The mode-INDEPENDENT half: preparation happens on the date shown whatever
+  // the account is set to.
+  assert.match(code, /prepares the SMS and email on the date shown/);
+
+  // ── NO PRODUCT-WIDE APPROVAL PROMISE ──────────────────────────────────
+  //
+  // "Nothing is sent without your approval" was an absolute claim about the
+  // whole product. ServiceSignal cannot make it: Manual mode is approval-
+  // based, Auto mode is designed to send on its own. Any approval statement
+  // must name the mode it applies to.
+  assert.equal(/Nothing is sent without your approval/.test(code), false,
+    "no product-wide approval promise");
+  assert.equal(/Nothing goes out on its own/.test(code), false);
+
+  // The scoped replacement, and it must actually name Manual mode.
+  assert.match(code, /In Manual mode, you’ll review each reminder before it sends\./);
+
+  // ── AND IT MUST NOT BRANCH ON THE STORED MODE ─────────────────────────
+  //
+  // Auto mode is not fully shipped: sending is gated server-side by
+  // BETA_APPROVAL_ONLY, which holds even for profile rows already stored as
+  // 'auto'. Rendering a different sentence for those rows would imply the
+  // stored value changes send behaviour today. It does not.
+  //
+  // The wording names Manual mode itself, so one unconditional sentence is
+  // both simpler and truthful.
+  const note = code.slice(code.indexOf("dash-up-note"), code.indexOf("</p>", code.indexOf("dash-up-note")));
+  assert.equal(/reminder_mode/.test(note), false,
+    "the reassurance sentence must not branch on the stored mode");
+  assert.equal(/\?|manualMode/.test(note), false,
+    "the sentence must be unconditional");
+  for (const overclaim of [/sends? automatically/i, /will send/i, /without asking/i, /Auto mode/i]) {
+    assert.equal(overclaim.test(note), false,
+      `the note must claim nothing about Auto mode: ${overclaim}`);
+  }
 
   // Auto mode is not live. Nothing may imply a customer gets contacted on a
   // future date on its own.
@@ -368,12 +400,32 @@ test("[static] SMS and email are named together and equally", () => {
   }
 });
 
-test("[static] there is no empty state for Coming up — the section hides instead", () => {
+test("[static] Coming up has a SMALL empty state, and it stays small", () => {
+  // CHANGED DELIBERATELY. Previously the section rendered nothing at all when
+  // empty, on the reasoning that absence beats a box saying nothing. That held
+  // while Invoice Status sat below it. With the chart removed, Coming up is
+  // the bottom of the page, and silently vanishing ends the Overview
+  // mid-thought — while "nothing is scheduled" is genuinely worth knowing when
+  // invoices are overdue.
+  //
+  // So: one line, inside the existing section, no illustration, no CTA.
   const page = readFileSync(join(ROOT, "app/dashboard/page.tsx"), "utf8");
-  const code = page.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  const code = page.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
-  assert.match(code, /visibleUpcoming\.length > 0 &&/, "rendered conditionally, not always");
-  for (const banned of [/No upcoming reminders/i, /Nothing coming up/i, /All clear/i]) {
-    assert.equal(banned.test(code), false, `banned empty state: ${banned}`);
+  assert.match(code, /visibleUpcoming\.length === 0 \? \(/,
+    "the empty branch must exist");
+  assert.match(code, /No reminders are scheduled to go out in the next few days\./);
+
+  // Truthful and calm: no celebration, no fake reassurance.
+  for (const banned of [/All clear/i, /Nothing to do/i, /you're all set/i, /🎉/]) {
+    assert.equal(banned.test(code), false, `banned empty-state copy: ${banned}`);
   }
+
+  // SMALL means one paragraph. The empty branch must not grow a list, a
+  // graphic or a call to action.
+  const start = code.indexOf("visibleUpcoming.length === 0 ? (");
+  const branch = code.slice(start, code.indexOf(") : (", start));
+  assert.equal(/<ul|<svg|<Link|<button/.test(branch), false,
+    "the empty state must stay a single line of text");
+  assert.ok((branch.match(/<p /g) ?? []).length === 1, "exactly one paragraph");
 });

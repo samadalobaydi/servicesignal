@@ -4,7 +4,6 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { useDashboard } from "@/components/dashboard/DashboardProvider";
 import StatsCards from "@/components/dashboard/StatsCards";
-import InvoiceStatusChart from "@/components/dashboard/InvoiceStatusChart";
 import { formatCurrency } from "@/lib/invoices";
 import { OnboardingHandoff } from "@/components/dashboard/OnboardingHandoff";
 import FirstInvoiceActivation from "@/components/dashboard/FirstInvoiceActivation";
@@ -61,11 +60,33 @@ const KIND_LABEL: Record<AttentionItem["kind"], string> = {
   overdue_no_reminder: "Overdue",
 };
 
-/** How many items to show before deferring to the full list. */
-const MAX_ATTENTION_ROWS = 5;
+/**
+ * What the heading says when every visible row shares one state.
+ *
+ * The plural, whole-section framing of KIND_LABEL — same facts, said once
+ * instead of on every row. Typed as a full Record, so adding a kind to
+ * AttentionItem fails the build here until it is given a summary: the section
+ * cannot silently lose its explanation.
+ */
+const UNIFORM_SUMMARY: Record<AttentionItem["kind"], string> = {
+  send_failed: "These reminders could not be sent. Resolve each one to continue chasing.",
+  reminder_ready: "These reminders are drafted and waiting for your approval.",
+  needs_decision: "These have finished their reminder schedule — decide what happens next.",
+  overdue_no_reminder: "These are overdue with no reminder scheduled yet.",
+};
 
-/** Coming up is context, not a queue. Four is enough to be useful. */
-const MAX_UPCOMING_ROWS = 4;
+/**
+ * Overview triages; it does not hold the queue.
+ *
+ * Five rows made this section behave like a table — the same state, copy and
+ * CTA repeated down the page until it read as decoration rather than a
+ * decision. Three is the most that can be scanned in the five seconds this
+ * page is meant to take. The full queue belongs to Needs Action.
+ */
+const MAX_ATTENTION_ROWS = 3;
+
+/** Coming up is context, not a queue. Three keeps it glanceable. */
+const MAX_UPCOMING_ROWS = 3;
 
 /** "11 Aug", read as a UTC calendar date so the day never slips a timezone. */
 function shortDate(iso: string): string {
@@ -93,6 +114,37 @@ export default function OverviewPage() {
     needsDecisionInvoiceIds: needsDecisionIds,
   });
   const visibleAttention = attention.slice(0, MAX_ATTENTION_ROWS);
+
+  // ── WHEN EVERY VISIBLE ITEM IS THE SAME PROBLEM ────────────────────────
+  //
+  // Five identical red rows — same tag, same sentence, same CTA — is how this
+  // section stopped reading as triage. When the visible rows share one kind,
+  // the heading says it ONCE and the rows go quiet: no repeated tag, no
+  // repeated explanation, no per-row colour. Red then means "urgent" again
+  // rather than "this is a list".
+  //
+  // Mixed states keep their per-row tags, because there the difference between
+  // rows is the whole point.
+  // ── WHY THIS IS NOT CONDITIONAL ON reminder_mode ───────────────────────
+  //
+  // The reassurance sentence in Coming up names Manual mode in its own words
+  // and is rendered unconditionally. It deliberately does NOT branch on
+  // profile.reminder_mode.
+  //
+  // Auto mode is not fully shipped in the founding beta: sending is gated
+  // server-side by BETA_APPROVAL_ONLY, which holds even for profile rows
+  // already stored as 'auto'. Branching on the stored value would imply that
+  // 'auto' currently changes what happens to a reminder, and it does not.
+  //
+  // The scoped wording stays true either way — it states what Manual mode
+  // does, and claims nothing about any other mode. When Auto genuinely ships,
+  // this is the sentence to revisit.
+
+  const uniformKind =
+    visibleAttention.length > 1 &&
+    visibleAttention.every((i) => i.kind === visibleAttention[0].kind)
+      ? visibleAttention[0].kind
+      : null;
 
   // ── What is coming ──────────────────────────────────────────────────────
   //
@@ -156,12 +208,22 @@ export default function OverviewPage() {
               <h2 id="attention-h" style={{ fontSize: "1.05rem", fontWeight: 650, color: "var(--dash-text)" }}>
                 Needs your attention
               </h2>
+              {/* The count is the FULL queue length, not the visible slice —
+                  "View all 3" when 3 are shown would be nonsense. Needs Action
+                  owns the queue, so that is where this goes. */}
               {attention.length > MAX_ATTENTION_ROWS && (
-                <Link href="/dashboard/chasing" className="text-sm" style={{ color: "var(--dash-accent-strong)", fontWeight: 600 }}>
+                <Link href="/dashboard/needs-action" className="text-sm" style={{ color: "var(--dash-accent-strong)", fontWeight: 600 }}>
                   View all {attention.length} →
                 </Link>
               )}
             </div>
+
+            {/* Said once, here, instead of on every row below. */}
+            {uniformKind && (
+              <p className="text-sm mt-1" style={{ color: "var(--dash-text-muted)" }}>
+                {UNIFORM_SUMMARY[uniformKind]}
+              </p>
+            )}
 
             {visibleAttention.length === 0 ? (
               /* Calm, not celebratory. Nothing to do is a normal state, not an
@@ -175,7 +237,7 @@ export default function OverviewPage() {
                 </p>
               </div>
             ) : (
-              <ul className="dash-attn-list">
+              <ul className={uniformKind ? "dash-attn-list dash-attn-list--uniform" : "dash-attn-list"}>
                 {visibleAttention.map((item) => {
                   const tone = attentionTone(item.kind);
                   return (
@@ -186,11 +248,15 @@ export default function OverviewPage() {
                         style={{
                           textDecoration: "none",
                           // Drives the left rule and the tag text from one
-                          // place, so a tone can never be half-applied.
-                          ["--attn-tone" as string]: TONE_COLOUR[tone],
+                          // place, so a tone can never be half-applied. Muted
+                          // when every visible row shares a state: the colour
+                          // has nothing left to distinguish.
+                          ["--attn-tone" as string]: uniformKind ? "var(--dash-text-muted)" : TONE_COLOUR[tone],
                         }}
                       >
-                        <span className="dash-attn-tag">{KIND_LABEL[item.kind]}</span>
+                        {!uniformKind && (
+                          <span className="dash-attn-tag">{KIND_LABEL[item.kind]}</span>
+                        )}
 
                         <span className="dash-attn-body">
                           {/* Customer first and largest — the row is about a
@@ -204,7 +270,10 @@ export default function OverviewPage() {
                             {/* Live from due_date vs today, and omitted rather
                                 than faked when the invoice is not yet due. */}
                             {item.urgencyLabel && <>{" · "}{item.urgencyLabel}</>}
-                            {" · "}{attentionDescription(item)}
+                            {/* The explanation is in the section subtitle when
+                                every row shares it. Repeating it here is what
+                                made five rows read as one wall of text. */}
+                            {!uniformKind && <>{" · "}{attentionDescription(item)}</>}
                           </span>
                         </span>
 
@@ -223,11 +292,25 @@ export default function OverviewPage() {
           </section>
 
           {/* ── Coming up ────────────────────────────────────────────────────
-              Rendered ONLY when there is a real future checkpoint. There is no
-              empty state here by design: "No upcoming reminders" is a bordered
-              box that costs vertical space to tell the owner nothing. Absence
-              is the better answer. */}
-          {visibleUpcoming.length > 0 && (
+              The answer to "what will ServiceSignal do next", and now the
+              bottom of the page — Invoice Status used to sit here saying
+              nothing at full width.
+
+              Previously this rendered nothing at all when empty. With the
+              chart gone that would end the page mid-thought, and "nothing
+              scheduled" is itself worth knowing when five invoices are
+              overdue. So the empty state is ONE line inside the same section,
+              not a bordered box with its own heading. */}
+          {visibleUpcoming.length === 0 ? (
+            <section className="dash-card dash-section" aria-labelledby="upcoming-h">
+              <h2 id="upcoming-h" style={{ fontSize: "1.05rem", fontWeight: 650, color: "var(--dash-text)" }}>
+                Coming up
+              </h2>
+              <p className="text-sm mt-1" style={{ color: "var(--dash-text-muted)" }}>
+                No reminders are scheduled to go out in the next few days.
+              </p>
+            </section>
+          ) : (
             <section className="dash-card dash-section" aria-labelledby="upcoming-h">
               <h2 id="upcoming-h" style={{ fontSize: "1.05rem", fontWeight: 650, color: "var(--dash-text)" }}>
                 Coming up
@@ -261,20 +344,15 @@ export default function OverviewPage() {
                 </p>
               )}
 
-              {/* Said once, here, instead of on every row — and it is the
-                  whole point of the section. SMS and email, equally, are
-                  prepared for review. Nothing goes out on its own. */}
+              {/* Said once, here, instead of on every row. SMS and email,
+                  equally, are prepared on the date shown — that part is true
+                  in every mode. Only the second sentence is mode-specific. */}
               <p className="dash-up-note">
-                ServiceSignal prepares the SMS and email on the date shown and holds
-                them for your review. Nothing is sent without your approval.
+                ServiceSignal prepares the SMS and email on the date shown.
+                In Manual mode, you’ll review each reminder before it sends.
               </p>
             </section>
           )}
-
-          {/* Full width now that Recent activity has gone. The donut is
-              unchanged in size — the extra width goes to the breakdown, which
-              becomes three columns at lg instead of three stacked rows. */}
-          <InvoiceStatusChart />
         </>
       )}
     </div>

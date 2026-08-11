@@ -2669,3 +2669,16 @@ html { scroll-behavior: smooth; }
 /* The word carries the meaning; the tint only reinforces it. */
 .ss-archived-tag--paid { background: var(--dash-green-soft); color: var(--dash-green); }
 .ss-archived-tag--unpaid { background: var(--dash-card-muted); color: var(--dash-text-muted); }
+
+/* ── Founding beta: allowance spent ────────────────────────────────────────
+   10 / 10 must read as a LIMIT, not as a bar that happens to be full. The
+   treatment is restrained on purpose: amber, not red, and applied to the bar
+   and one word rather than to the whole panel. This sits in the dashboard
+   header, where a loud state would shout on every page.
+
+   No upgrade affordance is offered here. ServiceSignal has no billing
+   destination, and a dead or "coming soon" button would be worse than the
+   honest statement. */
+.ss-beta-panel--spent .ss-beta-fill { background: var(--dash-amber, #b45309); }
+.ss-beta-panel--spent.ss-beta-panel--dark .ss-beta-fill { background: #fbbf24; }
+.ss-beta-panel--spent .ss-beta-detail { font-weight: 650; }

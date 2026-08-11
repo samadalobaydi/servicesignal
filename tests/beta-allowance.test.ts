@@ -11,6 +11,7 @@ import {
   countConsumed,
   betaAllowance,
   allowanceUsageLabel,
+  allowanceExhausted,
   allowanceUsageLabelCompact,
   allowanceUsageLabelMini,
   allowanceProgressLabel,
@@ -154,7 +155,41 @@ test("the desktop wording is one statement with one number", () => {
   assert.equal(allowanceUsageLabel(betaAllowance(1)), "Founding beta \u2014 1 / 10 reminders used");
   assert.equal(allowanceUsageLabel(betaAllowance(4)), "Founding beta \u2014 4 / 10 reminders used");
   assert.equal(allowanceUsageLabel(betaAllowance(9)), "Founding beta \u2014 9 / 10 reminders used");
-  assert.equal(allowanceUsageLabel(betaAllowance(10)), "Founding beta \u2014 10 / 10 reminders used");
+  // AT THE CAP the fraction is no longer sufficient on its own. A full bar
+  // reads as "nearly there"; the owner needs to know that reminders have
+  // actually stopped. "limit reached" adds a STATE, not a second number — the
+  // one-number rule below still holds.
+  assert.equal(allowanceUsageLabel(betaAllowance(10)),
+    "Founding beta \u2014 10 / 10 reminders used \u2014 limit reached");
+  assert.equal(/\d/.test("limit reached"), false, "the added words carry no second figure");
+});
+
+test("only the exhausted state says the limit is reached", () => {
+  // A near-full allowance must not be dressed up as a stop.
+  for (const used of [0, 1, 4, 9]) {
+    assert.equal(/limit reached/.test(allowanceUsageLabel(betaAllowance(used))), false,
+      `${used}/10 is not the cap and must not claim to be`);
+    assert.equal(allowanceExhausted(betaAllowance(used)), false);
+  }
+  assert.equal(allowanceExhausted(betaAllowance(10)), true);
+  assert.match(allowanceUsageLabel(betaAllowance(10)), /limit reached/);
+  assert.match(allowanceUsageLabelCompact(betaAllowance(10)), /limit reached/);
+});
+
+test("the cap state never promises billing that does not exist", () => {
+  // There is no in-app upgrade, checkout or billing route in this product.
+  // The allowance copy must therefore not imply one — no "upgrade", no
+  // "plan", no "coming soon". It states the fact and stops.
+  for (const label of [
+    allowanceUsageLabel(betaAllowance(10)),
+    allowanceUsageLabelCompact(betaAllowance(10)),
+    allowanceUsageLabelMini(betaAllowance(10)),
+    allowanceProgressLabel(betaAllowance(10)),
+  ]) {
+    for (const forbidden of [/upgrade/i, /billing/i, /plan\b/i, /pricing/i, /coming soon/i, /buy/i, /subscribe/i]) {
+      assert.equal(forbidden.test(label), false, `"${label}" implies billing that does not exist`);
+    }
+  }
 });
 
 test("no wording anywhere restates the same number a second way", () => {
@@ -172,7 +207,7 @@ test("no wording anywhere restates the same number a second way", () => {
 
 test("the compact and mini wordings shorten the framing, never the fraction", () => {
   assert.equal(allowanceUsageLabelCompact(betaAllowance(4)), "Beta \u2014 4 / 10 used");
-  assert.equal(allowanceUsageLabelCompact(betaAllowance(10)), "Beta \u2014 10 / 10 used");
+  assert.equal(allowanceUsageLabelCompact(betaAllowance(10)), "Beta \u2014 10 / 10 \u00b7 limit reached");
   assert.equal(allowanceUsageLabelMini(betaAllowance(4)), "Beta \u00b7 4 / 10");
   assert.equal(allowanceUsageLabelMini(betaAllowance(0)), "Beta \u00b7 0 / 10");
 
@@ -362,7 +397,11 @@ test("[static] the panel is not interactive and carries no upgrade CTA", () => {
   for (const banned of [/Upgrade/i, /Buy more/i, /Pricing/i, /Checkout/i, /Subscribe/i]) {
     assert.equal(banned.test(code), false, `no CTA: ${banned}`);
   }
-  assert.match(code, /<div className=\{`ss-beta-panel ss-beta-panel--\$\{tone\}`\}>/);
+  // The spent modifier is appended for the 10/10 state; the panel is still a
+  // plain div. The no-CTA assertions above are the guarantee that matters and
+  // they are unchanged — this one only pins the element type and base classes.
+  assert.match(code, /<div\s+className=\{`ss-beta-panel ss-beta-panel--\$\{tone\}\$\{exhausted \? " ss-beta-panel--spent" : ""\}`\}/);
+  assert.equal(/role="button"/.test(code), false, "still not a control");
   // And no icon of any kind — no star, no lightning.
   assert.equal(/<svg/.test(code), false, "the text and the bar are the whole component");
 });

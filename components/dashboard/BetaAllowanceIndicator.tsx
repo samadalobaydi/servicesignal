@@ -3,6 +3,7 @@
 import { useBetaAllowance } from "./BetaAllowanceContext";
 import {
   ALLOWANCE_LABEL_PREFIX,
+  allowanceExhausted,
   allowanceUsageDetail,
   allowanceUsageLabelCompact,
   allowanceUsageLabelMini,
@@ -56,8 +57,17 @@ export default function BetaAllowanceIndicator({ tone }: { tone: AllowanceTone }
   // where a plausible wrong value is worse than absence.
   if (!allowance) return null;
 
+  // At the cap the bar is full, and a full bar alone reads as "nearly there"
+  // rather than "stopped". The modifier carries a restrained amber treatment
+  // and the wording (allowanceUsageDetail) says "limit reached" — no upgrade
+  // CTA, because the product has no billing destination to send anyone to.
+  const exhausted = allowanceExhausted(allowance);
+
   return (
-    <div className={`ss-beta-panel ss-beta-panel--${tone}`}>
+    <div
+      className={`ss-beta-panel ss-beta-panel--${tone}${exhausted ? " ss-beta-panel--spent" : ""}`}
+      data-spent={exhausted ? "true" : undefined}
+    >
       {/*
         All three wordings render; CSS shows one. display:none removes the
         others from the accessibility tree as well as the layout, so a screen

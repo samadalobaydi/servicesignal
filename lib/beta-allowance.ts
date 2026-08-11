@@ -248,8 +248,23 @@ const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
  */
 export const ALLOWANCE_LABEL_PREFIX = "Founding beta";
 
+/**
+ * True when the founding-beta allowance is spent.
+ *
+ * Exposed rather than re-derived at each call site so the wording, the styling
+ * and any future gate all agree on one definition.
+ */
+export function allowanceExhausted(a: BetaAllowance): boolean {
+  return a.remaining === 0;
+}
+
 export function allowanceUsageDetail(a: BetaAllowance): string {
-  return `${a.used} / ${a.allowance} ${plural(a.allowance, "reminder", "reminders")} used`;
+  const fraction = `${a.used} / ${a.allowance} ${plural(a.allowance, "reminder", "reminders")} used`;
+  // A full bar alone reads as "nearly there", not "stopped". At the cap the
+  // owner needs to know why no further reminders will go out, so the state is
+  // said in words. No upgrade promise is made here — there is no billing
+  // destination in the product yet, and inventing one would be a lie.
+  return allowanceExhausted(a) ? `${fraction} — limit reached` : fraction;
 }
 
 export function allowanceUsageLabel(a: BetaAllowance): string {
@@ -258,7 +273,9 @@ export function allowanceUsageLabel(a: BetaAllowance): string {
 
 /** Tablet and narrow desktop. Same fraction, less framing. */
 export function allowanceUsageLabelCompact(a: BetaAllowance): string {
-  return `Beta — ${a.used} / ${a.allowance} used`;
+  return allowanceExhausted(a)
+    ? `Beta — ${a.used} / ${a.allowance} · limit reached`
+    : `Beta — ${a.used} / ${a.allowance} used`;
 }
 
 /** The mobile bar, which also carries a logo, a wordmark and Sign out. */

@@ -188,11 +188,24 @@ export function buildAttentionItems(input: AttentionInput): AttentionItem[] {
 
   // Most urgent kind first, then the most overdue, then the largest amount —
   // so the item most likely to cost the business money sits at the top.
+  // ── THE RANKING RULE, IN ORDER ────────────────────────────────────────
+  //
+  //   1. Attention kind      — product urgency wins outright. A failed send
+  //                            outranks a large overdue invoice, because the
+  //                            two need different decisions and one is broken.
+  //   2. Amount, descending  — among items needing the SAME decision, money is
+  //                            what distinguishes them. A £150 invoice must not
+  //                            sit above a £1,200 one when the choice is
+  //                            identical; that was the previous behaviour.
+  //   3. Days overdue, desc  — a genuine tiebreak for equal amounts.
+  //
+  // Deliberately three readable comparisons, not a weighted score: the owner
+  // must be able to look at the list and understand why it is in this order.
   return items.sort((a, b) => {
     const byKind = PRECEDENCE.indexOf(a.kind) - PRECEDENCE.indexOf(b.kind);
     if (byKind !== 0) return byKind;
-    if (b.daysOverdue !== a.daysOverdue) return b.daysOverdue - a.daysOverdue;
-    return b.amount - a.amount;
+    if (b.amount !== a.amount) return b.amount - a.amount;
+    return b.daysOverdue - a.daysOverdue;
   });
 }
 

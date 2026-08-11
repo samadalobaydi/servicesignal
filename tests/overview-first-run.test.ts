@@ -126,7 +126,9 @@ test("[static] the dashboard furniture is inside the populated branch only", () 
     /<StatsCards/,           // Total unpaid / Overdue / Awaiting approval / Paid
     /Needs your attention/,
     /Coming up/,
-    /<InvoiceStatusChart \/>/,
+    // InvoiceStatusChart is deliberately NO LONGER on the Overview — it took
+    // a full-width card to say "No invoice activity for this month" directly
+    // beneath five overdue invoices. See the Overview hierarchy pass.
   ]) {
     assert.match(populated, furniture, `${furniture} belongs to the populated branch`);
     assert.equal(
@@ -137,12 +139,18 @@ test("[static] the dashboard furniture is inside the populated branch only", () 
       furniture.test(alwaysRendered), false,
       `${furniture} must not be hoisted above the branch — that renders it in BOTH states`
     );
-    // And exactly once in the whole file, so a hoisted copy alongside the
-    // original cannot hide behind the original still being in place.
-    assert.equal(
-      (PAGE_CODE.match(new RegExp(furniture.source, "g")) ?? []).length, 1,
-      `${furniture} must appear exactly once`
-    );
+    // And a bounded number of times in the whole file, so a hoisted copy
+    // alongside the original cannot hide behind the original still being in
+    // place.
+    //
+    // "Coming up" legitimately appears TWICE: it is a ternary with an empty
+    // branch and a populated branch, and the heading belongs to both. Both
+    // sit inside the populated arm, which the assertions above already prove,
+    // so the hoisting guarantee is unaffected.
+    const occurrences = (PAGE_CODE.match(new RegExp(furniture.source, "g")) ?? []).length;
+    const allowed = furniture.source === "Coming up" ? 2 : 1;
+    assert.equal(occurrences, allowed,
+      `${furniture} must appear exactly ${allowed} time(s), found ${occurrences}`);
   }
 });
 
