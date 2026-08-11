@@ -2444,7 +2444,9 @@ html { scroll-behavior: smooth; }
 .ss-beta-topline {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  /* Tightened from 0.4rem: buys back a few px for the wording without
+     touching the type size. */
+  gap: 0.35rem;
   min-width: 0;
 }
 .ss-beta-topline .ss-beta-panel-text { flex: 0 1 auto; min-width: 0; }
@@ -2491,14 +2493,32 @@ html { scroll-behavior: smooth; }
 .ss-beta-panel--light { width: 120px; }
 .ss-beta-panel--light .ss-beta-t-mini { display: inline; }
 
+/* ── WIDTHS, AND WHY THE SPENT VARIANT IS DECLARED AT EACH BREAKPOINT ──────
+   The cap widths used to live in one separate `min-width: 1024px` block after
+   these rules. `.ss-beta-panel--light.ss-beta-panel--spent` is two classes
+   against one, so it outranked the 1280px width and applied at EVERY width
+   above 1024 — leaving the spent panel NARROWER at the widest breakpoint than
+   the ordinary one, which is exactly backwards: the cap needs more room, not
+   less. That is what truncated "Founding beta — 10 / 10 r…".
+
+   Each spent width now sits beside the width it extends, so the pair is read
+   and changed together and neither can silently outrank the other. */
+
 @media (min-width: 1024px) {
   .ss-beta-panel--light { width: 220px; }
+  /* + the badge (~92px) and its gap. */
+  .ss-beta-panel--light.ss-beta-panel--spent { width: 300px; }
   .ss-beta-panel--light .ss-beta-t-mini { display: none; }
   .ss-beta-panel--light .ss-beta-t-compact { display: inline; }
 }
 
 @media (min-width: 1280px) {
   .ss-beta-panel--light { width: 390px; }
+  /* The full wording AND the badge on one line. The badge is ~92px including
+     its border and padding, plus a 0.35rem gap — so +70px, which is the
+     smallest increase that leaves the label uncut rather than merely
+     less-cut. */
+  .ss-beta-panel--light.ss-beta-panel--spent { width: 460px; }
   .ss-beta-panel--light .ss-beta-t-compact { display: none; }
   .ss-beta-panel--light .ss-beta-t-full { display: inline; }
 }
@@ -2776,7 +2796,5 @@ html { scroll-behavior: smooth; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Room for the badge at the cap, so nothing has to shrink to fit. */
-@media (min-width: 1024px) {
-  .ss-beta-panel--light.ss-beta-panel--spent { width: 300px; }
-}
+/* The spent widths live INSIDE the breakpoints below, beside the widths they
+   extend. See the note there for why they cannot sit here. */

@@ -611,3 +611,51 @@ test("[static] the badge shares the wording's line and can never overlap it", ()
   assert.ok(badgeAt > toplineStart && badgeAt < toplineEnd,
     "the badge must render inside the topline row, before the progress track");
 });
+
+test("[static] the cap panel is never narrower than the ordinary one", () => {
+  // ── THE TRUNCATION BUG ──────────────────────────────────────────────────
+  //
+  // The cap width was declared once, in its own `min-width: 1024px` block,
+  // AFTER the breakpoint widths. `.ss-beta-panel--light.ss-beta-panel--spent`
+  // is two classes against one, so it outranked the 1280px rule and applied at
+  // every width above 1024 — pinning the spent panel to 300px where the
+  // ordinary panel was 390px.
+  //
+  // The cap shows the SAME wording plus a badge, so it always needs MORE room.
+  // A spent width below its sibling is the bug, whatever the numbers are.
+  const css = readFileSync(join(ROOT, "app/globals.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+
+  const blocks = Array.from(css.matchAll(/@media \(min-width: (\d+)px\) \{([\s\S]*?)\n\}/g));
+  const widthsByBreakpoint = new Map<number, { base?: number; spent?: number }>();
+
+  for (const [, bp, body] of blocks) {
+    const base = body.match(/\.ss-beta-panel--light \{ width: (\d+)px; \}/);
+    const spent = body.match(/\.ss-beta-panel--light\.ss-beta-panel--spent \{ width: (\d+)px; \}/);
+    if (!base && !spent) continue;
+    const entry = widthsByBreakpoint.get(Number(bp)) ?? {};
+    if (base) entry.base = Number(base[1]);
+    if (spent) entry.spent = Number(spent[1]);
+    widthsByBreakpoint.set(Number(bp), entry);
+  }
+
+  assert.ok(widthsByBreakpoint.size >= 2, "expected the 1024 and 1280 width blocks");
+
+  // Array.from: this tsconfig target does not permit Map iteration.
+  for (const [bp, { base, spent }] of Array.from(widthsByBreakpoint)) {
+    assert.ok(base !== undefined, `${bp}px declares no base width`);
+    assert.ok(spent !== undefined,
+      `${bp}px sets a base width but no cap width — the cap will inherit a narrower rule`);
+    assert.ok(spent! > base!,
+      `at ${bp}px the cap panel (${spent}px) must be wider than the ordinary one (${base}px): it shows the same wording plus a badge`);
+    // Sanity ceiling: the header also carries Add Invoice, the bell, an avatar
+    // and an email inside a 1240px container.
+    assert.ok(spent! <= 480,
+      `${spent}px would crowd the header's right-hand controls`);
+  }
+
+  // And no cap width may be declared outside a breakpoint block, where its
+  // extra specificity would outrank every width that follows it.
+  const outside = css.replace(/@media[\s\S]*?\n\}/g, "");
+  assert.equal(/\.ss-beta-panel--light\.ss-beta-panel--spent \{ width:/.test(outside), false,
+    "a cap width outside a media block outranks the breakpoint widths");
+});
