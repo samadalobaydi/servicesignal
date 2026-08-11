@@ -113,10 +113,10 @@ function ChaseRowAction({ invoice, hasPending, pendingReminder, onRequestPrepare
 
   return (
     <div className="flex flex-col items-end gap-1.5 w-full">
-      {/* flex-wrap here too. This is the group that actually holds the four
-          controls, so wrapping at THIS level is what lets the column narrow;
-          wrapping only on the cell above would have left this row rigid. */}
-      <div className="flex items-center gap-2 justify-end flex-wrap">
+      {/* Matches the cell above: one row from lg, compact wrap below it.
+          Both levels must agree, or the outer stays rigid while the inner
+          reflows and the alignment breaks. */}
+      <div className="flex items-center gap-2 justify-end flex-wrap lg:flex-nowrap">
         {!hasPending && canPrepare && (
           <button onClick={onRequestPrepare} disabled={busy} className="dash-btn whitespace-nowrap" style={{ padding: "0.5rem 0.9rem", opacity: busy ? 0.6 : 1 }}>
             Prepare Reminder
@@ -258,8 +258,14 @@ export default function ActiveChasingList({
                 // The actions column is sized for its real contents — Review
                 // reminder + Dismiss + Mark Paid + the menu — instead of
                 // competing with the text columns for whatever is left.
-                ["Customer", "w-[26%]"], ["Amount", "w-[10%]"], ["Due", "w-[13%]"],
-                ["Status", "w-[11%]"], ["Reminder state", "w-[15%]"], ["", "w-[25%]"],
+                // ROOT CAUSE OF THE ACTION PILE: the actions column was
+                // allocated 25%, but Review reminder + Dismiss + Mark Paid +
+                // the menu need roughly 375px, and 25% of the 1160px content
+                // width is 290. Wrapping then "solved" it by stacking, which
+                // is why the row looked broken. The text columns are the ones
+                // with slack — they truncate — so the width moves to actions.
+                ["Customer", "w-[22%]"], ["Amount", "w-[9%]"], ["Due", "w-[12%]"],
+                ["Status", "w-[9%]"], ["Reminder state", "w-[12%]"], ["", "w-[36%]"],
               ].map(([h, w], i) => (
                 <th key={h || "actions"} className={`${i === 5 ? "text-right" : "text-left"} ${w} px-6 py-3.5 text-xs uppercase ${i === 0 ? "rounded-tl-[14px]" : ""} ${i === 5 ? "rounded-tr-[14px]" : ""}`} style={{ color: "var(--dash-text-muted)", fontWeight: 600, letterSpacing: "0.05em" }}>{h}</th>
               ))}
@@ -277,6 +283,13 @@ export default function ActiveChasingList({
                         The full value stays available on hover. */}
                     <p className="text-base truncate" title={inv.customer_name} style={{ fontWeight: 600, color: "var(--dash-text)" }}>{inv.customer_name}</p>
                     <p className="text-sm truncate" title={inv.customer_email} style={{ color: "var(--dash-text-muted)" }}>{inv.customer_email}</p>
+                    {/* The history chevron lives HERE, not in the action
+                        group. It is a disclosure control for this row's
+                        detail, not a task the owner chooses between — putting
+                        it beside the customer stops it competing with the four
+                        real actions for horizontal space, and matches the Paid
+                        Invoices table, which already places it this way. */}
+                    <div className="mt-1.5"><HistoryToggle open={openLogId === inv.id} onClick={() => toggleLog(inv.id)} /></div>
                     {inv.payment_link && (
                       <p className="text-xs mt-0.5" style={{ color: "var(--dash-accent-strong)", fontWeight: 500 }}>Payment link added</p>
                     )}
@@ -296,15 +309,19 @@ export default function ActiveChasingList({
                       <span className="text-sm" style={{ color: rs.color, fontWeight: 600 }}>{rs.text}</span>
                     )}
                   </td>
-                  <td className="px-6 py-4">
-                    {/* flex-wrap, not flex-nowrap. Wrapping is what actually
-                        removes the overflow: it drops the group's min-content
-                        width to the widest SINGLE control instead of the sum of
-                        all of them, so a narrow desktop viewport reflows to a
-                        second line rather than pushing Mark Paid and the menu
-                        out of the card. justify-end keeps rows with fewer
-                        actions aligned with rows that have all of them. */}
-                    <div className="flex items-center gap-2 justify-end flex-wrap">
+                  {/* px-4, not px-6: 16px of the cell's own padding is worth
+                      more to the buttons than to the gutter. */}
+                  <td className="px-4 py-4">
+                    {/* ONE ROW at desktop.
+                        `lg:flex-nowrap` is the real fix — with the column
+                        widened above, all four controls fit on a single line
+                        from 1024px up, which is where this table is actually
+                        read. Below lg the table is only just wider than the
+                        card breakpoint, so wrapping there is a deliberate
+                        compact treatment rather than overflow recovery.
+                        justify-end keeps a two-action row aligned with a
+                        four-action row. */}
+                    <div className="flex items-center gap-2 justify-end flex-wrap lg:flex-nowrap">
                       <ChaseRowAction invoice={inv} hasPending={pendingReminderInvoiceIds.has(inv.id)} pendingReminder={pendingFor(inv.id)} onRequestPrepare={() => setPickerInvoice(inv)} onMarkPaid={onMarkPaid} onAfterAction={refetchAfterReminderAction} menu={
                 <InvoiceRowMenu
                   invoice={inv}
@@ -314,7 +331,6 @@ export default function ActiveChasingList({
                   onArchive={onArchiveInvoice}
                 />
               } />
-                      <HistoryToggle open={openLogId === inv.id} onClick={() => toggleLog(inv.id)} />
                     </div>
                   </td>
                 </tr>

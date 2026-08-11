@@ -191,28 +191,104 @@ test("[static] the chasing table card does not clip its row menu", () => {
   assert.match(code, /rounded-tr-\[14px\]/);
 });
 
-test("[static] the row action group can wrap instead of overflowing", () => {
+test("[static] desktop renders the actions as ONE row, not a wrapped pile", () => {
   const code = strip(read("components/dashboard/ActiveChasingList.tsx"));
 
-  // THE BUG: Review reminder + Dismiss + Mark Paid + the ⋯ menu are each
-  // whitespace-nowrap. Held in a flex-nowrap row, the group's min-content width
-  // is the SUM of all four, which exceeded the column and pushed Mark Paid and
-  // the menu outside the card. Wrapping drops that floor to the widest single
-  // control, which is what actually removes the overflow — as opposed to
-  // shrinking the buttons until they happen to fit at one viewport width.
-  assert.equal(/flex-nowrap/.test(code), false,
-    "no action row may be flex-nowrap; that is what forced the overflow");
-
+  // FIRST ATTEMPT, AND WHY IT WAS WRONG: plain `flex-wrap` stopped the
+  // clipping but produced a three-line action pile at desktop — Review +
+  // Dismiss, then Mark Paid + menu, then the chevron — and a tall ragged row.
+  // Containment is not layout. The fix is the column allocation plus
+  // `lg:flex-nowrap`, so the row is deliberately horizontal where it is read.
   const groups = code.match(/className="flex items-center gap-2 justify-end[^"]*"/g) ?? [];
   assert.ok(groups.length >= 2, `expected the cell and inner action groups, found ${groups.length}`);
   for (const g of groups) {
-    assert.match(g, /flex-wrap/, `action group must be wrappable: ${g}`);
-    // justify-end is what keeps a two-action row aligned with a four-action row.
+    assert.match(g, /lg:flex-nowrap/, `action group must be one row at desktop: ${g}`);
+    assert.match(g, /flex-wrap/, `and a deliberate compact wrap below lg: ${g}`);
     assert.match(g, /justify-end/, "rows with fewer actions must stay aligned");
   }
 
-  // table-fixed is the other half: under auto layout a single long customer
-  // email set a floor for the Customer column and squeezed the actions column.
+  // The actions column must hold the majority of the slack, or nowrap simply
+  // reintroduces the overflow it replaced.
+  const actions = code.match(/\["", "w-\[(\d+)%\]"\]/);
+  assert.ok(actions, "the actions column must have an explicit width");
+  assert.ok(Number(actions![1]) >= 34,
+    `actions column is ${actions![1]}% — too narrow for four controls at nowrap`);
+
+  // Widths must still add up, or table-fixed distributes the remainder oddly.
+  const pcts = Array.from(code.matchAll(/"w-\[(\d+)%\]"/g)).map((m) => Number(m[1]));
+  assert.equal(pcts.reduce((a, b) => a + b, 0), 100, `column widths must total 100%, got ${pcts.join("+")}`);
+
   assert.match(code, /<table className="w-full table-fixed">/);
   assert.match(code, /truncate/, "long customer text must truncate, not widen the column");
+});
+
+test("[static] the history chevron is out of the action group", () => {
+  // It was competing with the four real actions for horizontal space, and was
+  // the control that dropped to its own line. It is a row-disclosure toggle,
+  // not a task — it belongs with the row's identity, as on Paid Invoices.
+  const code = strip(read("components/dashboard/ActiveChasingList.tsx"));
+  const cell = code.slice(code.indexOf('<td className="px-4 py-4">'));
+  const actionCell = cell.slice(0, cell.indexOf("</td>"));
+  assert.equal(/<HistoryToggle/.test(actionCell), false,
+    "the history chevron must not sit inside the action group");
+
+  // ...but it must still exist on the row: not hidden to make things fit.
+  // Scoped to the DESKTOP table — `inv.customer_email` also appears in the
+  // mobile card above it, and anchoring on the first match checked the wrong
+  // half of the component.
+  const desktop = code.slice(code.indexOf("hidden md:block dash-card"));
+  const customerCell = desktop.slice(desktop.indexOf("inv.customer_email"));
+  assert.match(customerCell.slice(0, 400), /<HistoryToggle/,
+    "the chevron must move, not disappear");
+});
+
+
+// ── Developer comments must never reach the customer ───────────────────────
+
+test("[static] no block comment sits in JSX child position", () => {
+  // WHAT HAPPENED: unwrapping `{onboarding ? ( /* ... */ <div/> ) : (...)}`
+  // removed the braces, and a block comment among JSX CHILDREN is not a
+  // comment — it is text. React rendered the implementation note into the Add
+  // Invoice drawer, above the due-date field, on a live Preview.
+  //
+  // THE RULE: `/* */` is a real comment only in EXPRESSION position — directly
+  // after `(`, `{`, `?`, `:`, `&&`, `||`, `,` or `=`. Immediately after a `>`
+  // that closed a JSX tag, it is rendered text.
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.name === "node_modules" || e.name.startsWith(".")
+        ? [] : e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]);
+
+  const files = walk(join(ROOT, "app")).concat(walk(join(ROOT, "components")))
+    .filter((f) => f.endsWith(".tsx"));
+  assert.ok(files.length > 10, "the sweep must actually find components");
+
+  for (const file of files) {
+    const code = readFileSync(file, "utf8");
+    for (let i = code.indexOf("/*"); i !== -1; i = code.indexOf("/*", i + 2)) {
+      // Skip `//`-style lines and doc blocks at module scope.
+      let k = i - 1;
+      while (k >= 0 && /\s/.test(code[k])) k--;
+      const prev = k >= 0 ? code[k] : "{";
+      if ("({?:&|,=;[".includes(prev)) continue;   // expression position — fine
+      if (prev === "*" || prev === "/") continue;  // nested/adjacent comment
+      const line = code.slice(0, i).split("\n").length;
+      assert.equal(prev === ">", false,
+        `${file.slice(ROOT.length)}:${line} — block comment directly after a JSX tag renders as visible text; wrap it in {/* ... */}`);
+    }
+  }
+});
+
+test("[static] the date-field implementation note cannot render as form text", () => {
+  const code = read("components/invoice/InvoiceFields.tsx");
+  for (const fragment of ["ONE field, not two", "showPicker()", "BRACES ARE LOAD-BEARING"]) {
+    const at = code.indexOf(fragment);
+    assert.ok(at > -1, `${fragment} should still be documented for developers`);
+    // Every occurrence must live inside a {/* ... */} container.
+    const before = code.slice(0, at);
+    const opener = before.lastIndexOf("{/*");
+    const closer = before.lastIndexOf("*/}");
+    assert.ok(opener > closer,
+      `"${fragment}" is not inside a {/* ... */} container — it would render`);
+  }
 });

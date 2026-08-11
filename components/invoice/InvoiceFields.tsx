@@ -302,7 +302,7 @@ export function InvoiceFields({
       <div>
         <p className="section-legend">{"Invoice"}</p>
         <div className="space-y-3">
-          
+
             <div>
               <label className="field-label" htmlFor="inv-reference">
                 {requireReference ? "Invoice reference *" : <>Invoice reference <span className="opt">(optional)</span></>}
@@ -324,7 +324,7 @@ export function InvoiceFields({
               <label className="field-label" htmlFor="inv-amount">
                 Amount *
               </label>
-              
+
                 <input
                   id="inv-amount"
                   // TEXT, not number. A number input strips the comma in
@@ -359,14 +359,18 @@ export function InvoiceFields({
 
             <div>
               <label className="field-label" htmlFor="inv-due-date">Due date *</label>
-              
-                /* ONE field, not two.
-                   A single text input owns dd/mm/yyyy. The calendar button
-                   sits INSIDE it and opens the browser's own picker via
-                   showPicker() on a visually-hidden date input — so there is
-                   no second visible date control to confuse anyone, and no
-                   date-picker dependency. Both paths write the same ISO
-                   string, so they cannot drift. */
+              {/* ONE field, not two.
+                  A single text input owns dd/mm/yyyy. The calendar button sits
+                  INSIDE it and opens the browser's own picker via showPicker()
+                  on a visually-hidden date input — so there is no second
+                  visible date control to confuse anyone, and no date-picker
+                  dependency. Both paths write the same ISO string, so they
+                  cannot drift.
+
+                  BRACES ARE LOAD-BEARING. A bare block comment sitting among
+                  JSX CHILDREN is not a comment — it is text, and React renders
+                  it. This one shipped to a Preview and appeared as visible
+                  copy above the date field. */}
                 <div className="ss-date">
                   <input
                     id="inv-due-date" type="text" inputMode="numeric"
@@ -433,7 +437,7 @@ export function InvoiceFields({
             </div>
           </div>
 
-          
+
           <Collapsible label="Add a job description">
             <label className="field-label" htmlFor="inv-job">
               Job description <span className="opt">(optional)</span>
@@ -455,7 +459,7 @@ export function InvoiceFields({
             )}
           </Collapsible>
 
-          
+
           <Collapsible
             label={savedPaymentLink ? "Payment link" : "Add a payment link"}
             defaultOpen={!!savedPaymentLink}
@@ -512,7 +516,7 @@ export function InvoiceFields({
       <div>
         <p className="section-legend">{"Reminder plan"}</p>
         <div className="space-y-3">
-          
+
           <SettingSummary
             label="Tone"
             value={toneLabel}
@@ -555,7 +559,7 @@ export function InvoiceFields({
               overdue on Standard receives exactly one. See
               lib/onboarding-schedule.ts. Falls back to the shared summary until
               a due date has been entered. */}
-          
+
           <SettingSummary
             label="Schedule"
             value={activePreset?.key === "custom" ? "Custom" : `${activePreset?.title ?? "Standard"}`}
