@@ -84,7 +84,20 @@ export async function dismissReminder(id: string): Promise<{ success: boolean; m
  */
 export async function prepareReminder(
   invoiceId: string
-): Promise<{ success: boolean; message: string; alreadyPending?: boolean }> {
+): Promise<{
+  success: boolean;
+  message: string;
+  alreadyPending?: boolean;
+  /**
+   * "allowance_exhausted" when the founding-beta cap left no capacity to
+   * prepare a new reminder. Named so a caller can branch on the STATE rather
+   * than pattern-matching prose; the row already renders `message` verbatim,
+   * so the copy is truthful even if the cap was reached between the page
+   * rendering and the click.
+   */
+  state?: string;
+  allowanceExhausted?: boolean;
+}> {
   try {
     const res = await fetch(`/api/reminders/prepare`, {
       method: "POST",

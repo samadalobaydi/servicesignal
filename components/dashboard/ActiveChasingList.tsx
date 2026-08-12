@@ -11,8 +11,14 @@ import InvoiceActivityLog, { HistoryToggle } from "./InvoiceActivityLog";
 import { useDashboard } from "./DashboardProvider";
 import ChannelPickerModal from "./ChannelPickerModal";
 import { dismissReminder } from "@/lib/reminders";
+import { useBetaAllowance } from "./BetaAllowanceContext";
+import { allowanceExhausted } from "@/lib/beta-allowance";
 
-function reminderStateLabel(invoice: Invoice, hasPending: boolean): { text: string; color: string; pill?: boolean } {
+function reminderStateLabel(
+  invoice: Invoice,
+  hasPending: boolean,
+  allowanceSpent: boolean,
+): { text: string; color: string; pill?: boolean } {
   // "Ready for review", not "ready to send": the owner has not seen the
   // message yet, and the row no longer offers a way to send without doing so.
   if (hasPending) return { text: "Ready for review", color: "var(--dash-amber)", pill: true };
@@ -21,6 +27,23 @@ function reminderStateLabel(invoice: Invoice, hasPending: boolean): { text: stri
   if (total === 0) return { text: "No reminders set", color: "var(--dash-text-muted)" };
   const eligibility = prepareEligibility(invoice.reminder_schedules, invoice.reminders_sent ?? [], invoice.due_date);
   const canPrepare = !!eligibility.schedule;
+
+  // ── ALLOWANCE SPENT ───────────────────────────────────────────────────
+  //
+  // Only replaces the states that would otherwise INVITE preparation. An
+  // invoice that is not yet eligible, or has finished its schedule, already
+  // says something more specific and keeps saying it.
+  //
+  // Deliberately checked AFTER hasPending: a reminder prepared before the cap
+  // was reached is still reviewable and still sendable against the slot it
+  // already holds, so it must keep reading "Ready for review".
+  //
+  // Light navy, matching the header's "Limit reached" — this is a capacity
+  // fact about the account, not a fault with the invoice.
+  if (allowanceSpent && canPrepare) {
+    return { text: "Reminder limit reached", color: "var(--dash-text-muted)", pill: true };
+  }
+
   if (sentCount === 0 && canPrepare) return { text: "Ready to chase", color: "var(--dash-accent-strong)" };
   if (canPrepare) return { text: `${sentCount} of ${total} reminders sent`, color: "var(--dash-accent-strong)" };
   // Not eligible yet is NOT the same as finished — before the stricter
@@ -58,7 +81,8 @@ interface ActiveChasingListProps {
   onArchiveInvoice: (invoice: Invoice) => Promise<boolean>;
 }
 
-function ChaseRowAction({ invoice, hasPending, pendingReminder, onRequestPrepare, onMarkPaid, onAfterAction, menu }: {
+function ChaseRowAction({ invoice, hasPending, pendingReminder, onRequestPrepare, onMarkPaid, onAfterAction, menu, allowanceSpent }: {
+  allowanceSpent: boolean;
   menu?: React.ReactNode;
   invoice: Invoice;
   hasPending: boolean;
@@ -117,7 +141,12 @@ function ChaseRowAction({ invoice, hasPending, pendingReminder, onRequestPrepare
           Both levels must agree, or the outer stays rigid while the inner
           reflows and the alignment breaks. */}
       <div className="flex items-center gap-2 justify-end flex-wrap lg:flex-nowrap">
-        {!hasPending && canPrepare && (
+        {/* HIDDEN, not disabled. A greyed-out primary button invites a click
+            and explains nothing; the row's state column already says
+            "Reminder limit reached". Everything else on the row — Mark Paid,
+            the lifecycle menu, history — stays exactly as it was, because the
+            invoice itself is unaffected. */}
+        {!hasPending && canPrepare && !allowanceSpent && (
           <button onClick={onRequestPrepare} disabled={busy} className="dash-btn whitespace-nowrap" style={{ padding: "0.5rem 0.9rem", opacity: busy ? 0.6 : 1 }}>
             Prepare Reminder
           </button>
@@ -161,6 +190,19 @@ export default function ActiveChasingList({
   invoices, pendingReminderInvoiceIds, onPrepareReminder, onMarkPaid,
   reminderStatusesByInvoice, onEditInvoice, onDeleteInvoice, onArchiveInvoice,
 }: ActiveChasingListProps) {
+  // ── IS THERE CAPACITY TO SEND ANOTHER REMINDER? ────────────────────────
+  //
+  // The SAME source the header indicator uses: the reminder_allowance_slots
+  // ledger via BetaAllowanceContext, judged by the same allowanceExhausted().
+  // No second definition of "10 reminders used".
+  //
+  // Null while the count is in flight, and null is treated as NOT spent — so
+  // a slow read never hides a legitimate action. The server pre-flight and the
+  // atomic send-time claim both sit behind this, so the cost of being briefly
+  // optimistic here is at most one refused prepare.
+  const allowance = useBetaAllowance();
+  const allowanceSpent = allowance !== null && allowanceExhausted(allowance);
+
   const [openLogId, setOpenLogId] = useState<string | null>(null);
   const toggleLog = (id: string) => setOpenLogId((cur) => (cur === id ? null : id));
   const { reminders, refetchAfterReminderAction } = useDashboard();
@@ -191,7 +233,7 @@ export default function ActiveChasingList({
       {/* Mobile cards */}
       <div className="flex flex-col gap-3 md:hidden">
         {sorted.map((inv) => {
-          const rs = reminderStateLabel(inv, pendingReminderInvoiceIds.has(inv.id));
+          const rs = reminderStateLabel(inv, pendingReminderInvoiceIds.has(inv.id), allowanceSpent);
           return (
             <div key={inv.id} className="dash-card p-4 space-y-3">
               <div className="flex items-start justify-between gap-2">
@@ -218,7 +260,7 @@ export default function ActiveChasingList({
               ) : (
                 <p className="text-sm" style={{ color: rs.color, fontWeight: 600 }}>{rs.text}</p>
               )}
-              <ChaseRowAction invoice={inv} hasPending={pendingReminderInvoiceIds.has(inv.id)} pendingReminder={pendingFor(inv.id)} onRequestPrepare={() => setPickerInvoice(inv)} onMarkPaid={onMarkPaid} onAfterAction={refetchAfterReminderAction} menu={
+              <ChaseRowAction allowanceSpent={allowanceSpent} invoice={inv} hasPending={pendingReminderInvoiceIds.has(inv.id)} pendingReminder={pendingFor(inv.id)} onRequestPrepare={() => setPickerInvoice(inv)} onMarkPaid={onMarkPaid} onAfterAction={refetchAfterReminderAction} menu={
                 <InvoiceRowMenu
                   invoice={inv}
                   reminderStatuses={reminderStatusesByInvoice[inv.id] ?? []}
@@ -273,7 +315,7 @@ export default function ActiveChasingList({
           </thead>
           <tbody>
             {sorted.map((inv) => {
-              const rs = reminderStateLabel(inv, pendingReminderInvoiceIds.has(inv.id));
+              const rs = reminderStateLabel(inv, pendingReminderInvoiceIds.has(inv.id), allowanceSpent);
               return (
                 <Fragment key={inv.id}>
                 <tr style={{ borderTop: "1px solid var(--dash-border)" }}>
@@ -322,7 +364,7 @@ export default function ActiveChasingList({
                         justify-end keeps a two-action row aligned with a
                         four-action row. */}
                     <div className="flex items-center gap-2 justify-end flex-wrap lg:flex-nowrap">
-                      <ChaseRowAction invoice={inv} hasPending={pendingReminderInvoiceIds.has(inv.id)} pendingReminder={pendingFor(inv.id)} onRequestPrepare={() => setPickerInvoice(inv)} onMarkPaid={onMarkPaid} onAfterAction={refetchAfterReminderAction} menu={
+                      <ChaseRowAction allowanceSpent={allowanceSpent} invoice={inv} hasPending={pendingReminderInvoiceIds.has(inv.id)} pendingReminder={pendingFor(inv.id)} onRequestPrepare={() => setPickerInvoice(inv)} onMarkPaid={onMarkPaid} onAfterAction={refetchAfterReminderAction} menu={
                 <InvoiceRowMenu
                   invoice={inv}
                   reminderStatuses={reminderStatusesByInvoice[inv.id] ?? []}

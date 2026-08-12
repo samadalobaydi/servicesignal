@@ -6,6 +6,11 @@ import { formatDate } from "@/lib/invoices";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { persistGeneratedContent } from "@/lib/reminder-channel-store";
 import { resolveBusinessName } from "@/lib/reminder-approval";
+import {
+  allowancePreflight,
+  ALLOWANCE_EXHAUSTED_STATE,
+  allowanceExhaustedMessage,
+} from "@/lib/allowance-preflight";
 
 /**
  * POST /api/reminders/prepare
@@ -113,6 +118,33 @@ export async function POST(request: NextRequest) {
 
   const schedule = eligibility.schedule;
 
+  // ── ALLOWANCE PRE-FLIGHT ────────────────────────────────────────────────
+  //
+  // Read once, applied only to the branches that would CREATE new send
+  // capacity. Deliberately NOT applied to:
+  //
+  //   - an existing pending reminder — already prepared, already counted, and
+  //     returning it consumes nothing;
+  //   - an already-sent reminder — that path returns "already sent", which is
+  //     a more useful answer than an allowance refusal.
+  //
+  // UX protection only. The authoritative cap is the atomic slot claim at send
+  // time; this fails open when the ledger cannot be read.
+  const preflight = await allowancePreflight(supabase);
+  const refuseForAllowance = () =>
+    NextResponse.json(
+      {
+        success: false,
+        state: ALLOWANCE_EXHAUSTED_STATE,
+        message: allowanceExhaustedMessage(preflight.used, preflight.allowance),
+        allowanceExhausted: true,
+      },
+      // 409, not 500: a capability answer about the account's state, not a
+      // fault. The browser can branch on `state` if the allowance changed
+      // between page render and click.
+      { status: 409 }
+    );
+
   // Check for an existing reminder_log for this invoice + schedule
   const { data: existing } = await supabase
     .from("reminder_logs")
@@ -141,6 +173,10 @@ export async function POST(request: NextRequest) {
     // approval flow, no schema change, and history stays intact because the
     // dismissal/failure already appeared in the activity feed at the time.
     if (existing.status === "dismissed" || existing.status === "failed") {
+      // Reviving is creation: a dismissed or failed row becomes a sendable
+      // draft again, so it needs the same protection as a fresh insert.
+      if (preflight.known && preflight.exhausted) return refuseForAllowance();
+
       const { error: reviveError } = await supabase
         .from("reminder_logs")
         .update({
@@ -174,6 +210,9 @@ export async function POST(request: NextRequest) {
       { status: 409 }
     );
   }
+
+  // No existing row: this is a genuinely new reminder.
+  if (preflight.known && preflight.exhausted) return refuseForAllowance();
 
   // Build a subject for display (full email is rebuilt at send time)
   const subject = `Reminder: invoice from your business`;
