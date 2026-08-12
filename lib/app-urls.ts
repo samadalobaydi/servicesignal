@@ -48,23 +48,160 @@ function stripTrailingSlashes(url: string): string {
  * rendered server-side. In the browser this returns null and the existing
  * resolution is unchanged.
  */
-function vercelPreviewOrigin(): string | null {
-  if (process.env.VERCEL_ENV !== "preview") return null;
+/**
+ * Distinct from null: "this IS a preview, and it is misconfigured".
+ *
+ * null means "not a preview, carry on with the normal resolution". This
+ * sentinel means "stop — do not fall back to production", which is a different
+ * instruction and must not collapse into the same value.
+ */
+const PREVIEW_MISCONFIGURED = Symbol("preview-misconfigured");
 
-  const host = process.env.VERCEL_URL?.trim();
-  if (!host) return null;
+/**
+ * An explicitly configured Preview origin — the escape hatch for a project
+ * where Vercel's system variables are not exposed to the runtime.
+ *
+ * ── WHY ITS OWN VARIABLE, AND NOT NEXT_PUBLIC_APP_URL ─────────────────────
+ *
+ * NEXT_PUBLIC_APP_URL is one project-wide value meaning "the app's origin". On
+ * a Preview it holds production, because production also needs it. Reusing it
+ * as a Preview override would make the SAME value mean two different things
+ * depending on where it was set — and being unable to tell those apart is the
+ * original bug in this file.
+ *
+ * PREVIEW_APP_URL has exactly one meaning: someone deliberately set this
+ * Preview's origin. If it is present it was intended; if it is absent there is
+ * nothing to disambiguate.
+ *
+ * Server-only, with no NEXT_PUBLIC_ prefix: it is used to build token links
+ * during server-side email rendering and must never be inlined into the client
+ * bundle.
+ */
+/**
+ * Can this runtime POSITIVELY prove it is local development?
+ *
+ * ── WHY ABSENCE IS NOT EVIDENCE ───────────────────────────────────────────
+ *
+ * The resolver used to treat "no VERCEL_ENV" as "must be local" and fall
+ * through to NEXT_PUBLIC_APP_URL. But a Vercel Preview with system variables
+ * switched off exposes no VERCEL_ENV either — so a misconfigured Preview was
+ * indistinguishable from `next dev`, and silently emailed the production
+ * origin. That is the original 404 bug, reached by a different route.
+ *
+ * Local must therefore be established by something POSITIVE:
+ *
+ *   NODE_ENV === "development"  — set by `next dev`. Vercel builds and runs
+ *                                 with NODE_ENV=production, so this is never
+ *                                 true on a deployment.
+ *   a loopback origin           — localhost / 127.0.0.1 / ::1. Local by
+ *                                 construction: no deployed environment can
+ *                                 legitimately mail a link to loopback, and
+ *                                 nobody can receive one there.
+ *
+ * Either is sufficient. Both are deployment configuration, never
+ * request-derived.
+ */
+function isPositivelyLocal(): boolean {
+  if (process.env.NODE_ENV === "development") return true;
 
-  // VERCEL_URL is a bare host with no scheme. Validated anyway rather than
-  // interpolated blindly — a value carrying a scheme, a path, credentials or
-  // whitespace would silently build a malformed or off-origin link.
-  if (!/^[a-z0-9.-]+$/i.test(host)) {
+  const raw = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (!raw) return false;
+  try {
+    const host = new URL(stripTrailingSlashes(raw)).hostname.toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+  } catch {
+    return false;
+  }
+}
+
+function explicitPreviewOrigin(): string | null {
+  const raw = process.env.PREVIEW_APP_URL?.trim();
+  if (!raw) return null;
+
+  const cleaned = stripTrailingSlashes(raw);
+  try {
+    const parsed = new URL(cleaned);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error(`unsupported protocol "${parsed.protocol}"`);
+    }
+    if (!parsed.hostname) throw new Error("missing hostname");
+
+    // Refused, loudly. Pointing a Preview override at production is almost
+    // certainly a copy-paste of NEXT_PUBLIC_APP_URL, and honouring it would
+    // rebuild the exact 404 link this whole contract exists to prevent.
+    if (cleaned === PRODUCTION_ORIGIN) {
+      console.error(
+        "[app-urls] PREVIEW_APP_URL is set to the production origin, which " +
+          "would email a verification link into an environment this Preview " +
+          "is not. Ignoring it; set the Preview's own URL or unset it."
+      );
+      return null;
+    }
+    return cleaned;
+  } catch {
     console.error(
-      `[app-urls] VERCEL_URL is not a bare hostname: ${JSON.stringify(host)}. Ignoring it.`
+      `[app-urls] PREVIEW_APP_URL is malformed: ${JSON.stringify(cleaned)}. ` +
+        "Expected an absolute origin such as https://my-branch.vercel.app."
     );
     return null;
   }
-  return `https://${host}`;
 }
+
+function vercelPreviewOrigin(): string | null | typeof PREVIEW_MISCONFIGURED {
+  const env = process.env.VERCEL_ENV;
+
+  // ── A DEPLOYMENT VERCEL HAS IDENTIFIED AS A PREVIEW ─────────────────────
+  if (env === "preview") {
+    const host = process.env.VERCEL_URL?.trim();
+
+    if (host && /^[a-z0-9.-]+$/i.test(host)) return `https://${host}`;
+
+    if (host) {
+      // Present but unusable — a value carrying a scheme, path, credentials or
+      // whitespace would build a malformed or off-origin link.
+      console.error(
+        `[app-urls] VERCEL_URL is not a bare hostname: ${JSON.stringify(host)}.`
+      );
+    }
+
+    const explicit = explicitPreviewOrigin();
+    if (explicit) return explicit;
+
+    console.error(
+      "[app-urls] VERCEL_ENV is \"preview\" but no usable Preview origin is " +
+        "available (VERCEL_URL missing or invalid, PREVIEW_APP_URL unset). " +
+        "Account-journey email SUPPRESSED rather than sent with a production " +
+        "link that would 404."
+    );
+    return PREVIEW_MISCONFIGURED;
+  }
+
+  // ── NO VERCEL_ENV AT ALL ────────────────────────────────────────────────
+  //
+  // This runtime looks EXACTLY like local development: with system variables
+  // switched off, a Vercel Preview exposes neither VERCEL_ENV nor VERCEL_URL,
+  // and there is nothing left to distinguish it from `next dev`.
+  //
+  // That is why PREVIEW_APP_URL is honoured here. Setting a server-only
+  // environment variable IS the operator declaring "this deployment is not
+  // production, and this is its origin" — trusted deployment configuration,
+  // never request-derived, so it carries the same trust as VERCEL_URL.
+  //
+  // Without this branch the previous contract was self-contradictory: it
+  // offered PREVIEW_APP_URL as the answer to missing system variables, while
+  // gating it behind VERCEL_ENV — which is itself one of the missing system
+  // variables. A Preview in that state silently resolved to production and
+  // rebuilt the 404 this file exists to prevent.
+  if (env === undefined || env.trim() === "") {
+    const explicit = explicitPreviewOrigin();
+    if (explicit) return explicit;
+  }
+
+  // "production", or any other value: never overridden. A stray
+  // PREVIEW_APP_URL must not be able to redirect production's token links.
+  return null;
+}
+
 
 /**
  * The app's own base origin. Resolution order:
@@ -91,7 +228,9 @@ export function getAppBaseUrl(): string {
   // the browser this is null and the window.location.origin behaviour below is
   // untouched.
   const preview = vercelPreviewOrigin();
-  if (preview) return preview;
+  // Lenient by design — this builds in-app links, where a wrong origin is
+  // visible immediately and harmless. Only the email resolver fails closed.
+  if (typeof preview === "string") return preview;
 
   const envValue = process.env.NEXT_PUBLIC_APP_URL;
 
@@ -188,7 +327,34 @@ export function requireAppBaseUrl(): string | null {
   // are untouched: VERCEL_ENV is "production" and undefined respectively, so
   // this returns null there and resolution continues exactly as before.
   const preview = vercelPreviewOrigin();
+  // A misconfigured Preview fails CLOSED. The signup row is already saved by
+  // the caller, so nothing is lost but the email — and an unsent email with a
+  // loud log is recoverable, while one carrying a token to a 404 is not.
+  if (preview === PREVIEW_MISCONFIGURED) return null;
   if (preview) return preview;
+
+  // ── AN UNCLASSIFIABLE DEPLOYED RUNTIME FAILS CLOSED ─────────────────────
+  //
+  // Reaching here means: not a Preview by any trusted signal, and no explicit
+  // Preview origin. That is correct for production and for local development —
+  // but it is ALSO what a Vercel Preview looks like when system variables are
+  // switched off, and returning NEXT_PUBLIC_APP_URL there would mail a token
+  // to production and 404, which is the whole bug.
+  //
+  // So the environment must positively identify itself. Production says so via
+  // VERCEL_ENV; local proves it via NODE_ENV or a loopback origin. Anything
+  // else is ambiguous, and an ambiguous environment does not get to send a
+  // security-sensitive link.
+  if (process.env.VERCEL_ENV !== "production" && !isPositivelyLocal()) {
+    console.error(
+      "[app-urls] This runtime cannot be classified as Production, Preview or " +
+        "local development (VERCEL_ENV unset, no PREVIEW_APP_URL, NODE_ENV not " +
+        "development, configured origin is not loopback). Account-journey " +
+        "email SUPPRESSED rather than sent with a possibly wrong origin. On " +
+        "Vercel, expose the system environment variables or set PREVIEW_APP_URL."
+    );
+    return null;
+  }
 
   const raw = process.env.NEXT_PUBLIC_APP_URL;
 

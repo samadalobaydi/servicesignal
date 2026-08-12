@@ -35,7 +35,11 @@ const STATES: Record<State, { title: string; body: string; cta?: { href: string;
   },
   expired: {
     title: "This link has expired",
-    body: "Verification links are valid for 48 hours. Email support@servicesignal.app and we'll send you a new one.",
+    // NOT "we'll send you a new one". issueVerification has exactly one caller
+    // (app/api/signup/route.ts), and there is no admin route, script or npm
+    // task that can mint and send a replacement token — so that promise could
+    // not be kept. Support can help a person; that is all this claims.
+    body: "Verification links are valid for 48 hours. Email support@servicesignal.app and we'll help you get set up.",
   },
   invalid: {
     // Same wording as expired would be misleading; same LACK of detail is

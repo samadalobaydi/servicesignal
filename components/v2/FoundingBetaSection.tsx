@@ -39,6 +39,10 @@ export default function FoundingBetaSection() {
   const [status, setStatus] = useState<"idle" | "sending" | "done">("idle");
   /* True only when the API confirms Resend accepted the access email. */
   const [emailSent, setEmailSent] = useState(false);
+  // The server distinguishes "already on the list" from "the send failed".
+  // Without it the two collapse into one arm and a deliberate product decision
+  // gets reported to the visitor as an infrastructure failure.
+  const [alreadyListed, setAlreadyListed] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   /**
    * The address we actually submitted, captured at the moment of success.
@@ -113,6 +117,7 @@ export default function FoundingBetaSection() {
         // The API reports saving and sending as separate outcomes, so the
         // confirmation below can only claim an email was sent when one was.
         setEmailSent(Boolean(data.emailSent));
+        setAlreadyListed(data.outcome === "already_listed");
         // Hand the two reusable values to /signup via same-origin
         // sessionStorage — never a query string, so the address stays out of
         // history, referrer headers and server logs.
@@ -169,6 +174,7 @@ export default function FoundingBetaSection() {
     setErrors({});
     setFormError(null);
     setEmailSent(false);
+    setAlreadyListed(false);
     setSubmittedEmail("");
     clearSignupPrefill();
     setStatus("idle");
@@ -219,6 +225,40 @@ export default function FoundingBetaSection() {
                     Open it to finish creating your ServiceSignal account. The link
                     expires in 48 hours. If it hasn&rsquo;t arrived after a few
                     minutes, check your spam folder.
+                  </p>
+                </>
+              ) : alreadyListed ? (
+                <>
+                  {/* NOT a failure. This address is already on the list and we
+                      deliberately do not resend — sending again on demand would
+                      let anyone mail the same address repeatedly, and the
+                      per-address cooldown that would make it safe does not
+                      exist yet. Saying "we couldn't send" here described that
+                      product decision as an infrastructure fault. */}
+                  <p className="v2-beta-done-t">You&rsquo;re already on the list</p>
+                  <p className="v2-beta-done-s">
+                    <span className="v2-beta-done-email">{submittedEmail}</span> is
+                    already registered for the founding beta. If you still have our
+                    verification email, open the link in it to finish creating your
+                    account.
+                  </p>
+                  {/* The 48 hours is not decoration. Tokens expire after
+                      VERIFICATION_TTL_HOURS, submitting this form again does NOT
+                      issue a replacement, and nothing here resends — so telling
+                      someone to "check your inbox" and stopping would, after two
+                      days, be an instruction that cannot work.
+
+                      IT DOES NOT PROMISE A NEW LINK. issueVerification has
+                      exactly one caller (the signup route, which duplicates
+                      never reach); there is no admin route, script or task that
+                      can mint and send a replacement token. Support can help a
+                      person, so that is all this claims. See the launch gap in
+                      the report. */}
+                  <p className="v2-beta-done-s">
+                    Verification links expire 48 hours after they&rsquo;re sent. If
+                    yours has expired, or you can&rsquo;t find the email, check your
+                    spam folder or email support@servicesignal.app and we&rsquo;ll
+                    help you get set up.
                   </p>
                 </>
               ) : (
