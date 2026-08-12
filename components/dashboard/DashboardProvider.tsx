@@ -13,6 +13,7 @@ import {
   archiveInvoice,
 } from "@/lib/invoices";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
+import { buildInvoiceInsert } from "@/lib/invoice-create-payload";
 import { fetchProfile } from "@/lib/profile";
 import { fetchPendingReminders, prepareReminder, fetchLatestSentMap, fetchReminderHistory } from "@/lib/reminders";
 import { fetchLatestActionMap } from "@/lib/invoice-actions";
@@ -158,27 +159,18 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const handleAddInvoice = useCallback(async (data: InvoiceFormData) => {
+    // The payload is built by a pure, tested function — see
+    // lib/invoice-create-payload.ts. It used to be assembled inline here,
+    // which is why a parseFloat on a currency-formatted string ("£1,500.00")
+    // could reach production as amount = null with nothing to catch it.
+    const payload = buildInvoiceInsert(data);
+    if (!payload) {
+      setError("Failed to save invoice. Please check the amount and try again.");
+      return;
+    }
+
     const supabase = getSupabaseBrowser();
-    const inserted = await insertInvoice(supabase, {
-      // Migration 007 columns, now collected by the dashboard form too.
-      // Spread so an unset field is ABSENT from the insert rather than an
-      // explicit null on every row — matching lib/invoice-write.ts, and
-      // matching the nullable columns verified in production.
-      ...(data.invoice_reference.trim() ? { invoice_reference: data.invoice_reference.trim() } : {}),
-      ...(data.job_description.trim() ? { job_description: data.job_description.trim() } : {}),
-      customer_name:      data.customer_name.trim(),
-      customer_email:     data.customer_email.trim(),
-      customer_phone:     data.customer_phone.trim(),
-      amount:             parseFloat(data.amount),
-      due_date:           data.due_date,
-      payment_link:       data.payment_link.trim(),
-      reminder_tone:      data.reminder_tone,
-      reminder_schedules: data.reminder_schedules,
-      // status and reminders_sent are NOT sent. Production defaults them to
-      // 'unpaid' and an empty text[] (verified on main — PRODUCTION), and after
-      // migration 013 `authenticated` holds no INSERT privilege on either
-      // column, so naming them here would fail outright.
-    });
+    const inserted = await insertInvoice(supabase, payload);
     if (inserted) {
       setInvoices((prev) => refreshStatuses([inserted, ...prev]));
     } else {

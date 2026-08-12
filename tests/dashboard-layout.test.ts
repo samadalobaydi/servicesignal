@@ -147,9 +147,11 @@ test("[static] the legacy dashboard presentation is deleted, not just bypassed",
 });
 
 test("[static] reference and job description reach the creation payload", () => {
-  const provider = strip(read("components/dashboard/DashboardProvider.tsx"));
-  const call = provider.slice(provider.indexOf("insertInvoice(supabase, {"));
-  const payload = call.slice(0, call.indexOf("});") + 1);
+  // The payload moved OUT of the React callback into a pure module, so it
+  // could finally be tested — see lib/invoice-create-payload.ts.
+  const builder = strip(read("lib/invoice-create-payload.ts"));
+  const call = builder.slice(builder.indexOf("return {"));
+  const payload = call.slice(0, call.indexOf("\n  };") + 1);
 
   // Collected by the form, so they must actually be sent — otherwise the new
   // fields are decorative and the data is silently dropped.

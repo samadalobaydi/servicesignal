@@ -1568,13 +1568,13 @@ const REQUIRED_INSERT_COLUMNS = (() => {
 
 /**
  * The two EXECUTABLE insert sites. Both run as `authenticated`:
- * DashboardProvider on the browser client, invoice-write via
- * app/api/onboarding/invoices, which uses getSupabaseServer() — a fact worth
- * stating because it makes the onboarding path subject to 013 too, and it was
- * originally missed.
+ * invoice-create-payload feeds the browser client from DashboardProvider,
+ * invoice-write runs via app/api/onboarding/invoices, which uses
+ * getSupabaseServer() — a fact worth stating because it makes the onboarding
+ * path subject to 013 too, and it was originally missed.
  */
 const INSERT_SITES = [
-  "components/dashboard/DashboardProvider.tsx",
+  "lib/invoice-create-payload.ts",
   "lib/invoice-write.ts",
 ];
 
@@ -1681,7 +1681,7 @@ test("[static] no executable insert payload sends a database-owned column", () =
     // conditionally — `...(x ? { invoice_reference: x } : {})` — so the naive
     // slice ended at that inner `})` and silently examined a fragment,
     // reporting the real fields further down as missing.
-    const call = code.slice(code.search(/\.insert\(|insertInvoice\(/));
+    const call = code.slice(code.search(/\.insert\(|return \{/));
     const open = call.indexOf("{");
     let depth = 0, close = open;
     for (let k = open; k < call.length; k++) {
@@ -1692,7 +1692,9 @@ test("[static] no executable insert payload sends a database-owned column", () =
     const payload = call.slice(open, close + 1);
 
     for (const col of WITHHELD_COLUMNS) {
-      assert.equal(new RegExp(`\\b${col}\\s*:`).test(payload), false,
+      // `[,:]` — ES6 SHORTHAND COUNTS. `{ status }` sends the column just as
+      // surely as `{ status: x }`, and a colon-only check would not see it.
+      assert.equal(new RegExp(`\\b${col}\\s*[,:]`).test(payload), false,
         `${f} still sends ${col}; 013 denies INSERT on that column`);
     }
     // ...and the REQUIRED fields are still there, or creation is broken in the
@@ -1704,7 +1706,7 @@ test("[static] no executable insert payload sends a database-owned column", () =
     // does). Requiring all ten here would fail on a payload that is entirely
     // correct — so required/optional is read from the type rather than assumed.
     for (const col of REQUIRED_INSERT_COLUMNS) {
-      assert.ok(new RegExp(`\\b${col}\\s*:`).test(payload),
+      assert.ok(new RegExp(`\\b${col}\\s*[,:]`).test(payload),
         `${f} must still supply ${col}`);
     }
   }

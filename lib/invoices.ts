@@ -119,7 +119,21 @@ export async function insertInvoice(
     .single();
 
   if (error) {
-    console.error("insertInvoice error:", error.message);
+    // The WHOLE error, not just .message. PostgrestError carries code, details
+    // and hint, and those are what identify a failure: "23502" plus
+    // 'column "amount"' says NOT NULL violation on a specific column, whereas
+    // the message alone sent us looking in the wrong place entirely.
+    //
+    // Console only — never surfaced to the customer, who gets the safe generic
+    // copy. This is for whoever has to diagnose the next one.
+    console.error("insertInvoice failed", {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      // The KEYS only. Values are customer data and must not be logged.
+      payloadKeys: Object.keys(payload),
+    });
     return null;
   }
   return data as Invoice;
