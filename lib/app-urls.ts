@@ -22,6 +22,51 @@ function stripTrailingSlashes(url: string): string {
 }
 
 /**
+ * The origin of THIS Vercel Preview deployment, or null when not on one.
+ *
+ * ── WHY THIS EXISTS ───────────────────────────────────────────────────────
+ *
+ * NEXT_PUBLIC_APP_URL is a single project-wide value. Set to
+ * https://servicesignal.app so production is correct, it also applies to every
+ * Preview — so a beta signup submitted on a Preview received a verification
+ * link pointing at production, which 404'd because the route only exists on
+ * this branch. The whole entry journey was untestable before release.
+ *
+ * ── WHY THESE TWO VARIABLES ARE TRUSTED ───────────────────────────────────
+ *
+ * VERCEL_ENV and VERCEL_URL are injected by the platform at build/run time.
+ * They are NOT derived from the incoming request, so nothing a caller can send
+ * — Host, Origin, Referer, a form field, a query parameter — can influence
+ * them. That matters because these links carry one-time verification tokens: a
+ * spoofable origin would let an attacker have a real token mailed to a host
+ * they control.
+ *
+ * VERCEL_URL is also the immutable per-deployment host, so the link returns to
+ * the exact deployment that sent it rather than to a moving branch alias.
+ *
+ * Both are server-only (no NEXT_PUBLIC_ prefix), which is correct: emails are
+ * rendered server-side. In the browser this returns null and the existing
+ * resolution is unchanged.
+ */
+function vercelPreviewOrigin(): string | null {
+  if (process.env.VERCEL_ENV !== "preview") return null;
+
+  const host = process.env.VERCEL_URL?.trim();
+  if (!host) return null;
+
+  // VERCEL_URL is a bare host with no scheme. Validated anyway rather than
+  // interpolated blindly — a value carrying a scheme, a path, credentials or
+  // whitespace would silently build a malformed or off-origin link.
+  if (!/^[a-z0-9.-]+$/i.test(host)) {
+    console.error(
+      `[app-urls] VERCEL_URL is not a bare hostname: ${JSON.stringify(host)}. Ignoring it.`
+    );
+    return null;
+  }
+  return `https://${host}`;
+}
+
+/**
  * The app's own base origin. Resolution order:
  *
  *   1. NEXT_PUBLIC_APP_URL, if set — the explicit, preferred
@@ -41,6 +86,13 @@ function stripTrailingSlashes(url: string): string {
  *      with no env var set.
  */
 export function getAppBaseUrl(): string {
+  // Same preview correction as requireAppBaseUrl, and for the same reason.
+  // Only ever true server-side: VERCEL_URL has no NEXT_PUBLIC_ prefix, so in
+  // the browser this is null and the window.location.origin behaviour below is
+  // untouched.
+  const preview = vercelPreviewOrigin();
+  if (preview) return preview;
+
   const envValue = process.env.NEXT_PUBLIC_APP_URL;
 
   if (envValue && envValue.trim()) {
@@ -130,6 +182,14 @@ export function getDashboardUrl(): string {
  * production, and the deployment's own URL in Vercel preview.
  */
 export function requireAppBaseUrl(): string | null {
+  // PREVIEW FIRST. On a Preview deployment the project-wide NEXT_PUBLIC_APP_URL
+  // names production, which is precisely the wrong destination for an email
+  // sent by this deployment — see vercelPreviewOrigin(). Production and local
+  // are untouched: VERCEL_ENV is "production" and undefined respectively, so
+  // this returns null there and resolution continues exactly as before.
+  const preview = vercelPreviewOrigin();
+  if (preview) return preview;
+
   const raw = process.env.NEXT_PUBLIC_APP_URL;
 
   if (!raw || !raw.trim()) {
