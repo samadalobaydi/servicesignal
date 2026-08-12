@@ -52,7 +52,7 @@ export const LEGAL_CONFIG = {
 const LEGAL_RETURNS = {
   // REVIEW BRANCH: `landing` points at the /v2 preview. Change to "/" when v2
   // becomes the root landing page.
-  landing: { href: "/v2", label: "Back to landing page", closeTab: false },
+  landing: { href: "/", label: "Back to landing page", closeTab: false },
   // Opened in a NEW TAB from the signup consent line, so the correct action is
   // to close this tab and reveal the original — navigating this tab to /signup
   // would produce a second, empty signup form and make the visitor's entered

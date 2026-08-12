@@ -290,7 +290,7 @@ export function SignupForm({
             <Link href="/login" style={{ color: BRAND_BLUE, fontWeight: 600 }}>Sign in</Link>
           </p>
           {/* REVIEW BRANCH: points at the /v2 preview. Change back to "/" when v2 becomes the root landing page. */}
-          <Link href="/v2" className={splitStyles.footerSecondary}>← Back to landing page</Link>
+          <Link href="/" className={splitStyles.footerSecondary}>← Back to landing page</Link>
         </>
       }
     >

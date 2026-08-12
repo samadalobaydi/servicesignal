@@ -62,7 +62,7 @@ export default function LegalPageLayout({
           {/* REVIEW BRANCH: the wordmark always points at the /v2 preview,
               independent of ?from=. Change back to "/" when v2 becomes the
               root landing page. */}
-          <Link href="/v2" className="v2-legal-lockup" aria-label="ServiceSignal home">
+          <Link href="/" className="v2-legal-lockup" aria-label="ServiceSignal home">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/branding/servicesignal-mark.png" alt="" className="v2-legal-mark" />
             <span className="v2-legal-word">

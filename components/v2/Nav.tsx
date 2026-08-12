@@ -38,7 +38,7 @@ export default function Nav() {
       }}
     >
       <div className="v2-section flex items-center justify-between" style={{ height: 64 }}>
-        <Link href="/v2" className="flex items-center gap-2.5" style={{ textDecoration: "none" }}>
+        <Link href="/" className="flex items-center gap-2.5" style={{ textDecoration: "none" }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/branding/servicesignal-mark.png" alt="ServiceSignal" className="v2-nav-mark" />
           <span className="v2-nav-word" style={{ fontWeight: 700, color: "var(--v2-ink)", letterSpacing: "-0.01em" }}>

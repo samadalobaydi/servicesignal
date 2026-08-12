@@ -29,7 +29,7 @@ export function BetaAccessRequired() {
               Sign in
             </Link>
           </p>
-          <Link href="/v2" className={splitStyles.footerSecondary}>
+          <Link href="/" className={splitStyles.footerSecondary}>
             Back to ServiceSignal
           </Link>
         </>
@@ -58,7 +58,7 @@ export function BetaAccessRequired() {
       </div>
 
       <Link
-        href="/v2#access"
+        href="/#access"
         className="mt-5 w-full inline-flex items-center justify-center rounded-lg"
         style={{
           background: BRAND_BLUE,

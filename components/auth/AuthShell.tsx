@@ -63,7 +63,7 @@ export function AuthShell({ children, footer, aside }: AuthShellProps) {
                 Nav and SiteFooter already use.
                 REVIEW BRANCH: points at the /v2 preview. Change back to "/"
                 when v2 becomes the root landing page. */}
-            <Link href="/v2" aria-label="ServiceSignal home" className={split.lockup}>
+            <Link href="/" aria-label="ServiceSignal home" className={split.lockup}>
               <Image
                 src="/branding/servicesignal-mark.png"
                 alt=""
@@ -110,7 +110,7 @@ export function AuthShell({ children, footer, aside }: AuthShellProps) {
           ~36px above the card — inside the requested 32-40px window. The
           image is untouched; this is layout positioning only. */}
       {/* REVIEW BRANCH: points at the /v2 preview. Change back to "/" when v2 becomes the root landing page. */}
-      <Link href="/v2" aria-label="ServiceSignal home" className="block max-w-full" style={{ marginBottom: -22, width: "min(440px, 100%)" }}>
+      <Link href="/" aria-label="ServiceSignal home" className="block max-w-full" style={{ marginBottom: -22, width: "min(440px, 100%)" }}>
         <Image
           src="/branding/servicesignal-auth-logo.png"
           alt="ServiceSignal"

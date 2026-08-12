@@ -61,10 +61,10 @@ function LoginForm() {
                 required" state — a dead end dressed as a call to action.
                 The ?next= forwarding is gone with it: it only ever mattered
                 for a public signup path, which does not exist right now. */}
-            <Link href="/v2#access" style={{ color: BRAND_BLUE, fontWeight: 600 }}>Join the founding beta</Link>
+            <Link href="/#access" style={{ color: BRAND_BLUE, fontWeight: 600 }}>Join the founding beta</Link>
           </p>
           {/* REVIEW BRANCH: points at the /v2 preview. Change back to "/" when v2 becomes the root landing page. */}
-          <Link href="/v2" className={splitStyles.footerSecondary}>← Back to landing page</Link>
+          <Link href="/" className={splitStyles.footerSecondary}>← Back to landing page</Link>
         </>
       }
     >
