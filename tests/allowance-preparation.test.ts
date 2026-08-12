@@ -180,7 +180,7 @@ test("[static] Active Chasing hides Prepare Reminder and says why", () => {
 
   // The state column carries the meaning, in the header's restrained language.
   assert.match(code, /text: "Reminder limit reached"/);
-  assert.match(code, /"Reminder limit reached", color: "var\(--dash-text-muted\)"/,
+  assert.match(code, /"Reminder limit reached", color: "var\(--dash-navy\)", pill: true, tone: "slate"/,
     "light navy/slate, matching the header — no amber or red");
 
   // Only replaces states that would otherwise invite preparation, and only
@@ -221,4 +221,64 @@ test("[static] invoice creation remains independent of the allowance", () => {
         `${f} must not consult ${forbidden}: an invoice may always exist`);
     }
   }
+});
+
+// ── House style: the limit state is slate, overdue stays red ───────────────
+
+test("[static] 'Reminder limit reached' uses the locked slate tokens, never amber", () => {
+  // THE DEFECT: both pill render sites hardcoded an inline amber style object,
+  // so the state's own colour was ignored and the founding-beta cap rendered
+  // as a warning. Amber is not a structural colour in this dashboard.
+  const list = read("components/dashboard/ActiveChasingList.tsx");
+  const code = strip(list.replace(/\{\/\*[\s\S]*?\*\/\}/g, ""));
+  const css = read("app/globals.css").replace(/\/\*[\s\S]*?\*\//g, "");
+
+  // The state declares a tone; the render site no longer decides the colour.
+  assert.match(code, /tone: "slate"/, "the limit state must be slate-toned");
+  assert.equal(/"Reminder limit reached"[^}]*amber/.test(code), false,
+    "the limit state must not carry any amber");
+
+  // Neither pill site may hardcode colours again.
+  assert.equal(/background: "var\(--dash-amber-soft\)"/.test(code), false,
+    "pill colours belong to the class, not to two duplicated inline objects");
+  const pillSites = code.match(/dash-state-pill dash-state-pill--\$\{rs\.tone \?\? "amber"\}/g) ?? [];
+  assert.equal(pillSites.length, 2,
+    `both the card and the table must use the shared pill, found ${pillSites.length}`);
+
+  // The slate tone reuses the EXACT tokens the Overview badge uses — no third
+  // near-duplicate blue.
+  const slate = css.slice(css.indexOf(".dash-state-pill--slate {"));
+  const slateBlock = slate.slice(0, slate.indexOf("}"));
+  assert.match(slateBlock, /background: var\(--dash-navy-soft\)/);
+  assert.match(slateBlock, /color: var\(--dash-navy\)/);
+  assert.equal(/amber/.test(slateBlock), false, "no amber in the slate tone");
+
+  const badge = css.slice(css.indexOf(".ss-beta-badge {"));
+  const badgeBlock = badge.slice(0, badge.indexOf("}"));
+  for (const token of ["--dash-navy-soft", "--dash-navy)"]) {
+    assert.ok(badgeBlock.includes(token) && slateBlock.includes(token),
+      `${token} must be shared with the Overview badge, not duplicated`);
+  }
+});
+
+test("[static] Overdue keeps its semantic red, and no behaviour changed", () => {
+  const list = read("components/dashboard/ActiveChasingList.tsx");
+  const code = strip(list.replace(/\{\/\*[\s\S]*?\*\/\}/g, ""));
+
+  // Overdue is a genuine semantic state and must stay red.
+  // Both overdue treatments: the status badge, and the days-overdue text.
+  assert.match(code, /overdue: \{ label: "Overdue", bg: "var\(--dash-red-soft\)", color: "var\(--dash-red\)" \}/,
+    "the Overdue badge must keep its red treatment");
+  assert.match(code, /inv\.status === "overdue" \? "var\(--dash-red\)"/,
+    "the days-overdue text must stay red");
+  assert.equal(/overdue[^;]*--dash-navy/.test(code), false,
+    "overdue must not be recoloured slate");
+
+  // "Ready for review" is a real call to action and keeps amber.
+  assert.match(code, /"Ready for review", color: "var\(--dash-amber\)", pill: true, tone: "amber"/);
+
+  // Behaviour untouched: the same guard, the same source of truth.
+  assert.match(code, /!hasPending && canPrepare && !allowanceSpent/);
+  assert.match(code, /allowance !== null && allowanceExhausted\(allowance\)/);
+  assert.match(code, /useBetaAllowance\(\)/);
 });

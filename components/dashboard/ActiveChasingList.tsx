@@ -18,10 +18,11 @@ function reminderStateLabel(
   invoice: Invoice,
   hasPending: boolean,
   allowanceSpent: boolean,
-): { text: string; color: string; pill?: boolean } {
+): { text: string; color: string; pill?: boolean; tone?: "amber" | "slate" } {
   // "Ready for review", not "ready to send": the owner has not seen the
   // message yet, and the row no longer offers a way to send without doing so.
-  if (hasPending) return { text: "Ready for review", color: "var(--dash-amber)", pill: true };
+  // Amber is correct here: a draft is genuinely waiting on the owner.
+  if (hasPending) return { text: "Ready for review", color: "var(--dash-amber)", pill: true, tone: "amber" };
   const sentCount = invoice.reminders_sent?.length ?? 0;
   const total = invoice.reminder_schedules?.length ?? 0;
   if (total === 0) return { text: "No reminders set", color: "var(--dash-text-muted)" };
@@ -41,7 +42,11 @@ function reminderStateLabel(
   // Light navy, matching the header's "Limit reached" — this is a capacity
   // fact about the account, not a fault with the invoice.
   if (allowanceSpent && canPrepare) {
-    return { text: "Reminder limit reached", color: "var(--dash-text-muted)", pill: true };
+    // SLATE, not amber. Reaching the founding-beta cap is a capacity fact
+    // about the account, not a warning about this invoice — the same reading
+    // as the Overview header's "Limit reached", and it reuses that badge's
+    // tokens rather than introducing another blue.
+    return { text: "Reminder limit reached", color: "var(--dash-navy)", pill: true, tone: "slate" };
   }
 
   if (sentCount === 0 && canPrepare) return { text: "Ready to chase", color: "var(--dash-accent-strong)" };
@@ -254,7 +259,7 @@ export default function ActiveChasingList({
                 <span style={{ fontWeight: 600, color: inv.status === "overdue" ? "var(--dash-red)" : "var(--dash-text-muted)" }}>{daysOverdueLabel(inv)}</span>
               </div>
               {rs.pill ? (
-                <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs whitespace-nowrap self-start" style={{ background: "var(--dash-amber-soft)", color: "var(--dash-amber)", fontWeight: 600 }}>
+                <span className={`dash-state-pill dash-state-pill--${rs.tone ?? "amber"} self-start`}>
                   {rs.text}
                 </span>
               ) : (
@@ -344,7 +349,7 @@ export default function ActiveChasingList({
                   <td className="px-6 py-4"><StatusBadge status={inv.status} /></td>
                   <td className="px-6 py-4">
                     {rs.pill ? (
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs whitespace-nowrap" style={{ background: "var(--dash-amber-soft)", color: "var(--dash-amber)", fontWeight: 600 }}>
+                      <span className={`dash-state-pill dash-state-pill--${rs.tone ?? "amber"}`}>
                         {rs.text}
                       </span>
                     ) : (

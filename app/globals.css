@@ -2798,3 +2798,36 @@ html { scroll-behavior: smooth; }
 }
 /* The spent widths live INSIDE the breakpoints below, beside the widths they
    extend. See the note there for why they cannot sit here. */
+
+/* ── Reminder-state pill (Active Chasing) ──────────────────────────────────
+   Both render sites — the mobile card and the desktop table — carried the same
+   inline amber style object, so a state needing a different treatment had
+   nowhere to say so and the colour was applied regardless of what the state
+   actually meant. One class, two tones, no third near-duplicate blue.
+
+   The tokens are the ones the Overview "Limit reached" badge already uses, so
+   the two surfaces cannot drift apart. Only sizing and padding are local. */
+.dash-state-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.625rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* A draft genuinely waiting on the owner — amber is meaningful here. */
+.dash-state-pill--amber {
+  background: var(--dash-amber-soft);
+  color: var(--dash-amber);
+}
+
+/* A capacity fact about the account, not a fault with the invoice. Same
+   tokens as .ss-beta-badge on the Overview header. */
+.dash-state-pill--slate {
+  background: var(--dash-navy-soft);
+  color: var(--dash-navy);
+  border: 1px solid var(--dash-border-strong);
+}
