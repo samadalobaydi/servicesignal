@@ -102,21 +102,76 @@ test("the signup subtitle no longer contradicts Auto mode", () => {
 
 // ── Routing: one gate decides ──────────────────────────────────────────────
 
-test("account creation defers routing to the single onboarding gate", () => {
-  // It used to push /onboarding unconditionally, so an account with nothing to
-  // do landed on "Your account is ready — there's nothing to set up".
+test("account creation navigates hard, and never re-renders /signup", () => {
+  // ── THE /#access REGRESSION ────────────────────────────────────────────
+  //
+  // /api/beta/account clears the beta continuation cookie on SUCCESS. A
+  // router.refresh() after router.push() re-rendered the still-current
+  // /signup route on the server, resolveContinuation() found no cookie, and
+  // app/signup/page.tsx rendered <BetaAccessRequired /> — whose only CTA is
+  // href="/#access". A brand-new account was told it needed beta access.
   const form = code("components/auth/SignupForm.tsx");
-  assert.equal(/router\.push\("\/onboarding"\)/.test(form), false,
-    "creation must not hardcode the onboarding destination");
-  assert.match(form, /router\.push\("\/dashboard"\)/,
-    "it must go to the dashboard and let the gate route");
+  // Anchored on EXECUTABLE code: code() strips comments, so a comment-based
+  // anchor returns -1 and slices the whole file.
+  const gateStart = form.indexOf('fetch("/api/profile"');
+  assert.ok(gateStart > -1, "the profile call must exist");
+  const success = form.slice(gateStart);
 
-  // The profile call still precedes navigation, so the gate reads a row that
-  // exists rather than racing it.
+  // REPLACE, not assign: account creation is terminal. The invitation behind
+  // /signup has been spent, so leaving it in history means Back returns to a
+  // continuation route with no cookie — which renders BetaAccessRequired, the
+  // exact screen this whole fix exists to keep away from a new customer.
+  assert.match(success, /window\.location\.replace\("\/dashboard"\)/,
+    "success must be a full document navigation that replaces the consumed page");
+  assert.equal(/window\.location\.assign\(/.test(success), false,
+    "assign leaves the spent /signup entry directly behind /dashboard");
+  assert.equal(/window\.location\.href\s*=/.test(success), false,
+    "href assignment also stacks history");
+  assert.equal(/router\.refresh\(\)/.test(success), false,
+    "refresh re-renders the abandoned /signup route into BetaAccessRequired");
+  assert.equal(/router\.push\(/.test(success), false,
+    "a soft push can race the auth cookies @supabase/ssr is still writing");
+
+  // The destination is unchanged: the dashboard gate still routes.
+  assert.equal(/replace\("\/onboarding"\)/.test(success), false,
+    "the dashboard remains the single routing authority");
+
+  // The profile still exists before the gate reads it.
   const profileIdx = form.indexOf('fetch("/api/profile"');
-  const pushIdx = form.indexOf('router.push("/dashboard")');
-  assert.ok(profileIdx > -1 && pushIdx > profileIdx,
-    "the profile must be created before the gate reads it");
+  const navIdx = form.indexOf('window.location.replace("/dashboard")');
+  assert.ok(profileIdx > -1 && navIdx > profileIdx);
+});
+
+test("a successful signup can never land on the public beta form", () => {
+  const form = code("components/auth/SignupForm.tsx");
+  const success = form.slice(form.indexOf('fetch("/api/profile"'));
+
+  // /#access is the public access journey. It is not a success destination.
+  assert.equal(/#access/.test(success), false,
+    "success must never route to the public founding-beta form");
+
+  // BetaAccessRequired is reachable only from the signup PAGE's own guard,
+  // never from the form's success path.
+  assert.equal(/BetaAccessRequired/.test(success), false);
+  assert.match(code("app/signup/page.tsx"), /if \(!continuation\) return <BetaAccessRequired \/>;/,
+    "that guard is correct for a genuine visit without an invitation");
+});
+
+test("a failed sign-in is handled explicitly and cannot look like success", () => {
+  // Identity is proven twice before any navigation: the sign-in result AND a
+  // fresh getUser(), because "no error" is not the same as "the browser is
+  // now this user". A mismatch signs out and stays on the form.
+  const form = code("components/auth/SignupForm.tsx");
+  assert.match(form, /const \{ data: confirmed \} = await supabase\.auth\.getUser\(\);/);
+  assert.match(form, /if \(!signedInAs \|\| signedInAs !== expected \|\| activeAs !== expected\)/);
+
+  const mismatch = form.slice(form.indexOf("if (!signedInAs"));
+  const branch = mismatch.slice(0, mismatch.indexOf("\n        }"));
+  assert.match(branch, /await supabase\.auth\.signOut\(\);/);
+  assert.match(branch, /setError\(/, "the failure must be shown, not navigated past");
+  assert.match(branch, /return;/);
+  assert.equal(/window\.location\.(replace|assign|href)|router\.push/.test(branch), false,
+    "a mismatch must never navigate");
 });
 
 test("the gate sends only genuinely-incomplete accounts to onboarding", () => {

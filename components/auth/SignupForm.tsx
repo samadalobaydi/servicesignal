@@ -266,27 +266,45 @@ export function SignupForm({
           // read that retries by itself.
         }
 
-        // ── ONE ROUTING AUTHORITY, NOT TWO ────────────────────────────
+        // ── HARD NAVIGATION, NOT router.push + refresh ───────────────
         //
-        // This used to push /onboarding unconditionally, which is why a tester
-        // re-running the journey landed on "Your account is ready — there's
-        // nothing to set up". That screen is correct for someone who typed the
-        // URL; it is pointless friction for someone who just pressed Create
-        // account.
+        // THE BUG THIS FIXES. `router.push("/dashboard")` followed by
+        // `router.refresh()` sent a successfully-created account back to the
+        // PUBLIC founding-beta form at /#access.
         //
-        // The dashboard layout already runs the only gate that matters —
-        // getVerifiedContext() + shouldRedirectToOnboarding() — so going there
-        // lets that single decision route everyone:
+        // Mechanism, and it is not a redirect at all:
+        //   1. POST /api/beta/account succeeds and CLEARS the beta
+        //      continuation cookie (route.ts sets it to "" on the success
+        //      path) — correct, the invitation has been spent.
+        //   2. router.refresh() re-renders the CURRENT route tree on the
+        //      server. The push has not necessarily committed yet, so the
+        //      current route is still /signup.
+        //   3. app/signup/page.tsx calls resolveContinuation(), which now
+        //      finds no cookie, and renders <BetaAccessRequired />.
+        //   4. That screen's primary CTA is href="/#access".
         //
-        //   onboarding_status "required" → gate redirects to /onboarding
-        //   completed / exempt           → stays on the dashboard
+        // So the user was shown "you need beta access" moments after being
+        // granted it, and the only way out of that screen is the public form.
         //
-        // A brand-new account is stamped "required" by the /api/profile call
-        // above, so it still reaches the onboarding FLOW; the only thing
-        // removed is the dead-end screen for accounts with nothing to do.
-        // No loop: /onboarding never redirects back to /dashboard.
-        router.push("/dashboard");
-        router.refresh();
+        // A full document navigation removes the race entirely: nothing
+        // re-renders the abandoned /signup route, and the browser sends the
+        // freshly-set auth cookies on a real request, so middleware and the
+        // dashboard layout both see the session on their first look. With a
+        // soft navigation the RSC payload can be requested before
+        // @supabase/ssr has finished writing them.
+        //
+        // REPLACE, not assign. Account creation is a terminal transition: the
+        // invitation behind /signup has been spent, so leaving that entry in
+        // history means Back returns to a continuation route whose cookie no
+        // longer exists — which renders BetaAccessRequired, the very screen
+        // this fix exists to keep away from a new customer. replace() drops
+        // the consumed page from the stack instead of stacking on top of it.
+        //
+        // The DESTINATION is unchanged and still correct: the dashboard layout
+        // remains the single routing authority, sending "required" accounts to
+        // the onboarding flow and leaving everyone else in place. The defect
+        // was the navigation mechanism, not the target.
+        window.location.replace("/dashboard");
         return;
       } catch {
         setError("We couldn't reach ServiceSignal. Please check your connection and try again.");
