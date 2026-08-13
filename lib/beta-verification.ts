@@ -316,3 +316,201 @@ export async function recordAttempt(admin: SupabaseClient, rowId: string): Promi
   const current = typeof data?.attempts === "number" ? data.attempts : 0;
   await admin.from("beta_verifications").update({ attempts: current + 1 }).eq("id", rowId);
 }
+
+// ── RESEND ─────────────────────────────────────────────────────────────────
+
+/**
+ * Minimum gap between accepted resends for one address.
+ *
+ * Enforced by the DATABASE, in the same statement that claims the right to
+ * resend — see reissueVerification. A client-disabled button and a serverless
+ * in-memory counter are both bypassable; only the row is authoritative.
+ */
+export const RESEND_COOLDOWN_SECONDS = 60;
+
+export type ReissueOutcome =
+  /** A fresh token exists and is the only active one. Send it. */
+  | { status: "issued"; token: string; restore: () => Promise<void> }
+  /** Too soon. `retryAfterSeconds` is advisory copy, not the decision. */
+  | { status: "cooldown"; retryAfterSeconds: number }
+  /**
+   * No active verification for this address: never applied, already used to
+   * create an account, or expired past supersession. DELIBERATELY one outcome
+   * — distinguishing them would tell a caller which, and that is exactly the
+   * membership information this flow must not disclose.
+   */
+  | { status: "not_eligible" }
+  | { status: "error" };
+
+/**
+ * Issue a replacement verification token for an address that already has a
+ * live one.
+ *
+ * ── THE ATOMIC CLAIM ──────────────────────────────────────────────────────
+ *
+ * The cooldown is NOT `read created_at → decide → write`. Two concurrent
+ * requests both pass that check and both send. Instead the supersede IS the
+ * claim: a single UPDATE that matches only a row which is still active AND
+ * older than the cooldown. Postgres locks the row, so exactly one concurrent
+ * request can match it; the loser matches zero rows and is refused. The
+ * decision and the state change are the same statement.
+ *
+ * ── FAILURE ORDERING ──────────────────────────────────────────────────────
+ *
+ * beta_verifications permits at most one active row per address
+ * (beta_verifications_one_active_per_email), so old and new cannot both live.
+ * The old token is therefore retired BEFORE the new one is sent — and if the
+ * send then fails the applicant would hold nothing usable.
+ *
+ * `restore` is the compensation for exactly that: it retires the new row and
+ * reactivates the old one, in that order because the reverse would put two
+ * active rows through the unique index. The caller invokes it when the
+ * provider refuses, so a failed resend costs the applicant nothing. It also
+ * returns them to a pre-cooldown state, which is correct: a send that never
+ * happened should not spend their next attempt.
+ */
+export async function reissueVerification(
+  admin: SupabaseClient,
+  rawEmail: string
+): Promise<ReissueOutcome> {
+  const email = rawEmail.trim().toLowerCase();
+  const cutoff = new Date(Date.now() - RESEND_COOLDOWN_SECONDS * 1000).toISOString();
+
+  const { data: claimed, error: claimError } = await admin
+    .from("beta_verifications")
+    .update({ superseded_at: new Date().toISOString() })
+    .eq("beta_signup_email", email)
+    .is("consumed_at", null)
+    .is("superseded_at", null)
+    .lte("created_at", cutoff)
+    .select("id, business_name, created_at");
+
+  if (claimError) {
+    console.error("[beta-verification] resend claim failed:", claimError.message);
+    return { status: "error" };
+  }
+
+  const previous = claimed?.[0];
+
+  if (!previous) {
+    // Nothing was claimable. Read once more — NOT to re-decide, only to word
+    // the answer: an active row that was simply too new means cooldown.
+    const { data: live } = await admin
+      .from("beta_verifications")
+      .select("created_at")
+      .eq("beta_signup_email", email)
+      .is("consumed_at", null)
+      .is("superseded_at", null)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    const newest = live?.[0]?.created_at;
+    if (newest) {
+      const elapsed = (Date.now() - new Date(newest).getTime()) / 1000;
+      const remaining = Math.max(1, Math.ceil(RESEND_COOLDOWN_SECONDS - elapsed));
+      return { status: "cooldown", retryAfterSeconds: remaining };
+    }
+    return { status: "not_eligible" };
+  }
+
+  const token = generateToken();
+  const expiresAt = new Date(Date.now() + VERIFICATION_TTL_HOURS * 3600 * 1000);
+
+  const { error: insertError } = await admin.from("beta_verifications").insert({
+    beta_signup_email: email,
+    business_name: previous.business_name,
+    token_hash: hashToken(token),
+    expires_at: expiresAt.toISOString(),
+  });
+
+  if (insertError) {
+    // The claim succeeded but the replacement did not land. Put the applicant
+    // back exactly where they were rather than leaving them with nothing.
+    //
+    // THE ERROR IS CHECKED. If this rollback silently failed, the address
+    // would be left with ZERO active rows — the old one superseded, no new one
+    // inserted — and every later resend would find nothing to claim and answer
+    // `not_eligible`, which sends no email. That is the one genuinely
+    // unrecoverable state in this flow, so it is escalated rather than logged
+    // as routine.
+    const { error: rollbackError } = await admin
+      .from("beta_verifications")
+      .update({ superseded_at: null })
+      .eq("id", previous.id);
+
+    if (rollbackError) {
+      console.error(
+        "[beta-verification] CRITICAL: resend insert failed AND the rollback " +
+          `failed for ${email}. This address now has no active verification ` +
+          "and cannot self-recover; it needs a manual re-issue. " +
+          `insert=${insertError.message} rollback=${rollbackError.message}`
+      );
+    } else {
+      console.error("[beta-verification] resend insert failed:", insertError.message);
+    }
+    return { status: "error" };
+  }
+
+  const restore = async () => {
+    // ORDER MATTERS. Retire the new row first: reactivating the old one while
+    // the new is still active would put two active rows through
+    // beta_verifications_one_active_per_email and the second update would fail
+    // on the index.
+    const newHash = hashToken(token);
+
+    const { error: retireError } = await admin
+      .from("beta_verifications")
+      .update({ superseded_at: new Date().toISOString() })
+      .eq("token_hash", newHash);
+
+    if (retireError) {
+      // The new row is still active. That is undelivered but RECOVERABLE: an
+      // active row means the next resend can claim it once the cooldown
+      // passes. Leaving it alone is strictly better than pressing on and
+      // risking a state with no active row at all.
+      console.error(
+        "[beta-verification] resend rollback could not retire the new token for " +
+          `${email}; leaving it active so the address can still self-recover. ` +
+          retireError.message
+      );
+      return;
+    }
+
+    const { error: reviveError } = await admin
+      .from("beta_verifications")
+      .update({ superseded_at: null })
+      .eq("id", previous.id);
+
+    if (!reviveError) return;
+
+    // ── THE STATE WE MUST NOT LEAVE ───────────────────────────────────
+    //
+    // The new row is retired and the old one did not come back, so this
+    // address has NO active verification. Every later resend would find
+    // nothing to claim and answer `not_eligible` — no email, forever.
+    //
+    // So put the new row back. The customer never received that link, but an
+    // active row is what makes the next resend work, and a recoverable state
+    // beats a dead one.
+    const { error: undoError } = await admin
+      .from("beta_verifications")
+      .update({ superseded_at: null })
+      .eq("token_hash", newHash);
+
+    if (undoError) {
+      console.error(
+        "[beta-verification] CRITICAL: resend rollback left " + email +
+          " with no active verification. It cannot self-recover and needs a " +
+          `manual re-issue. revive=${reviveError.message} undo=${undoError.message}`
+      );
+    } else {
+      console.error(
+        "[beta-verification] resend rollback could not revive the previous token for " +
+          `${email}; the new (undelivered) token was reinstated so the address ` +
+          "can self-recover after the cooldown. " + reviveError.message
+      );
+    }
+  };
+
+  return { status: "issued", token, restore };
+}

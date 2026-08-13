@@ -2895,3 +2895,27 @@ html { scroll-behavior: smooth; }
   padding-top: 0.9rem;
   border-top: 1px solid var(--v2-line, #e2e8f0);
 }
+
+/* The resend action. Primary within the continuation panel — by this point
+   the customer has said which stage they are at, so a recommendation is
+   finally appropriate here. */
+.v2-beta-resend {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.85rem;
+  padding: 0.7rem 1.25rem;
+  border-radius: 10px;
+  border: 0;
+  background: var(--v2-accent, #0891b2);
+  color: #ffffff;
+  font-size: 0.95rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+.v2-beta-resend:hover:not(:disabled) { filter: brightness(1.06); }
+.v2-beta-resend:disabled { opacity: 0.6; cursor: default; }
+.v2-beta-resend:focus-visible {
+  outline: 2px solid var(--v2-accent, #0891b2);
+  outline-offset: 3px;
+}

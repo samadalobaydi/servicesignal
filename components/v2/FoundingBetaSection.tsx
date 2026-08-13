@@ -51,6 +51,9 @@ export default function FoundingBetaSection() {
    * the only state the reused-email card opens in.
    */
   const [setupStage, setSetupStage] = useState<null | "still-setting-up">(null);
+  /** The resend panel's own state. "idle" until they ask. */
+  const [resend, setResend] = useState<"idle" | "sending" | "sent" | "cooldown" | "failed">("idle");
+  const [resendNote, setResendNote] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   /**
    * The address we actually submitted, captured at the moment of success.
@@ -177,6 +180,40 @@ export default function FoundingBetaSection() {
    * expires, and issuing a token for any address supersedes that address's
    * earlier tokens server-side.
    */
+  /**
+   * Ask the server for a replacement verification link.
+   *
+   * The in-flight guard is UX only — it stops a double-click producing two
+   * requests. The authoritative limit is the atomic per-address claim in
+   * reissueVerification plus the network limiter, neither of which this
+   * component can influence.
+   */
+  const requestResend = async () => {
+    if (resend === "sending") return;
+    setResend("sending");
+    setResendNote(null);
+    try {
+      const res = await fetch("/api/beta/resend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: submittedEmail }),
+      });
+      const data = await res.json().catch(() => null);
+      const state = data?.state;
+      // Trusts the server's own verdict, never the HTTP status alone: only a
+      // genuine accepted send may render "sent".
+      if (res.ok && data?.success && state === "sent") setResend("sent");
+      else if (state === "cooldown") {
+        setResend("cooldown");
+        setResendNote(typeof data?.retryAfterSeconds === "number"
+          ? `You can request another in about ${data.retryAfterSeconds}s.`
+          : null);
+      } else setResend("failed");
+    } catch {
+      setResend("failed");
+    }
+  };
+
   const useDifferentEmail = () => {
     setForm((f) => ({ ...f, email: "" }));
     setErrors({});
@@ -184,6 +221,8 @@ export default function FoundingBetaSection() {
     setEmailSent(false);
     setAlreadyListed(false);
     setSetupStage(null);
+    setResend("idle");
+    setResendNote(null);
     setSubmittedEmail("");
     clearSignupPrefill();
     setStatus("idle");
@@ -282,26 +321,82 @@ export default function FoundingBetaSection() {
                     </>
                   ) : (
                     <div id="beta-setup-help" className="v2-beta-help">
-                      {/* No resend, and none promised: issueVerification has a
-                          single caller and there is no support reissue tool. */}
-                      <p className="v2-beta-done-s">
-                        Use the verification email we sent when you first joined
-                        the founding beta to continue setting up your account.
-                        Verification links are valid for 48 hours.
-                      </p>
-                      <p className="v2-beta-done-s">
-                        If you can&rsquo;t find the email, check your spam folder.
-                        If the link has expired, email support@servicesignal.app
-                        and we&rsquo;ll help you get set up.
-                      </p>
+                      {resend === "sent" ? (
+                        <>
+                          {/* ── CONDITIONAL, AND IT HAS TO BE ────────────
+                              `state: "sent"` is returned for a real send AND
+                              for an address with nothing to verify — the two
+                              are deliberately indistinguishable, because
+                              telling them apart would reveal whether this
+                              address is mid-setup or already has an account.
+
+                              That privacy property makes an unconditional
+                              "We've sent you a link" untrue in one of the two
+                              cases. The conditional wording is true in both,
+                              and reads naturally to the customer who actually
+                              needed it.
+
+                              No second large button: the next thing to do is
+                              open an inbox, not press this again. */}
+                          <p className="v2-beta-done-t">Check your inbox</p>
+                          <p className="v2-beta-done-s">
+                            If your setup still needs verifying, a fresh link is on
+                            its way to{" "}
+                            <span className="v2-beta-done-email">{submittedEmail}</span>.
+                            Check your spam folder too. Verification links are valid
+                            for 48 hours.
+                          </p>
+                          <p className="v2-beta-done-s">
+                            Already finished setting up? Sign in instead.
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="v2-beta-done-t">Continue setting up</p>
+                          <p className="v2-beta-done-s">
+                            We&rsquo;ll send a fresh verification link to{" "}
+                            <span className="v2-beta-done-email">{submittedEmail}</span>.
+                            Verification links are valid for 48 hours.
+                          </p>
+                          <button
+                            type="button"
+                            className="v2-beta-resend"
+                            onClick={requestResend}
+                            disabled={resend === "sending"}
+                            aria-busy={resend === "sending"}
+                          >
+                            {resend === "sending" ? "Sending…" : "Send another verification link"}
+                          </button>
+                          {/* Announced when it appears, so a screen-reader user
+                              learns the outcome without moving focus. */}
+                          {(resend === "cooldown" || resend === "failed") && (
+                            <p className="v2-beta-done-s" role="status" aria-live="polite">
+                              {resend === "cooldown" ? (
+                                <>
+                                  A verification link was recently sent. Please wait a
+                                  moment before requesting another.
+                                  {resendNote ? ` ${resendNote}` : ""}
+                                </>
+                              ) : (
+                                <>
+                                  We couldn&rsquo;t send the verification email just
+                                  now. Please try again shortly. If it keeps failing,
+                                  email support@servicesignal.app and we&rsquo;ll help
+                                  you get set up.
+                                </>
+                              )}
+                            </p>
+                          )}
+                        </>
+                      )}
                       <button
                         type="button"
                         className="v2-beta-done-alt"
                         aria-expanded
                         aria-controls="beta-setup-help"
-                        onClick={() => setSetupStage(null)}
+                        onClick={() => { setSetupStage(null); setResend("idle"); setResendNote(null); }}
                       >
-                        Back to options
+                        ← Back to options
                       </button>
                     </div>
                   )}

@@ -461,20 +461,45 @@ test("the two stage choices lead to different, truthful places", () => {
   // A — the ONLY route to login, and only after the customer says so.
   assert.match(dup, /<Link href="\/login" className="v2-beta-choice"> I&rsquo;ve already set up my account/);
 
-  // B — reveals guidance inline; it must NOT navigate to login.
+  // B — a real resend action, not an instruction to go hunting. It must NOT
+  // navigate to login: someone still setting up cannot use that form.
   const still = dup.slice(dup.indexOf("v2-beta-help"));
   assert.equal(/href="\/login"/.test(still), false,
     "someone still setting up must not be sent to a form they cannot use");
-  assert.match(still, /Use the verification email we sent when you first joined/);
+  assert.match(still, /Continue setting up/);
+  assert.match(still, /We&rsquo;ll send a fresh verification link to/);
+  assert.match(still, /Send another verification link/);
   assert.match(still, /valid for 48 hours/);
-  assert.match(still, /check your spam folder/i);
-  assert.match(still, /support@servicesignal\.app/);
   assert.match(still, /Back to options/, "a way back to the two choices");
 
-  // And it promises no reissue, because none exists.
-  for (const promise of [/we&rsquo;ll resend/i, /send you another/i, /a new verification email/i, /send you a new one/i]) {
-    assert.equal(promise.test(still), false, `no resend may be promised: ${promise}`);
-  }
+  // Support is now a FALLBACK, reachable only from the failure branch — no
+  // longer the normal next step.
+  const failureBranch = still.slice(still.indexOf('resend === "cooldown" || resend === "failed"'));
+  assert.match(failureBranch, /support@servicesignal\.app/);
+});
+
+
+test("[static] the resend action cannot be double-submitted", () => {
+  const section = read("components/v2/FoundingBetaSection.tsx");
+  const dup = reusedArm();
+
+  // Client disabling is UX only — the server cooldown is authoritative — but
+  // without it an impatient double-click fires two requests, one of which the
+  // server then refuses, and the customer sees a cooldown message for their
+  // own first click.
+  assert.match(dup, /disabled=\{resend === "sending"\}/,
+    "the button must be disabled while a request is in flight");
+  assert.match(dup, /aria-busy=\{resend === "sending"\}/,
+    "and must announce the busy state");
+  assert.match(dup, /\{resend === "sending" \? "Sending…" : "Send another verification link"\}/,
+    "with a visible loading label");
+
+  // A re-entrancy guard in the handler too, for keyboard repeat and races.
+  assert.match(section, /if \(resend === "sending"\) return;/,
+    "the handler must refuse to run while a request is in flight");
+
+  // Cooldown and failure are announced to assistive tech.
+  assert.match(dup, /role="status" aria-live="polite"/);
 });
 
 test("[static] the stage choice is keyboard accessible", () => {
@@ -607,43 +632,35 @@ test("the reused-email state cannot promise that an expired link will work", () 
 });
 
 
-test("no surface promises a resend that the product cannot perform", () => {
-  // PROVEN: issueVerification has exactly ONE caller — app/api/signup/route.ts
-  // — which duplicates never reach. There is no admin route, no scripts/
-  // directory and no npm task capable of minting and sending a replacement
-  // token. Support can help a person; nothing can automatically reissue.
-  //
-  // Both customer-facing surfaces that mention an expired or missing link must
-  // therefore promise help, not a new email.
-  for (const f of ["app/verify/page.tsx", "components/v2/FoundingBetaSection.tsx"]) {
-    const code = read(f)
-      .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/^\s*\/\/.*$/gm, "");
-    assert.equal(/send you a new one/i.test(code), false,
-      `${f} promises a reissue that no code path can deliver`);
-    assert.equal(/we.?ll resend/i.test(code), false, `${f} must not promise a resend`);
-    assert.match(code, /help you get set up/i,
-      `${f} must offer the support route it can actually honour`);
-  }
+test("the resend promise is now backed by a real code path", () => {
+  // REVERSED DELIBERATELY. This previously asserted that no surface may
+  // promise a resend, because none existed. The beta entry journey now has
+  // one, so the contract is the opposite: the promise must be backed.
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.name === "node_modules" || e.name.startsWith(".")
+        ? [] : e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]);
 
-  // And the mechanism really is absent — if a reissue path is ever added, this
-  // fails and the copy can honestly be upgraded.
-  const callers = ["app/api/signup/route.ts"];
-  const issueCallers = ["app", "lib"].flatMap((dir) => {
-    const walk = (d: string): string[] =>
-      readdirSync(d, { withFileTypes: true }).flatMap((e) =>
-        e.name === "node_modules" || e.name.startsWith(".")
-          ? [] : e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]);
-    return walk(join(ROOT, dir));
-  })
-    .filter((f) => /\.tsx?$/.test(f) && !f.endsWith("lib/beta-verification.ts"))
-    .filter((f) => /issueVerification\(/.test(readFileSync(f, "utf8")))
-    .map((f) => f.slice(ROOT.length))
-    .sort();
-  assert.deepEqual(issueCallers, callers,
-    "a new issueVerification caller may mean a reissue path now exists — revisit the copy");
+  assert.ok(existsSync(join(ROOT, "app/api/beta/resend/route.ts")),
+    "the resend endpoint must exist");
+
+  const reissueCallers = walk(join(ROOT, "app"))
+    .filter((f) => /\.tsx?$/.test(f))
+    .filter((f) => /reissueVerification\(/.test(readFileSync(f, "utf8")))
+    .map((f) => f.slice(ROOT.length));
+  assert.deepEqual(reissueCallers, ["app/api/beta/resend/route.ts"],
+    "reissue must be reachable from exactly the resend endpoint");
+
+  // /verify keeps the support route: that page holds no email address (the
+  // token travels in an httpOnly cookie), so it cannot offer a resend and
+  // must not pretend to.
+  const verifyPage = read("app/verify/page.tsx")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  assert.match(verifyPage, /help you get set up/i);
+  assert.equal(/send you a new one/i.test(verifyPage), false,
+    "/verify still cannot reissue, so it must still not promise to");
 });
+
 
 test("[static] the duplicate outcome still reports emailSent: false", () => {
   // The copy change must not have quietly re-enabled resend or flipped the
@@ -657,22 +674,45 @@ test("[static] the duplicate outcome still reports emailSent: false", () => {
     "duplicates must still not resend");
 });
 
-test("[static] the success state cannot claim a send that did not happen", () => {
+test("[static] no state claims a send that did not happen", () => {
   const section = read("components/v2/FoundingBetaSection.tsx");
 
-  // The confirmation is gated on the server's own flag, not on HTTP success.
+  // The FIRST-send confirmation is still gated on the server's own flag.
   assert.match(section, /setEmailSent\(Boolean\(data\.emailSent\)\)/);
-  assert.match(section, /\{emailSent \? \(/,
-    "the two confirmations must branch on emailSent");
+  assert.match(section, /\{emailSent \? \(/);
 
-  // "Check your inbox" must live ONLY inside the emailSent === true arm.
   const branch = section.slice(section.indexOf("{emailSent ? ("));
-  const truthy = branch.slice(0, branch.indexOf(") : ("));
-  assert.match(truthy, /Check your inbox/);
-  assert.match(truthy, /We&rsquo;ve sent a verification link/);
+  const dupStart = branch.indexOf(") : alreadyListed ? (");
+  const failStart = branch.indexOf("\n              ) : (", dupStart);
+  const flat = (t: string) => t.replace(/\s+/g, " ");
+  const sent = flat(branch.slice(0, dupStart));
+  const failed = flat(branch.slice(failStart, branch.indexOf(")}", failStart)));
 
-  const falsy = branch.slice(branch.indexOf(") : ("));
-  assert.equal(/Check your inbox/.test(falsy), false,
-    "the no-send state must never claim an inbox delivery");
-  assert.equal(/We&rsquo;ve sent a verification link/.test(falsy), false);
+  assert.match(sent, /Check your inbox/);
+  assert.equal(/Check your inbox/.test(failed), false,
+    "the send-failure state must never claim an inbox delivery");
+
+  // ── THE RESEND CONFIRMATION MUST BE CONDITIONAL ───────────────────────
+  //
+  // `state: "sent"` is returned BOTH for a real send and for an address with
+  // nothing to verify — deliberately indistinguishable, or the endpoint would
+  // reveal whether the address is mid-setup or already has an account.
+  //
+  // That makes an unconditional "we've sent you a link" untrue in one of the
+  // two cases, so the copy has to hedge. This is the privacy property and the
+  // truthfulness property being satisfied by the same sentence.
+  const dup = reusedArm();
+  assert.match(dup, /\{resend === "sent" \? \(/,
+    "the confirmation must be driven by the server's reported state");
+  assert.match(dup, /If your setup still needs verifying, a fresh link is on its way/,
+    "the confirmation must be conditional");
+  assert.equal(/We&rsquo;ve sent a fresh verification link/.test(dup), false,
+    "an unconditional claim is untrue when the address had nothing to verify");
+  assert.equal(/<p className="v2-beta-done-t">Verification link sent<\/p>/.test(dup), false,
+    "even the heading must not assert a send");
+  // ...and it still points a finished customer somewhere useful.
+  assert.match(dup, /Already finished setting up\? Sign in instead\./);
+
+  // The resend failure branch says the opposite, and says it truthfully.
+  assert.match(dup, /We couldn&rsquo;t send the verification email just now/);
 });
