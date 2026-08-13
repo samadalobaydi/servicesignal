@@ -266,7 +266,26 @@ export function SignupForm({
           // read that retries by itself.
         }
 
-        router.push("/onboarding");
+        // ── ONE ROUTING AUTHORITY, NOT TWO ────────────────────────────
+        //
+        // This used to push /onboarding unconditionally, which is why a tester
+        // re-running the journey landed on "Your account is ready — there's
+        // nothing to set up". That screen is correct for someone who typed the
+        // URL; it is pointless friction for someone who just pressed Create
+        // account.
+        //
+        // The dashboard layout already runs the only gate that matters —
+        // getVerifiedContext() + shouldRedirectToOnboarding() — so going there
+        // lets that single decision route everyone:
+        //
+        //   onboarding_status "required" → gate redirects to /onboarding
+        //   completed / exempt           → stays on the dashboard
+        //
+        // A brand-new account is stamped "required" by the /api/profile call
+        // above, so it still reaches the onboarding FLOW; the only thing
+        // removed is the dead-end screen for accounts with nothing to do.
+        // No loop: /onboarding never redirects back to /dashboard.
+        router.push("/dashboard");
         router.refresh();
         return;
       } catch {
@@ -299,7 +318,12 @@ export function SignupForm({
           arriving later than the other. */}
       <AuthHeading
         title="Create your account"
-        subtitle="Follow up overdue invoices with SMS and email reminders — always with your approval before anything is sent."
+        /* NOT "always with your approval". That is a product-wide, permanent
+           claim, and this same screen advertises Auto mode as coming — so the
+           page contradicted itself, and the sentence would become false the
+           day Auto ships. Scoped to the founding beta, which is true now and
+           stays true later. */
+        subtitle="Follow up overdue invoices with SMS and email reminders — every reminder ready for your review during the founding beta."
       />
       <AuthError message={error} />
 
@@ -391,7 +415,12 @@ export function SignupForm({
             }}
           >
             {password.length === 0
-              ? "Choose a password that meets both requirements above."
+              /* DERIVED, not restated. This said "both requirements" while the
+                 checklist above rendered PASSWORD_RULES — four of them. The
+                 sentence was a second, hand-maintained copy of a number the
+                 policy already owns, so it went stale the moment the policy
+                 changed. Counting the rendered rules cannot drift. */
+              ? `Choose a password that meets ${PASSWORD_RULES.length === 2 ? "both" : `all ${PASSWORD_RULES.length}`} requirements above.`
               : passwordOk
               ? shouldSuggestLongerPassword(password)
                 ? `Password accepted. ${PASSWORD_COMFORTABLE_LENGTH} characters or more would be harder to guess.`
