@@ -2831,3 +2831,67 @@ html { scroll-behavior: smooth; }
   color: var(--dash-navy);
   border: 1px solid var(--dash-border-strong);
 }
+
+
+/* ── Founding beta: reused-email self-selection ────────────────────────────
+   Two choices of EQUAL weight. A large primary "Sign in" beside a small
+   "still setting up?" link would visually re-create the exact problem the
+   choice exists to remove — someone who never finished setup being pushed
+   toward a form they cannot use.
+
+   Both are the same size, the same treatment, and neither is styled as the
+   recommended answer, because ServiceSignal does not know which is correct
+   and must not find out. */
+.v2-beta-done-q {
+  margin-top: 1.1rem;
+  font-size: 0.9rem;
+  font-weight: 650;
+  color: var(--v2-ink, #0f172a);
+}
+
+.v2-beta-choices {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+  margin-top: 0.65rem;
+}
+
+/* Stacked below 560px. Side by side, each label wraps to three cramped lines
+   on a phone and the two stop reading as a clean either/or. */
+@media (max-width: 560px) {
+  .v2-beta-choices { grid-template-columns: 1fr; }
+}
+
+.v2-beta-choice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 52px;
+  padding: 0.7rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid var(--v2-line, #cbd5e1);
+  background: #ffffff;
+  color: var(--v2-ink, #0f172a);
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.35;
+  text-decoration: none;
+  cursor: pointer;
+}
+.v2-beta-choice:hover {
+  border-color: var(--v2-accent, #0891b2);
+  background: #f8fafc;
+}
+.v2-beta-choice:focus-visible {
+  outline: 2px solid var(--v2-accent, #0891b2);
+  outline-offset: 2px;
+}
+
+/* The revealed guidance. Follows its trigger in the DOM, so focus order is
+   already correct and no focus management is needed. */
+.v2-beta-help {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--v2-line, #e2e8f0);
+}

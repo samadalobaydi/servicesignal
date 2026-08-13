@@ -43,6 +43,14 @@ export default function FoundingBetaSection() {
   // Without it the two collapse into one arm and a deliberate product decision
   // gets reported to the visitor as an infrastructure failure.
   const [alreadyListed, setAlreadyListed] = useState(false);
+  /**
+   * Which stage the CUSTOMER says they are at — never what the server decided.
+   *
+   * The server cannot tell us this without becoming an account-existence
+   * oracle, and it does not try. `null` is "they haven't said yet", which is
+   * the only state the reused-email card opens in.
+   */
+  const [setupStage, setSetupStage] = useState<null | "still-setting-up">(null);
   const [formError, setFormError] = useState<string | null>(null);
   /**
    * The address we actually submitted, captured at the moment of success.
@@ -175,6 +183,7 @@ export default function FoundingBetaSection() {
     setFormError(null);
     setEmailSent(false);
     setAlreadyListed(false);
+    setSetupStage(null);
     setSubmittedEmail("");
     clearSignupPrefill();
     setStatus("idle");
@@ -229,37 +238,73 @@ export default function FoundingBetaSection() {
                 </>
               ) : alreadyListed ? (
                 <>
-                  {/* NOT a failure. This address is already on the list and we
-                      deliberately do not resend — sending again on demand would
-                      let anyone mail the same address repeatedly, and the
-                      per-address cooldown that would make it safe does not
-                      exist yet. Saying "we couldn't send" here described that
-                      product decision as an infrastructure fault. */}
-                  <p className="v2-beta-done-t">You&rsquo;re already on the list</p>
-                  <p className="v2-beta-done-s">
-                    <span className="v2-beta-done-email">{submittedEmail}</span> is
-                    already registered for the founding beta. If you still have our
-                    verification email, open the link in it to finish creating your
-                    account.
-                  </p>
-                  {/* The 48 hours is not decoration. Tokens expire after
-                      VERIFICATION_TTL_HOURS, submitting this form again does NOT
-                      issue a replacement, and nothing here resends — so telling
-                      someone to "check your inbox" and stopping would, after two
-                      days, be an instruction that cannot work.
+                  {/* ── THE CUSTOMER SELF-SELECTS ────────────────────────────
+                      This card opens with NO recommendation, because the server
+                      genuinely does not know which stage this person is at and
+                      must not find out. `already_listed` means only "this
+                      address has been used before" — it is the database's
+                      unique-constraint verdict on beta_signups, which proves a
+                      form submission and nothing about Supabase Auth.
 
-                      IT DOES NOT PROMISE A NEW LINK. issueVerification has
-                      exactly one caller (the signup route, which duplicates
-                      never reach); there is no admin route, script or task that
-                      can mint and send a replacement token. Support can help a
-                      person, so that is all this claims. See the launch gap in
-                      the report. */}
-                  <p className="v2-beta-done-s">
-                    Verification links expire 48 hours after they&rsquo;re sent. If
-                    yours has expired, or you can&rsquo;t find the email, check your
-                    spam folder or email support@servicesignal.app and we&rsquo;ll
-                    help you get set up.
+                      Leading with Sign in would push someone who never finished
+                      setup toward a form they cannot use. Leading with "finish
+                      setup" would insult someone who has been a customer for a
+                      month. So neither leads: the person tells us, and only
+                      then does a route become primary. */}
+                  <p className="v2-beta-done-t">
+                    You&rsquo;ve used this email with ServiceSignal before
                   </p>
+                  <p className="v2-beta-done-s">
+                    <span className="v2-beta-done-email">{submittedEmail}</span> has
+                    already been used to start setting up ServiceSignal.
+                  </p>
+
+                  {setupStage === null ? (
+                    <>
+                      <p className="v2-beta-done-q">What would you like to do?</p>
+                      {/* Equal visual weight, deliberately. A large primary and
+                          a small link would re-create the problem the choice
+                          exists to solve. */}
+                      <div className="v2-beta-choices">
+                        <Link href="/login" className="v2-beta-choice">
+                          I&rsquo;ve already set up my account
+                        </Link>
+                        <button
+                          type="button"
+                          className="v2-beta-choice"
+                          aria-expanded={false}
+                          aria-controls="beta-setup-help"
+                          onClick={() => setSetupStage("still-setting-up")}
+                        >
+                          I&rsquo;m still setting up
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div id="beta-setup-help" className="v2-beta-help">
+                      {/* No resend, and none promised: issueVerification has a
+                          single caller and there is no support reissue tool. */}
+                      <p className="v2-beta-done-s">
+                        Use the verification email we sent when you first joined
+                        the founding beta to continue setting up your account.
+                        Verification links are valid for 48 hours.
+                      </p>
+                      <p className="v2-beta-done-s">
+                        If you can&rsquo;t find the email, check your spam folder.
+                        If the link has expired, email support@servicesignal.app
+                        and we&rsquo;ll help you get set up.
+                      </p>
+                      <button
+                        type="button"
+                        className="v2-beta-done-alt"
+                        aria-expanded
+                        aria-controls="beta-setup-help"
+                        onClick={() => setSetupStage(null)}
+                      >
+                        Back to options
+                      </button>
+                    </div>
+                  )}
                 </>
               ) : (
                 <>

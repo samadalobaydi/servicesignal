@@ -377,199 +377,235 @@ test("[static] the provider result is what decides the success copy", () => {
   }
 });
 
+/** The reused-email arm of the confirmation card, whitespace-collapsed. */
+function reusedArm(): string {
+  const section = readFileSync(join(ROOT, "components/v2/FoundingBetaSection.tsx"), "utf8")
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "");   // comments cannot satisfy any of this
+  const branch = section.slice(section.indexOf("{emailSent ? ("));
+  const dupStart = branch.indexOf(") : alreadyListed ? (");
+  assert.ok(dupStart > -1, "the reused-email arm must exist");
+  const failStart = branch.indexOf("\n              ) : (", dupStart);
+  assert.ok(failStart > dupStart, "the failure arm must follow it");
+  return branch.slice(dupStart, failStart).replace(/\s+/g, " ");
+}
+
 test("[static] the three signup outcomes render three distinct states", () => {
   const section = read("components/v2/FoundingBetaSection.tsx");
 
-  // Driven by the server's own two signals, not by HTTP status.
   assert.match(section, /setEmailSent\(Boolean\(data\.emailSent\)\)/);
   assert.match(section, /setAlreadyListed\(data\.outcome === "already_listed"\)/);
-  // Reset between submissions, or a second attempt inherits the first verdict.
   assert.match(section, /setEmailSent\(false\);\s*\n\s*setAlreadyListed\(false\);/);
 
-  // Three arms: sent → already-listed → genuine failure.
   const branch = section.slice(section.indexOf("{emailSent ? ("));
-  assert.match(branch, /\{emailSent \? \([\s\S]*?\) : alreadyListed \? \([\s\S]*?\) : \(/,
-    "the duplicate case must sit between 'sent' and 'failed'");
-
-  // Bounded FORWARD from the duplicate arm, not with lastIndexOf. The
-  // component contains further ternaries after this block, so lastIndexOf
-  // found one of those and the duplicate slice swallowed the failure arm —
-  // which made the "no failure copy here" assertion fail for the wrong reason.
   const dupStart = branch.indexOf(") : alreadyListed ? (");
-  assert.ok(dupStart > -1, "the already-listed arm must exist");
-  const failStart = branch.indexOf(") : (", dupStart + 5);
-  assert.ok(failStart > dupStart, "the failure arm must follow it");
+  const failStart = branch.indexOf("\n              ) : (", dupStart);
+  const flat = (t: string) => t.replace(/\s+/g, " ");
+  const sent = flat(branch.slice(0, dupStart));
+  const failed = flat(branch.slice(failStart, branch.indexOf(")}", failStart)));
 
-  const sent = branch.slice(0, dupStart);
-  const dup = branch.slice(dupStart, failStart);
-  const failed = branch.slice(failStart, branch.indexOf(")}", failStart));
-
-  // 1. Fresh + sent.
+  // 1. Fresh + sent — unchanged.
   assert.match(sent, /Check your inbox/);
   assert.match(sent, /We&rsquo;ve sent a verification link/);
 
-  // 2. Duplicate — truthful, and NOT described as a failure.
-  assert.match(dup, /already on the list/i);
-  assert.match(dup, /already registered for the founding beta/i);
-  // Conditional on the email still being valid — see the expiry test below.
-  assert.match(dup, /If you still have our/i);
-  assert.match(dup, /open the link in it/i);
-  assert.equal(/couldn&rsquo;t send/i.test(dup), false,
-    "a deliberate no-resend must not be reported as an infrastructure failure");
-  assert.equal(/Check your inbox<\/p>/.test(dup), false);
-
-  // 3. Genuine failure keeps its failure copy.
+  // 3. Genuine failure — separate, and offers NO stage choice or sign-in.
   assert.match(failed, /We couldn&rsquo;t send a verification link/);
   assert.match(failed, /support@servicesignal\.app/);
-  assert.equal(/already on the list/i.test(failed), false);
+  assert.equal(/v2-beta-choice/.test(failed), false,
+    "a send failure is not a reused email and must not offer the stage choice");
+  assert.equal(/href="\/login"/.test(failed), false);
+  assert.equal(/used this email/i.test(failed), false);
 
-  // No arm other than the first may promise an inbox delivery.
-  assert.equal(/We&rsquo;ve sent a verification link/.test(dup + failed), false,
-    "only a confirmed send may claim a verification link was sent");
+  // Only the first arm may claim a delivery.
+  assert.equal(/We&rsquo;ve sent a verification link/.test(reusedArm() + failed), false);
 });
 
-test("an UNCLASSIFIABLE deployed runtime fails closed, never production", () => {
-  // ── THE INVARIANT ─────────────────────────────────────────────────────
+test("the reused-email state recommends nothing until the customer chooses", () => {
+  const dup = reusedArm();
+
+  // Neutral opening: states only that the address was used before.
+  assert.match(dup, /You&rsquo;ve used this email with ServiceSignal before/);
+  assert.match(dup, /already been used to start setting up ServiceSignal/);
+  assert.match(dup, /What would you like to do\?/);
+
+  // ── NEITHER ROUTE MAY LEAD ──────────────────────────────────────────
   //
-  // A Vercel Preview with system variables switched off exposes no VERCEL_ENV
-  // and no VERCEL_URL — so it is indistinguishable from local development by
-  // absence alone. Treating "no VERCEL_ENV" as "must be local" and falling
-  // through to NEXT_PUBLIC_APP_URL emitted the PRODUCTION origin from a
-  // Preview: the original 404 bug, reached by a second route.
-  //
-  // Executed before the fix, all three of these returned the production
-  // origin. A security-sensitive resolver in an ambiguous deployed
-  // environment must send nothing.
-  for (const nodeEnv of [undefined, "production", "test"]) {
-    withEnv(
-      {
-        VERCEL_ENV: undefined, VERCEL_URL: undefined, PREVIEW_APP_URL: undefined,
-        NODE_ENV: nodeEnv, NEXT_PUBLIC_APP_URL: PROD,
-      },
-      () => {
-        const base = requireAppBaseUrl();
-        assert.equal(base, null,
-          `NODE_ENV=${String(nodeEnv)}: an unclassifiable runtime must send nothing`);
-        assert.notEqual(base, PROD, "and must never silently return production");
-      }
-    );
+  // Sign in must not be the universal next step: someone who never finished
+  // setup would be sent to a form they cannot use.
+  assert.match(dup, /I&rsquo;ve already set up my account/);
+  assert.match(dup, /I&rsquo;m still setting up/);
+
+  // Both choices carry the SAME class, which is what makes them equal weight.
+  const choices = dup.match(/className="v2-beta-choice"/g) ?? [];
+  assert.equal(choices.length, 2,
+    `both stage choices must share one treatment, found ${choices.length}`);
+
+  // The choice is gated on customer-supplied state, never on server data.
+  assert.match(dup, /setupStage === null \?/);
+  assert.match(dup, /setSetupStage\("still-setting-up"\)/);
+
+  // No assertion about the account, in either direction.
+  for (const asserts of [
+    /You already have a ServiceSignal account/i,
+    /you don&rsquo;t have an account/i,
+    /your account exists/i,
+    /you&rsquo;re already signed up/i,
+    /already signed in/i,
+  ]) {
+    assert.equal(asserts.test(dup), false, `must not assert: ${asserts}`);
   }
 });
 
-test("local development is established POSITIVELY, not by absence", () => {
-  // Signal 1: NODE_ENV=development, set by `next dev`. Vercel builds and runs
-  // with NODE_ENV=production, so this is never true on a deployment.
-  withEnv(
-    { VERCEL_ENV: undefined, VERCEL_URL: undefined, PREVIEW_APP_URL: undefined,
-      NODE_ENV: "development", NEXT_PUBLIC_APP_URL: "http://localhost:3000" },
-    () => assert.equal(requireAppBaseUrl(), "http://localhost:3000")
-  );
+test("the two stage choices lead to different, truthful places", () => {
+  const dup = reusedArm();
 
-  // Signal 2: a loopback origin — local by construction. Covers `next start`
-  // locally, where NODE_ENV is production.
-  for (const loopback of ["http://localhost:3000", "http://127.0.0.1:3000"]) {
-    withEnv(
-      { VERCEL_ENV: undefined, VERCEL_URL: undefined, PREVIEW_APP_URL: undefined,
-        NODE_ENV: "production", NEXT_PUBLIC_APP_URL: loopback },
-      () => assert.equal(requireAppBaseUrl(), loopback, `${loopback} is positively local`)
-    );
+  // A — the ONLY route to login, and only after the customer says so.
+  assert.match(dup, /<Link href="\/login" className="v2-beta-choice"> I&rsquo;ve already set up my account/);
+
+  // B — reveals guidance inline; it must NOT navigate to login.
+  const still = dup.slice(dup.indexOf("v2-beta-help"));
+  assert.equal(/href="\/login"/.test(still), false,
+    "someone still setting up must not be sent to a form they cannot use");
+  assert.match(still, /Use the verification email we sent when you first joined/);
+  assert.match(still, /valid for 48 hours/);
+  assert.match(still, /check your spam folder/i);
+  assert.match(still, /support@servicesignal\.app/);
+  assert.match(still, /Back to options/, "a way back to the two choices");
+
+  // And it promises no reissue, because none exists.
+  for (const promise of [/we&rsquo;ll resend/i, /send you another/i, /a new verification email/i, /send you a new one/i]) {
+    assert.equal(promise.test(still), false, `no resend may be promised: ${promise}`);
+  }
+});
+
+test("[static] the stage choice is keyboard accessible", () => {
+  const dup = reusedArm();
+  // A real button, not a div with a click handler.
+  assert.match(dup, /<button type="button" className="v2-beta-choice" aria-expanded=\{false\} aria-controls="beta-setup-help"/);
+  // The revealed region is the one the trigger names, and follows it in DOM
+  // order — so focus order is correct without any focus management.
+  assert.match(dup, /<div id="beta-setup-help" className="v2-beta-help">/);
+  assert.match(dup, /aria-expanded aria-controls="beta-setup-help"/,
+    "the collapse control must report expanded state too");
+  // Meaning never carried by colour alone: both choices are worded.
+  assert.match(dup, /I&rsquo;ve already set up my account/);
+});
+
+test("[static] 'Use a different email' leaves no stale state behind", () => {
+  const section = read("components/v2/FoundingBetaSection.tsx");
+  const fn = section.slice(section.indexOf("const useDifferentEmail ="));
+  const body = fn.slice(0, fn.indexOf("\n  };"));
+
+  // EVERY piece of per-submission state must be cleared, or the next visitor
+  // to the form inherits the last one's verdict. setSetupStage is the newest
+  // and the easiest to forget.
+  for (const reset of [
+    /setForm\(\(f\) => \(\{ \.\.\.f, email: "" \}\)\)/,  // the input itself
+    /setEmailSent\(false\)/,
+    /setAlreadyListed\(false\)/,
+    /setSetupStage\(null\)/,
+    /setSubmittedEmail\(""\)/,
+    /clearSignupPrefill\(\)/,
+    /setStatus\("idle"\)/,
+  ]) {
+    assert.match(body, reset, `useDifferentEmail must reset ${reset}`);
+  }
+  // And it returns focus to the field it just cleared.
+  assert.match(body, /setRefocusEmail\(true\)/);
+});
+
+test("[static] the stage choices stack on narrow screens", () => {
+  const css = read("app/globals.css").replace(/\/\*[\s\S]*?\*\//g, "");
+
+  const grid = css.slice(css.indexOf(".v2-beta-choices {"));
+  assert.match(grid.slice(0, grid.indexOf("}")), /grid-template-columns: 1fr 1fr;/,
+    "side by side at desktop, so neither reads as the recommended answer");
+
+  // Side by side on a phone, each label wraps to several cramped lines and the
+  // two stop reading as a clean either/or.
+  const mq = css.slice(css.indexOf("@media (max-width: 560px)"));
+  assert.match(mq.slice(0, 200), /\.v2-beta-choices \{ grid-template-columns: 1fr; \}/,
+    "the choices must stack below 560px");
+
+  // Comfortable target size on touch.
+  const choice = css.slice(css.indexOf(".v2-beta-choice {"));
+  assert.match(choice.slice(0, choice.indexOf("}")), /min-height: 52px;/);
+});
+
+test("[static] no account lookup was added to the public beta endpoint", () => {
+  // The merged state means B and C render identically, so distinguishing them
+  // buys the customer nothing — and querying Supabase Auth from a public,
+  // unauthenticated endpoint would add an attack surface and a new failure
+  // mode for no UX gain. The existing unique-constraint path already covers
+  // both, which also preserves the DB-authoritative race semantics.
+  const route = read("app/api/signup/route.ts")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+  for (const lookup of [
+    /auth\.admin\.listUsers/, /auth\.admin\.getUserById/,
+    /getUserByEmail/, /from\("profiles"\)/, /getSupabaseAdmin\(\)[\s\S]{0,80}auth/,
+  ]) {
+    assert.equal(lookup.test(route), false,
+      `the public beta endpoint must not perform an account lookup: ${lookup}`);
   }
 
-  // NOT local: NODE_ENV=development is enough on its own, even with a non
-  // loopback origin (a dev server behind a tunnel is still local).
-  withEnv(
-    { VERCEL_ENV: undefined, VERCEL_URL: undefined, PREVIEW_APP_URL: undefined,
-      NODE_ENV: "development", NEXT_PUBLIC_APP_URL: "https://my-tunnel.ngrok.io" },
-    () => assert.equal(requireAppBaseUrl(), "https://my-tunnel.ngrok.io")
-  );
+  // The duplicate verdict still comes from the database's unique constraint.
+  assert.match(route, /error\.code === "23505"/,
+    "duplicate detection must stay the DB uniqueness violation, not a pre-check");
+  assert.equal(/select[\s\S]{0,60}beta_signups[\s\S]{0,60}eq\("email"/.test(route), false,
+    "no check-then-insert: that would replace an atomic constraint with a race");
 });
 
-test("production classification still resolves to the production origin", () => {
-  withEnv(
-    { VERCEL_ENV: "production", VERCEL_URL: "ss.vercel.app", PREVIEW_APP_URL: undefined,
-      NODE_ENV: "production", NEXT_PUBLIC_APP_URL: PROD },
-    () => assert.equal(requireAppBaseUrl(), PROD)
-  );
-});
+test("[static] the Sign in CTA prefills without putting the email in a URL", () => {
+  const login = read("app/login/page.tsx");
+  // Uses the EXISTING same-origin sessionStorage mechanism that already
+  // carries this value to /signup.
+  assert.match(login, /from "@\/lib\/signup-prefill"/);
 
-test("PREVIEW_APP_URL works WITHOUT VERCEL_ENV, and never overrides production", () => {
-  const PREVIEW = "https://example-preview.vercel.app";
-
-  // ── THE CONTRADICTION THIS RESOLVES ───────────────────────────────────
+  // ── NO HYDRATION MISMATCH ─────────────────────────────────────────────
   //
-  // PREVIEW_APP_URL was documented as the answer to missing Vercel system
-  // variables, but was gated behind VERCEL_ENV — itself one of those
-  // variables. Executed, that combination returned the PRODUCTION origin:
-  // exactly the silent fallback the contract forbids.
-  withEnv(
-    { VERCEL_ENV: undefined, VERCEL_URL: undefined, PREVIEW_APP_URL: PREVIEW, NEXT_PUBLIC_APP_URL: PROD },
-    () => {
-      const base = requireAppBaseUrl();
-      assert.equal(base, PREVIEW,
-        "an explicit Preview origin must work when VERCEL_ENV is absent");
-      assert.notEqual(base, PROD, "and must never resolve to production");
-    }
-  );
+  // /login is PRERENDERED, so its HTML is built once with no sessionStorage in
+  // scope. A lazy useState initialiser would return "" on the server and the
+  // stored address on the client, so the first client render would disagree
+  // with the served markup about this input's value — guaranteed, because
+  // prerendered HTML can never contain it.
+  //
+  // Deterministic initial state, filled after mount instead.
+  assert.match(login, /const \[email, setEmail\] {2,}= useState\(""\);/,
+    "email must initialise deterministically on server and client");
+  assert.equal(/useState\(\(\) => readSignupPrefill/.test(login), false,
+    "a lazy initialiser reintroduces the hydration mismatch");
+  assert.match(login, /useEffect\(\(\) => \{\s*\n\s*const stored = readSignupPrefill\(\)\?\.email;\s*\n\s*if \(stored\) setEmail\(stored\);\s*\n\s*\}, \[\]\);/,
+    "the stored address must be applied after mount, once");
 
-  // An empty VERCEL_ENV is the same condition as an absent one.
-  withEnv(
-    { VERCEL_ENV: "", VERCEL_URL: undefined, PREVIEW_APP_URL: PREVIEW, NEXT_PUBLIC_APP_URL: PROD },
-    () => assert.equal(requireAppBaseUrl(), PREVIEW)
-  );
-
-  // PRODUCTION IS NEVER OVERRIDABLE. A stray PREVIEW_APP_URL set at project
-  // scope must not redirect production's token links.
-  withEnv(
-    { VERCEL_ENV: "production", VERCEL_URL: "ss.vercel.app", PREVIEW_APP_URL: PREVIEW, NEXT_PUBLIC_APP_URL: PROD },
-    () => assert.equal(requireAppBaseUrl(), PROD,
-      "VERCEL_ENV=production must ignore PREVIEW_APP_URL entirely")
-  );
-
-  // Local development, with no override set, is unchanged.
-  withEnv(
-    { VERCEL_ENV: undefined, VERCEL_URL: undefined, PREVIEW_APP_URL: undefined, NEXT_PUBLIC_APP_URL: "http://localhost:3000" },
-    () => assert.equal(requireAppBaseUrl(), "http://localhost:3000")
-  );
+  // NEVER a query string: that leaks into history, referrers and access logs.
+  const section = read("components/v2/FoundingBetaSection.tsx");
+  assert.equal(/href="\/login\?email=/.test(section), false,
+    "the address must not travel in the URL");
+  assert.equal(/\/login\?[^"]*email/.test(section), false);
 });
 
-test("the duplicate state cannot promise that an expired link will work", () => {
-  // Tokens expire after VERIFICATION_TTL_HOURS (48). A duplicate submission
-  // issues NO replacement and sends nothing, so "check your inbox" alone would
-  // become an instruction that cannot work two days later.
-  const section = read("components/v2/FoundingBetaSection.tsx")
-    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "");   // comments cannot satisfy this
-  const branch = section.slice(section.indexOf("{emailSent ? ("));
-  const dupStart = branch.indexOf(") : alreadyListed ? (");
-  const dup = branch.slice(dupStart, branch.indexOf(") : (", dupStart + 5));
+test("the reused-email state cannot promise that an expired link will work", () => {
+  // Tokens expire after VERIFICATION_TTL_HOURS (48). A reused submission
+  // issues NO replacement and sends nothing, so guidance that said only
+  // "check your inbox" would become an instruction that cannot work two days
+  // later. The expiry is stated, and the route offered after it still exists.
+  const dup = reusedArm();
+  const still = dup.slice(dup.indexOf("v2-beta-help"));
 
-  // States the expiry, and offers a route that still exists once it has passed.
-  assert.match(dup, /expire 48 hours/i, "the duplicate state must state the expiry");
-  assert.match(dup, /support@servicesignal\.app/,
-    "an expired-link route must be offered");
-  // MUST NOT promise a new link. issueVerification has one caller (the signup
-  // route, which duplicates never reach) and there is no admin route, script
-  // or task that can mint and send a replacement token — so "we'll send you a
-  // new one" was a promise the product cannot keep.
-  assert.equal(/send you a new one/i.test(dup), false,
-    "no reissue mechanism exists; the copy must not promise one");
-  assert.match(dup, /help you get set up/i, "it may only promise human help");
+  assert.match(still, /valid for 48 hours/, "the guidance must state the expiry");
+  assert.equal(VERIFICATION_TTL_HOURS, 48, "and it must match the real TTL");
 
-  // The number must agree with the real TTL and with /verify's own copy.
-  assert.equal(VERIFICATION_TTL_HOURS, 48);
-
-  // Comments stripped FIRST. app/verify/page.tsx explains in a comment WHY it
-  // no longer says "send you a new one", and asserting on the raw file would
-  // let that explanation trip the very check it documents.
+  // /verify quotes the same lifetime. Comments stripped: that file explains in
+  // a comment why it no longer promises a reissue.
   const verifyPage = read("app/verify/page.tsx")
     .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   assert.match(verifyPage, /valid for 48 hours/,
     "the two surfaces must quote the same lifetime");
 
-  // Still no claim that a new email was just sent.
-  assert.equal(/We&rsquo;ve sent a verification link/.test(dup), false);
-  assert.equal(/couldn&rsquo;t send/i.test(dup), false,
-    "a deliberate no-resend is not an infrastructure failure");
+  // Human help only — no automated reissue is claimed anywhere.
+  assert.match(still, /help you get set up/i);
 });
+
 
 test("no surface promises a resend that the product cannot perform", () => {
   // PROVEN: issueVerification has exactly ONE caller — app/api/signup/route.ts

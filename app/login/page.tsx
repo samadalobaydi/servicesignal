@@ -1,7 +1,8 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { readSignupPrefill } from "@/lib/signup-prefill";
 import Link from "next/link";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import {
@@ -18,9 +19,41 @@ function LoginForm() {
 
   const callbackError = searchParams.get("auth_error");
 
+  // ── PREFILLED FROM THE ADDRESS THEY JUST TYPED ────────────────────────
+  //
+  // The reused-email state on the landing page sends people here, and asking
+  // for an address they entered ten seconds ago is the "don't ask twice" rule
+  // this product is built on.
+  //
+  // Read from the EXISTING same-origin sessionStorage mechanism that already
+  // carries this value to /signup — deliberately NOT `/login?email=...`, which
+  // would put a customer's address into browser history, referrer headers,
+  // server access logs and analytics.
+  //
+  // ── WHY THIS IS NOT A LAZY useState INITIALISER ───────────────────────
+  //
+  // /login is PRERENDERED (`○ /login` in the build output), so its HTML is
+  // generated once at build time with no sessionStorage in scope. A lazy
+  // initialiser would return "" on the server and the stored address on the
+  // client, so the very first client render would disagree with the served
+  // markup about this input's `value` — a hydration mismatch, guaranteed
+  // rather than merely possible, because prerendered HTML can never contain
+  // the value.
+  //
+  // Deterministic "" on both sides, then filled after mount. The effect runs
+  // only in the browser and only once, so the server HTML and the first client
+  // render are identical by construction.
   const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
+
+  // Populated AFTER hydration — see the note on `email` above. Empty deps: a
+  // one-shot read at mount. It never clobbers typing, because nothing can have
+  // been typed before the first effect runs.
+  useEffect(() => {
+    const stored = readSignupPrefill()?.email;
+    if (stored) setEmail(stored);
+  }, []);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(callbackError);
 
