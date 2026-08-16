@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useInvoiceForm } from "@/components/invoice/useInvoiceForm";
 import { InvoiceFields } from "@/components/invoice/InvoiceFields";
@@ -13,16 +13,42 @@ import {
 import styles from "./onboarding.module.css";
 
 /**
- * The two-step first-run flow.
+ * The first-run flow: one invoice in, two real reminders out.
  *
- * Step 1 confirms the business name. It is a confirmation and not a question:
- * the value captured at signup arrives prefilled, because asking again for
- * something the user has already given is the fastest way to make a product
- * feel careless.
+ * ── WHY A PAGE AND NOT A MODAL OVER THE DASHBOARD ─────────────────────────
  *
- * Step 2 records the first invoice and prepares its reminder, then hands off
- * to the dashboard with the invoice and reminder named in the URL so the
- * dashboard can open directly on the thing that was just created.
+ * The competitor pattern — dim the dashboard, float setup on top — exists to
+ * tell the customer their account is real and waiting. That is worth having.
+ * It is not worth having THIS way, for four reasons that are specific to this
+ * form rather than to overlays in general:
+ *
+ *   1. Height. Even with both optional sections collapsed this is a customer
+ *      block, an invoice block and a reminder-plan block. On a 390px phone
+ *      that is a scrolling dialog inside a scrolling page, which is the
+ *      awkward-modal-in-a-phone outcome to avoid, not a risk to manage.
+ *   2. The thing behind is the wrong thing. A zero-invoice account renders the
+ *      Overview first-run card, which already says "Ready to chase an overdue
+ *      invoice? / Add an invoice". Dimming that and floating a second, larger
+ *      invitation on top of it is one invitation too many.
+ *   3. It would need a focus trap, a scroll lock, an inert background and
+ *      considered Escape semantics purely to reach the accessibility a plain
+ *      page has for free — and Escape on a setup surface has no good answer:
+ *      dismissing to an empty dashboard is a silent Skip nobody chose.
+ *   4. Skip already has a real destination. /dashboard is a navigation, not a
+ *      dismissal, so the escape route needs no overlay to make sense.
+ *
+ * What the overlay was FOR is kept and made honest: instead of a blurred
+ * screenshot implying the account exists, the header states the two facts we
+ * already hold — the business name that will sign the reminders, and the
+ * address the customer is signed in with. Checkable, and it doubles as visible
+ * proof that neither is about to be asked for again.
+ *
+ * ── THE STEPS ─────────────────────────────────────────────────────────────
+ *
+ * A business-name prerequisite exists but is skipped whenever the name is
+ * already known, which is the ordinary case. Then: the invoice, then the
+ * prepared SMS and email. Two steps, because two things happen. Nothing is
+ * padded to three.
  *
  * Skipping is always available and always honest — it marks the account
  * `skipped`, not `completed`, so nothing later claims the user finished a flow
@@ -118,6 +144,8 @@ export function OnboardingFlow({
    * step did not complete, and this means it did.
    */
   const [defaultLinkWarning, setDefaultLinkWarning] = useState<string | null>(null);
+  /** Scoped root for the first-error search — see focusFirstError. */
+  const invoiceFormRef = useRef<HTMLFormElement>(null);
 
   // Onboarding is the one surface that requires a schedule which can produce a
   // reminder today — the whole point is to end on one the user can look at.
@@ -409,10 +437,37 @@ export function OnboardingFlow({
     }
   };
 
+  /**
+   * Moves the cursor to the first field the validator rejected.
+   *
+   * Queried from the DOM rather than from a hand-kept list of field ids, so
+   * adding, removing or reordering a field cannot silently stop this working —
+   * and the order it finds is document order, which is the order the customer
+   * reads in.
+   *
+   * rAF because aria-invalid is written by React on the next paint; querying
+   * synchronously would search the markup as it was BEFORE validation. The
+   * scroll afterwards is not redundant: focus() alone can leave the field
+   * under the sticky action bar.
+   */
+  const focusFirstError = useCallback(() => {
+    requestAnimationFrame(() => {
+      const first =
+        invoiceFormRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]');
+      if (!first) return;
+      first.focus();
+      first.scrollIntoView({ block: "center" });
+    });
+  }, []);
+
   const submitInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
     const data = invoiceState.validateAndGet();
-    if (!data) return;
+    // Everything typed stays exactly where it is — validateAndGet only reads.
+    if (!data) {
+      focusFirstError();
+      return;
+    }
 
     setBusy(true);
     setFailure(null);
@@ -505,10 +560,14 @@ export function OnboardingFlow({
           )}
         </header>
 
+        {/* Two segments because two things happen, not because a progress bar
+            looks more sophisticated with three. Labelled with the actions
+            themselves — a bare "1 / 2" tells the customer how long it is but
+            not what it is. */}
         {visibleStep && (
           <ol className={styles.rail} aria-label="Setup progress">
-            <li className={visibleStep >= 1 ? styles.railOn : styles.railOff}>First invoice</li>
-            <li className={visibleStep >= 2 ? styles.railOn : styles.railOff}>Review reminders</li>
+            <li className={visibleStep >= 1 ? styles.railOn : styles.railOff}>Add invoice</li>
+            <li className={visibleStep >= 2 ? styles.railOn : styles.railOff}>Ready to review</li>
           </ol>
         )}
 
@@ -562,7 +621,7 @@ export function OnboardingFlow({
                 {busy ? "Saving…" : "Continue"}
               </button>
               <button type="button" className={styles.skip} onClick={skip} disabled={busy}>
-                I&rsquo;ll do this later
+                Skip for now
               </button>
             </div>
           </form>
@@ -587,7 +646,7 @@ export function OnboardingFlow({
               {resumedInvoice
                 ? "You saved an invoice last time but its reminder wasn't prepared yet. Nothing has been sent."
                 : "Your invoice is safe. We just couldn't prepare its reminder — this is usually temporary."}{" "}
-              You can try again now, and nothing will be sent without your approval.
+              You can try again now.
             </p>
 
             <div className={styles.actions}>
@@ -605,17 +664,41 @@ export function OnboardingFlow({
             </div>
           </div>
         ) : (
-          <form onSubmit={submitInvoice} noValidate>
-            <h1 className={styles.title}>Add your first overdue invoice</h1>
+          <form onSubmit={submitInvoice} noValidate ref={invoiceFormRef}>
+            {/* The account part is over, said once and quietly. This is the
+                whole emotional job of the screen: the customer has just done
+                a beta application, an email verification, a password and a
+                terms agreement, and needs to know none of that is starting
+                again. */}
+            <p className={styles.eyebrow}>Your account is ready</p>
+            <h1 className={styles.title}>
+              Let&rsquo;s get your first overdue invoice ready.
+            </h1>
             <p className={styles.sub}>
-              {/* Plural: the owner reviews an SMS and an email, and the two
-                  channels are equal. Scoped to THESE reminders rather than
-                  stated as a permanent product guarantee — Auto mode is
-                  planned, and an absolute claim here would age badly. */}
-              Add the details below. ServiceSignal will prepare your SMS and
-              email reminders for review — neither is sent until you approve
-              them.
+              {/* Plural, and symmetrical: the owner reviews an SMS and an
+                  email, and the two channels are equal — neither is described
+                  as the main one. Scoped to THESE reminders rather than stated
+                  as a permanent product guarantee, because Auto mode is
+                  planned and an absolute claim here would age badly. */}
+              Add your customer, what they owe and when it was due. ServiceSignal
+              prepares the SMS and the email, and you review both before anything
+              goes out. Takes about a minute.
             </p>
+
+            {/* WHAT WE ALREADY KNOW — see the module CSS for why this replaces
+                a dimmed dashboard. Rendered only from values that exist, so a
+                missing one leaves no dangling separator or empty emphasis. */}
+            {(businessName.trim() || email) && (
+              <p className={styles.facts}>
+                {businessName.trim() && (
+                  <span>
+                    Reminders will come from{" "}
+                    <span className={styles.factStrong}>{businessName.trim()}</span>
+                  </span>
+                )}
+                {email && <span>Signed in as {email}</span>}
+              </p>
+            )}
 
             <div className={styles.fields}>
               <InvoiceFields
@@ -629,15 +712,18 @@ export function OnboardingFlow({
 
             <div className={styles.actions}>
               <button type="submit" className={styles.primary} disabled={busy}>
-                {busy ? "Saving…" : "Save and review reminders"}
+                {busy ? "Saving…" : "Add invoice & continue"}
               </button>
+              {/* A real button beside the primary, not a footnote beneath it.
+                  No confirmation, no warning, no consequence copy: skipping
+                  creates nothing and costs nothing. */}
               <button
                 type="button"
                 className={styles.skip}
                 onClick={skip}
                 disabled={busy}
               >
-                I&rsquo;ll do this later
+                Skip for now
               </button>
             </div>
           </form>

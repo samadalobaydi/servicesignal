@@ -3,34 +3,48 @@
  *
  * A CSS Module, for the same reason the auth split is one: these class names
  * cannot collide with .lp-*, .dash-* or .v2-*, and the rules stay out of
- * globals.css. Single centred column rather than the auth split — there is no
- * reassurance panel to run alongside, and the invoice step is tall enough that
- * a second column would only push it into a narrow gutter.
+ * globals.css.
+ *
+ * ── THE COLOUR CORRECTION ─────────────────────────────────────────────────
+ *
+ * This file previously used #2a5fe3 — a royal blue — for the primary button,
+ * the progress rail, every focus ring and every accent. That is the AUTH
+ * palette. The product the user is about to enter is built on the dashboard
+ * system, whose action colour is teal (--dash-accent / --dash-accent-strong).
+ * So the single screen that bridges signup and the product was the one screen
+ * painted in neither, and it read as a different application.
+ *
+ * Every accent below now comes from the same custom properties the dashboard
+ * uses, declared on :root in globals.css. No new colours are introduced here,
+ * and there is no amber anywhere except the one genuine non-blocking warning.
+ *
+ * ── WHY THE FORM IS NOT A MODAL OVER THE DASHBOARD ────────────────────────
+ *
+ * See OnboardingFlow for the full reasoning. In CSS terms the deciding fact is
+ * height: this form is taller than a 390px phone viewport even collapsed, so
+ * an overlay would have produced a scrolling dialog inside a scrolling page —
+ * the worst mobile pattern available — and would have needed a focus trap,
+ * scroll lock and inert background to be no better than a page.
  */
 
 .root {
   min-height: 100vh;
-  background: #f8fafc;
-  padding: 2.5rem 1.25rem 4rem;
+  background: var(--dash-bg);
+  padding: 2.5rem 1.25rem 3rem;
 }
 
-/* 560px → 660px.
-   The extra 100px is what lets Mobile|Email and Amount|Due date sit as real
-   two-column rows instead of two cramped halves: at 560px, minus 3.5rem of
-   card padding, each column was ~236px, which is tight for a UK mobile number
-   beside an email address. At 660px they are ~286px. It also removes roughly a
-   field's worth of scrolling from the first screen a customer ever uses.
-   Deliberately stopping here — this is a short form, and a wider card would
-   start to read as an admin panel rather than a quick first step. */
+/* 660px. Wide enough that Mobile|Email and Amount|Due date are real two-column
+   rows rather than two cramped halves, and deliberately no wider — past this a
+   short form starts to read as an admin panel. */
 .shell {
   width: 100%;
   max-width: 660px;
   margin-inline: auto;
-  background: #ffffff;
-  border: 1px solid #e6ebf2;
+  background: var(--dash-card);
+  border: 1px solid var(--dash-border);
   border-radius: 16px;
-  padding: 2rem 1.75rem 2.25rem;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 32px rgba(15, 23, 42, 0.06);
+  padding: 1.75rem 1.75rem 0;
+  box-shadow: var(--dash-shadow-lg);
 }
 
 .head {
@@ -38,7 +52,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.35rem;
 }
 .lockup {
   display: inline-flex;
@@ -46,97 +60,141 @@
   gap: 0.5rem;
 }
 .mark {
-  height: 28px;
+  height: 26px;
   width: auto;
   display: block;
 }
 .word {
   font-weight: 700;
-  font-size: 1.15rem;
+  font-size: 1.1rem;
   letter-spacing: -0.015em;
-  color: #0f172a;
+  color: var(--dash-text);
 }
 .wordB {
-  color: #2a5fe3;
+  color: var(--dash-accent-strong);
 }
 .progress {
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 600;
-  color: #64748b;
+  color: var(--dash-text-muted);
   white-space: nowrap;
 }
 
-/* Two labelled segments, matching the two user-facing steps. The
+/* Two labelled segments, matching the two things that actually happen. The
    business-name prerequisite and the retry-after-failure state are machinery,
-   not progress, and render no rail at all.
-   Deliberately not clickable — review depends on the invoice having been
-   saved, so an apparent shortcut back would offer a navigation the flow
-   cannot honour. */
+   not progress, and render no rail at all — inventing a third step so the
+   product looks thorough would be exactly the padding the brief rules out.
+   Deliberately not clickable: review depends on the invoice having been saved,
+   so an apparent shortcut back would offer a navigation the flow cannot
+   honour. */
 .rail {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.5rem;
-  margin: 0 0 1.75rem;
+  margin: 0 0 1.5rem;
   padding: 0;
   list-style: none;
 }
 .railOn,
 .railOff {
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   font-weight: 600;
   padding-top: 0.5rem;
   border-top: 3px solid;
 }
 .railOn {
-  color: #2a5fe3;
-  border-color: #2a5fe3;
+  color: var(--dash-accent-strong);
+  border-color: var(--dash-accent);
 }
 .railOff {
-  color: #94a3b8;
+  color: var(--dash-text-soft);
   border-color: #e2e8f0;
 }
 
+/* The reassurance, said once and quietly. The heading below is the ask; this
+   is the thing the customer needs to hear first — that the account part is
+   over. Teal, uppercase, small: the same eyebrow treatment the Overview
+   first-run card uses, so the two screens read as one product. */
+.eyebrow {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dash-accent-strong);
+  margin-bottom: 0.5rem;
+}
+
 .title {
-  font-size: 1.4rem;
+  font-size: 1.5rem;
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: #0f172a;
-  line-height: 1.25;
+  color: var(--dash-text);
+  line-height: 1.22;
 }
 .sub {
-  margin-top: 0.6rem;
-  margin-bottom: 1.5rem;
-  font-size: 0.9rem;
+  margin-top: 0.65rem;
+  font-size: 0.92rem;
   line-height: 1.6;
   color: #475569;
+}
+
+/*
+ * WHAT SERVICESIGNAL ALREADY KNOWS, SHOWN RATHER THAN CLAIMED.
+ *
+ * This is the honest replacement for a dimmed dashboard behind a modal. The
+ * competitor's blurred backdrop exists to say "your account is real and it is
+ * waiting" — this says the same thing with facts the customer can check, and
+ * it doubles as proof that the two details we already hold are not about to be
+ * asked for again.
+ *
+ * Slate, not teal: it is information, not an action or a status. No icon that
+ * could read as a success tick for something the user just did.
+ */
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.75rem;
+  margin: 1.25rem 0 0;
+  padding: 0.7rem 0.85rem;
+  background: var(--dash-navy-soft);
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--dash-navy);
+}
+.factStrong {
+  font-weight: 650;
+  color: var(--dash-text);
 }
 
 .label {
   display: block;
   font-size: 0.85rem;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--dash-text);
   margin-bottom: 0.4rem;
 }
 .input {
   width: 100%;
   padding: 0.7rem 0.85rem;
   font-size: 0.95rem;
-  color: #0f172a;
+  color: var(--dash-text);
   background: #ffffff;
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
+  border: 1px solid var(--dash-border-strong);
+  border-radius: 9px;
 }
 .input:focus-visible {
-  outline: 2px solid #2a5fe3;
-  outline-offset: 1px;
-  border-color: #2a5fe3;
+  outline: none;
+  border-color: var(--dash-accent);
+  box-shadow: 0 0 0 3px rgba(14, 165, 196, 0.12);
 }
 
 .err {
   margin-top: 0.35rem;
   font-size: 0.78rem;
-  color: #dc2626;
+  color: var(--dash-red);
 }
 
 /* Sits above the heading so a failure is announced before the form it
@@ -145,7 +203,7 @@
   margin-bottom: 1.25rem;
   padding: 0.75rem 0.9rem;
   border-radius: 10px;
-  background: #fef2f2;
+  background: var(--dash-red-soft);
   border: 1px solid #fecaca;
   color: #991b1b;
   font-size: 0.85rem;
@@ -153,55 +211,103 @@
 }
 
 .fields {
-  margin-bottom: 0.5rem;
+  margin-top: 1.75rem;
 }
 
+/*
+ * STICKY ACTIONS.
+ *
+ * position: sticky, NOT fixed. A fixed bar is lifted out of flow, so on iOS it
+ * fights the on-screen keyboard and can sit over the field being typed into.
+ * Sticky stays in the document: it rides the bottom of the viewport while the
+ * card is taller than the screen, then simply settles at the end of the card
+ * when it is not — so the same rule serves a 390px phone and a desktop with
+ * room to spare, with no breakpoint and no second layout to maintain.
+ *
+ * The negative inline margins let it span the card's padding, and the shell's
+ * bottom padding is 0 so the bar finishes the card cleanly.
+ */
 .actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  align-items: center;
   gap: 0.75rem;
-  margin-top: 1.75rem;
-  padding-top: 1.35rem;
-  border-top: 1px solid #eef1f6;
+  margin: 1.75rem -1.75rem 0;
+  padding: 1rem 1.75rem;
+  background: var(--dash-card);
+  border-top: 1px solid var(--dash-border);
+  border-radius: 0 0 16px 16px;
 }
 .primary {
+  flex: 1 1 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.75rem 1.25rem;
+  /* 46px: comfortably above the 44px touch target minimum, and the same
+     visual weight as the dashboard's own primary action. */
+  min-height: 46px;
+  padding: 0.7rem 1.2rem;
   border: none;
-  border-radius: 10px;
-  background: #2a5fe3;
+  border-radius: 9px;
+  background: var(--dash-accent);
   color: #ffffff;
+  font-family: 'DM Sans', sans-serif;
   font-size: 0.92rem;
   font-weight: 650;
   cursor: pointer;
-  transition: background 160ms ease;
+  transition: background 160ms ease, box-shadow 160ms ease;
 }
 .primary:hover:not(:disabled) {
-  background: #1f4fc8;
+  background: var(--dash-accent-strong);
+  box-shadow: 0 4px 14px rgba(8, 145, 178, 0.25);
+}
+.primary:focus-visible {
+  outline: 2px solid var(--dash-accent-strong);
+  outline-offset: 2px;
 }
 .primary:disabled {
   opacity: 0.65;
   cursor: not-allowed;
 }
 
-/* Subordinate but never hidden. An escape route the user cannot find is the
-   same as not having one. */
+/*
+ * SKIP.
+ *
+ * A real bordered button sitting beside the primary, not underlined grey text
+ * below it. Skipping is a legitimate choice and the customer is entitled to
+ * find it at a glance; the previous treatment made it look like a footnote,
+ * which is a quiet form of the guilt the brief rules out.
+ *
+ * It does not compete: no fill, muted label, and it takes only the width its
+ * text needs while the primary grows to fill the rest.
+ */
 .skip {
-  align-self: center;
-  padding: 0.35rem 0.5rem;
-  background: none;
-  border: none;
-  color: #64748b;
-  font-size: 0.85rem;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  padding: 0.7rem 1.1rem;
+  border-radius: 9px;
+  border: 1px solid var(--dash-border-strong);
+  background: #ffffff;
+  color: var(--dash-text-muted);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.9rem;
+  font-weight: 600;
   cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  white-space: nowrap;
+  transition: background 160ms ease, color 160ms ease;
 }
 .skip:hover:not(:disabled) {
-  color: #0f172a;
+  background: var(--dash-card-muted);
+  color: var(--dash-text);
+}
+.skip:focus-visible {
+  outline: 2px solid var(--dash-accent-strong);
+  outline-offset: 2px;
 }
 .skip:disabled {
   opacity: 0.55;
@@ -210,29 +316,42 @@
 
 @media (max-width: 480px) {
   .root {
-    padding: 1.5rem 0.9rem 3rem;
+    padding: 1.25rem 0.75rem 2rem;
   }
   .shell {
-    padding: 1.5rem 1.15rem 1.75rem;
+    padding: 1.35rem 1.1rem 0;
     border-radius: 14px;
   }
   .title {
-    font-size: 1.25rem;
+    font-size: 1.3rem;
+  }
+  .actions {
+    margin-inline: -1.1rem;
+    padding: 0.85rem 1.1rem;
+    /* Clears the iOS home indicator when the bar is riding the viewport. */
+    padding-bottom: max(0.85rem, env(safe-area-inset-bottom));
+    border-radius: 0 0 14px 14px;
+  }
+  /* The label shortens rather than the button shrinking — see OnboardingFlow,
+     where the long and short forms are separate spans. */
+  .skip {
+    padding-inline: 0.85rem;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .primary {
+  .primary,
+  .skip {
     transition: none;
   }
 }
 
-/* ── Prepared-reminder preview (visible step 2 of 2) ─────────────────────────────────────
+/* ── Prepared-reminder preview (visible step 2 of 2) ─────────────────────────
    Reads as a document, not a dashboard card: the user is looking at an email.
    Deliberately unstyled beyond structure — inventing an email-client chrome
    would suggest the message had already been sent. */
 .preview {
-  margin-top: 0.25rem;
+  margin-top: 1.5rem;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   background: #ffffff;
@@ -241,7 +360,7 @@
 .previewHead {
   margin: 0;
   padding: 0.9rem 1rem;
-  background: #f8fafc;
+  background: var(--dash-card-muted);
   border-bottom: 1px solid #e2e8f0;
   display: grid;
   gap: 0.4rem;
@@ -257,7 +376,7 @@
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #94a3b8;
+  color: var(--dash-text-soft);
 }
 .previewVal {
   margin: 0;
@@ -267,7 +386,7 @@
 }
 .previewSubject {
   font-weight: 650;
-  color: #0f172a;
+  color: var(--dash-text);
 }
 /* pre-wrap keeps the builder's paragraph breaks without rendering any markup. */
 .previewBody {
@@ -280,23 +399,23 @@
 /* Inline qualifier on the From row. Muted so it reads as metadata, not as
    part of the sender's name. */
 .previewNote2 {
-  color: #64748b;
+  color: var(--dash-text-muted);
   font-size: 0.8rem;
 }
 .previewNote {
   margin-top: 0.8rem;
   font-size: 0.8rem;
-  color: #64748b;
+  color: var(--dash-text-muted);
 }
 
 /* Non-blocking notice: something optional did not save, but the step itself
-   succeeded. Amber rather than the red .failure treatment, because the user
-   has lost nothing and needs no action right now. */
+   succeeded. The one place amber survives in this file, and it earns it —
+   this is a real "something did not happen" state, not decoration. */
 .warning {
   margin-bottom: 1.25rem;
   padding: 0.75rem 0.9rem;
   border-radius: 10px;
-  background: #fffbeb;
+  background: var(--dash-amber-soft);
   border: 1px solid #fde68a;
   color: #92400e;
   font-size: 0.85rem;
@@ -336,14 +455,14 @@
 }
 .chTabOn {
   background: #ffffff;
-  color: #0f172a;
+  color: var(--dash-text);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
-.chTab:focus-visible { outline: 2px solid #2a5fe3; outline-offset: 2px; }
+.chTab:focus-visible { outline: 2px solid var(--dash-accent-strong); outline-offset: 2px; }
 /* Edited marker on the tab. Paired with the word "Edited" in the panel, so
    colour is never the only signal. */
 .chDot {
-  width: 6px; height: 6px; border-radius: 999px; background: #2a5fe3;
+  width: 6px; height: 6px; border-radius: 999px; background: var(--dash-accent-strong);
 }
 
 .chActions {
@@ -371,37 +490,52 @@
   cursor: pointer;
   transition: background-color 140ms ease;
 }
-.chSave { background: #2a5fe3; color: #fff; border: 1px solid #2a5fe3; }
-.chSave:hover:not(:disabled) { background: #2350c4; }
-.chGhost { background: #fff; color: #0f172a; border: 1px solid #cbd5e1; }
-.chGhost:hover:not(:disabled) { background: #f8fafc; }
+.chSave {
+  background: var(--dash-accent);
+  color: #fff;
+  border: 1px solid var(--dash-accent);
+}
+.chSave:hover:not(:disabled) { background: var(--dash-accent-strong); }
+.chGhost {
+  background: #fff;
+  color: var(--dash-text);
+  border: 1px solid var(--dash-border-strong);
+}
+.chGhost:hover:not(:disabled) { background: var(--dash-card-muted); }
 .chSave:disabled, .chGhost:disabled { opacity: 0.6; cursor: default; }
-.chSave:focus-visible, .chGhost:focus-visible { outline: 2px solid #2a5fe3; outline-offset: 2px; }
+.chSave:focus-visible, .chGhost:focus-visible {
+  outline: 2px solid var(--dash-accent-strong);
+  outline-offset: 2px;
+}
 
 .editorWrap { padding: 0.9rem; }
 .editor {
   width: 100%;
   box-sizing: border-box;
   padding: 0.7rem 0.85rem;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--dash-border-strong);
   border-radius: 9px;
   font-family: 'DM Sans', sans-serif;
   font-size: 0.92rem;
   line-height: 1.6;
-  color: #0f172a;
+  color: var(--dash-text);
   resize: vertical;
 }
-.editor:focus-visible { outline: 2px solid #2a5fe3; outline-offset: 1px; border-color: #2a5fe3; }
-.editorMeta { margin-top: 0.4rem; font-size: 0.75rem; color: #64748b; }
+.editor:focus-visible {
+  outline: none;
+  border-color: var(--dash-accent);
+  box-shadow: 0 0 0 3px rgba(14, 165, 196, 0.12);
+}
+.editorMeta { margin-top: 0.4rem; font-size: 0.75rem; color: var(--dash-text-muted); }
 
 .confirm {
   margin-top: 0.85rem;
   padding: 0.85rem 1rem;
-  background: #fffbeb;
+  background: var(--dash-amber-soft);
   border: 1px solid #fde68a;
   border-radius: 10px;
 }
-.confirmT { font-size: 0.88rem; font-weight: 650; color: #0f172a; }
+.confirmT { font-size: 0.88rem; font-weight: 650; color: var(--dash-text); }
 .confirmS { margin-top: 0.2rem; font-size: 0.83rem; color: #92400e; line-height: 1.5; }
 .confirmActions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.75rem; }
 

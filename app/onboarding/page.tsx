@@ -35,6 +35,10 @@ export const dynamic = "force-dynamic";
  * flow ends by recording completion, so it must not begin when that record
  * cannot be written; otherwise a user types a real invoice, has a real
  * reminder prepared, and is told at the last step that none of it counted.
+ *
+ * This holds for `migration_absent` too. The live schema is unresolved, so
+ * that kind is one failed read rather than a proven absence — see
+ * onboardingView. To inspect the flow on a Preview, open /onboarding directly.
  */
 export default async function OnboardingPage() {
   const context = await getVerifiedContext();
