@@ -141,20 +141,47 @@ export function todayIsoLondon(): string {
   }).format(new Date());
 }
 
-export type DueDateProblem = "invalid" | "not_overdue";
-
 /**
- * Onboarding requires a genuinely OVERDUE invoice.
+ * Whether a stored due date is a real calendar date.
  *
- * Not a arbitrary restriction: the flow's whole purpose is to end on a
- * reminder the user can look at, and a reminder can only be prepared once a
- * schedule checkpoint has been reached. Today's date is rejected along with
- * future dates — the earliest checkpoint the default schedule reaches is the
- * due date itself, but an invoice due today has nothing overdue about it yet
- * and reads as a mistake.
+ * ── WHAT THIS REPLACED ────────────────────────────────────────────────────
+ *
+ * `checkOnboardingDueDate` used to live here and rejected any date that was
+ * not already in the past, so onboarding refused an invoice due today or
+ * later. That was wrong on the product and wrong on the mechanics:
+ *
+ *   - A customer may legitimately join with an invoice due next week. Being
+ *     told to "use an invoice that is already overdue" asks them either to
+ *     find a different invoice or to type a date that is not true, purely so
+ *     the flow can show a reminder preview. The invoice must not adapt to
+ *     onboarding.
+ *   - It did not even match the scheduler. `due_today` is a real checkpoint
+ *     (SCHEDULE_DAY 0), so an invoice due TODAY can be prepared today — and
+ *     `before_due_3_days` is -3, so an invoice due in three days is eligible
+ *     today on the Firm plan. The old rule rejected both. Eligibility is a
+ *     question for prepareEligibility(), which knows the checkpoints; it was
+ *     never a question about whether the date is in the past.
+ *
+ * What survives is the half that was genuinely validation: a due date has to
+ * be a real date. Applied on BOTH surfaces now rather than onboarding only,
+ * because the browser can never submit a malformed value (ukDateToIso commits
+ * nothing else) while an API caller can — so this closed a server-side hole
+ * rather than tightening anything a customer can reach.
  */
-export function checkOnboardingDueDate(iso: string): DueDateProblem | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "invalid";
-  // String comparison is safe and exact on zero-padded ISO dates.
-  return iso >= todayIsoLondon() ? "not_overdue" : null;
+export function isValidIsoDate(iso: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!match) return false;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+
+  // Round-trip through UTC so "2026-02-31" fails instead of silently becoming
+  // 3 March. UTC is used for the check only — never for display or comparison.
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  return (
+    probe.getUTCFullYear() === year &&
+    probe.getUTCMonth() === month - 1 &&
+    probe.getUTCDate() === day
+  );
 }

@@ -8,12 +8,17 @@ import { coerceInvoiceForm, createInvoiceForUser } from "@/lib/invoice-write";
  *
  * WHY A DEDICATED ROUTE, AND WHY THE GENERAL ONE WAS REMOVED
  *
- * Onboarding needs two guarantees the dashboard must NOT have: the caller's
- * email must be confirmed, and the schedule must produce a reminder that can
- * be prepared today. The second cannot be a parameter on a shared endpoint,
- * because a parameter is supplied by the client and the client that wants to
- * skip the check simply omits it. Policy has to be fixed by which URL was
- * called.
+ * Onboarding needs guarantees the dashboard must NOT have: the caller's email
+ * must be confirmed, and the onboarding field set is mandatory. Neither can be
+ * a parameter on a shared endpoint, because a parameter is supplied by the
+ * client and the client that wants to skip the check simply omits it. Policy
+ * has to be fixed by which URL was called.
+ *
+ * A third guarantee used to live here — that the schedule produce a reminder
+ * preparable TODAY — and has been removed. It rejected a real invoice due next
+ * week, which is ordinary data, and pushed the customer to alter it. Whether a
+ * reminder is preparable now is decided AFTER this write, from the saved
+ * invoice, and only chooses which screen the customer sees next.
  *
  * A previous revision of this work added a general POST /api/invoices that
  * required verification but not eligibility. Keeping it alongside this route
@@ -44,11 +49,10 @@ export async function POST(request: Request) {
   const form = coerceInvoiceForm((body ?? {}) as Record<string, never>);
   const supabase = getSupabaseServer();
 
-  // Eligibility is enabled HERE, in server code, on a route whose only purpose
-  // is onboarding. The browser runs the same rule for the error message; this
-  // is what makes it true.
+  // The onboarding field set is enabled HERE, in server code, on a route whose
+  // only purpose is onboarding. The browser runs the same rule for the error
+  // messages; this is what makes it true.
   const result = await createInvoiceForUser(supabase, form, {
-    requireReminderEligibility: true,
     requireOnboardingFields: true,
   });
 

@@ -2,15 +2,14 @@ import { SCHEDULE_DAY, SCHEDULE_CHRONOLOGY, daysFromDue } from "./reminder-sched
 import type { ReminderSchedule } from "@/types";
 
 /**
- * What a reminder plan will ACTUALLY do for an invoice that is already overdue.
+ * What a reminder plan will ACTUALLY do for an invoice, from today onwards.
  *
  * WHY THIS EXISTS
  *
- * Onboarding requires an invoice that is already past its due date. The shared
- * preset summaries in lib/invoice-form.ts describe a plan from the beginning of
- * its life — Standard reads "On the due date, then 3 and 7 days overdue" — which
- * is correct in the dashboard drawer, where an invoice may not be due yet, and
- * wrong here in two separate ways:
+ * The shared preset summaries in lib/invoice-form.ts describe a plan from the
+ * beginning of its life — Standard reads "On the due date, then 3 and 7 days
+ * overdue" — which is correct in the dashboard drawer and wrong during
+ * onboarding whenever the invoice is ALREADY overdue, in two separate ways:
  *
  *   1. It describes checkpoints that have already passed. An invoice 4 days
  *      overdue can never receive its "on the due date" reminder.
@@ -104,16 +103,22 @@ export function describePlan(plan: OnboardingSchedulePlan): string {
   const remaining = plan.later.map(checkpointPhrase);
 
   if (!plan.now) {
-    // Onboarding validation requires an overdue invoice, so this is defensive.
-    // If it is ever reached, say when the first reminder becomes available
-    // rather than claiming one is ready.
-    return remaining.length > 0
+    // AN ORDINARY CASE NOW, not a defensive one. Onboarding accepts invoices
+    // that are not yet due, so this is what a customer joining with an invoice
+    // due next week sees. It must therefore be a complete, forward-looking
+    // description rather than a fallback: every checkpoint is still ahead, so
+    // every one of them is named, and nothing claims a reminder is ready.
+    if (remaining.length === 0) return "No reminders are scheduled for this invoice.";
+    return remaining.length === 1
       ? `First reminder at ${remaining[0]}.`
-      : "No reminders are scheduled for this invoice.";
+      : `First reminder at ${remaining[0]}, then at ${joinPhrases(remaining.slice(1))}.`;
   }
 
   if (remaining.length === 0) {
-    return "One reminder, ready to review now. This plan has no later reminders for an invoice this overdue.";
+    // "at this stage", not "this overdue". A checkpoint can be reached before
+    // the due date — before_due_3_days sits at offset -3 — so this sentence is
+    // also shown for an invoice that is not overdue at all.
+    return "One reminder, ready to review now. This plan has no later reminders for an invoice at this stage.";
   }
 
   return `First reminder ready to review now, then at ${joinPhrases(remaining)}.`;

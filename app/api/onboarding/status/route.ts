@@ -9,6 +9,7 @@ import {
 } from "@/lib/onboarding";
 import { cleanBusinessNameOrNull } from "@/lib/business-name";
 import { isUuid } from "@/lib/onboarding-handoff";
+import { prepareEligibility } from "@/lib/reminder-schedule";
 
 /**
  * Reads and writes the caller's own onboarding status.
@@ -114,82 +115,170 @@ export async function PATCH(request: Request) {
   // `skipped` requires no evidence: it is a claim about a DECISION, not an
   // outcome, and the user is entitled to make it at any point.
   if (body.status === "completed") {
-    if (!isUuid(body.invoice_id) || !isUuid(body.reminder_id)) {
+    if (!isUuid(body.invoice_id)) {
       return NextResponse.json(
         { success: false, message: "Setup could not be confirmed. Please try again." },
         { status: 400 }
       );
     }
 
-    // One query, joined through invoices, under the user's own session.
-    // reminder_logs carries user_id AND invoice_id, so this pins all three
-    // relationships at once: the reminder is the user's, the invoice is the
-    // user's, and the reminder belongs to that invoice. RLS independently
-    // scopes both tables to auth.uid(), so a forged id from another account
-    // returns no row rather than someone else's data.
-    const { data: evidence, error: evidenceError } = await supabase
-      .from("reminder_logs")
-      .select("id, status, invoice_id, invoices!inner(id, status)")
-      .eq("id", body.reminder_id)
-      .eq("invoice_id", body.invoice_id)
-      .eq("user_id", context.user.id)
-      .maybeSingle();
-
-    if (evidenceError) {
-      console.error(
-        `[api/onboarding/status] Evidence lookup failed for user ${context.user.id}: ` +
-        evidenceError.message
-      );
-      return NextResponse.json(
-        { success: false, message: "We couldn't confirm your setup. Please try again." },
-        { status: 500 }
-      );
-    }
-
-    // No row means the pairing is wrong, one of them does not exist, the
-    // invoice was deleted (the inner join drops it), or neither is theirs.
-    // All are answered identically so the endpoint cannot be used to probe
-    // which ids exist on other accounts.
-    if (!evidence) {
-      console.warn(
-        `[api/onboarding/status] Rejected completion for user ${context.user.id}: ` +
-        `reminder ${body.reminder_id} / invoice ${body.invoice_id} did not resolve.`
-      );
-      return NextResponse.json(
-        { success: false, message: "Setup could not be confirmed. Please try again." },
-        { status: 422 }
-      );
-    }
-
-    // Which reminder states count as a finished onboarding.
+    // ── THE SECOND FORM OF EVIDENCE ─────────────────────────────────────
     //
-    // `pending` is the expected one: prepared, waiting for review, nothing
-    // sent. That is exactly what the flow promises.
+    // An invoice whose first checkpoint has not been reached produces no
+    // reminder, so there is no reminder to name. Requiring one would have left
+    // a customer who joined with an invoice due next week permanently
+    // `required` — sent back to onboarding on every dashboard visit, with a
+    // completed setup and no way to record it.
     //
-    // `sent` also counts. Between finishing the form and this request the user
-    // may legitimately have approved the reminder themselves in another tab —
-    // the approval route is the only path that sets `sent`, and it enforces
-    // its own eligibility and approval checks. Refusing completion there would
-    // punish someone for having engaged MORE than the flow asked. It remains
-    // true that this endpoint sends nothing.
-    //
-    // `dismissed` and `failed` do not count. Dismissed means the user threw
-    // the reminder away, and failed means it never got out — neither is the
-    // reviewable outcome onboarding exists to deliver.
-    const ACCEPTABLE = new Set(["pending", "sent"]);
-    if (!ACCEPTABLE.has(evidence.status)) {
-      console.warn(
-        `[api/onboarding/status] Rejected completion for user ${context.user.id}: ` +
-        `reminder ${body.reminder_id} has status '${evidence.status}'.`
+    // The evidence rule is widened, NOT relaxed. The client says only "this
+    // invoice"; the server re-derives eligibility from the STORED due date and
+    // schedules using the same function the prepare route uses. So a caller
+    // cannot skip the review by omitting reminder_id — if the invoice is in
+    // fact eligible, that path is refused and the reminder pair is demanded as
+    // before.
+    if (!body.reminder_id) {
+      const { data: invoice, error: invoiceError } = await supabase
+        .from("invoices")
+        .select("id, due_date, reminder_schedules, reminders_sent")
+        .eq("id", body.invoice_id)
+        .eq("user_id", context.user.id)
+        .maybeSingle();
+
+      if (invoiceError) {
+        console.error(
+          `[api/onboarding/status] Invoice lookup failed for user ${context.user.id}: ` +
+          invoiceError.message
+        );
+        return NextResponse.json(
+          { success: false, message: "We couldn't confirm your setup. Please try again." },
+          { status: 500 }
+        );
+      }
+
+      // Same answer for "does not exist" and "is not yours", so this cannot be
+      // used to probe another account's invoice ids.
+      if (!invoice) {
+        return NextResponse.json(
+          { success: false, message: "Setup could not be confirmed. Please try again." },
+          { status: 422 }
+        );
+      }
+
+      const eligibility = prepareEligibility(
+        invoice.reminder_schedules ?? [],
+        invoice.reminders_sent ?? [],
+        invoice.due_date
       );
-      return NextResponse.json(
-        {
-          success: false,
-          message:
-            "That reminder is no longer waiting for review, so setup can't be marked complete.",
-        },
-        { status: 409 }
-      );
+      if (eligibility.schedule) {
+        console.warn(
+          `[api/onboarding/status] Refused reminder-less completion for user ` +
+          `${context.user.id}: invoice ${body.invoice_id} is eligible now.`
+        );
+        // ── WHY THIS ONE REFUSAL IS MACHINE-READABLE ────────────────────
+        //
+        // The check is unchanged and still absolute: an eligible invoice can
+        // never be completed without its reminder. But this refusal is
+        // RECOVERABLE and every other one is not — the invoice crossed its
+        // first checkpoint between being created and this request, most
+        // obviously over midnight. `reason` lets the client respond to that
+        // specifically, by taking the customer into the preparation and
+        // review it should now be offering, instead of showing a dead end.
+        //
+        // No enumeration risk: reaching this line already required the
+        // invoice to belong to the caller. "Not found" and "not yours" both
+        // return above, with no reason and the identical message — so the two
+        // still cannot be told apart, and nothing about another account is
+        // observable either way.
+        return NextResponse.json(
+          {
+            success: false,
+            reason: "eligible_now",
+            message: "Setup could not be confirmed. Please try again.",
+          },
+          { status: 422 }
+        );
+      }
+      // Falls through to the status write below. Nothing was prepared and
+      // nothing was sent — the daily job will reach this invoice on its own
+      // checkpoint, exactly as it would for one added from the dashboard.
+    } else {
+      if (!isUuid(body.reminder_id)) {
+        return NextResponse.json(
+          { success: false, message: "Setup could not be confirmed. Please try again." },
+          { status: 400 }
+        );
+      }
+
+      // One query, joined through invoices, under the user's own session.
+      // reminder_logs carries user_id AND invoice_id, so this pins all three
+      // relationships at once: the reminder is the user's, the invoice is the
+      // user's, and the reminder belongs to that invoice. RLS independently
+      // scopes both tables to auth.uid(), so a forged id from another account
+      // returns no row rather than someone else's data.
+      const { data: evidence, error: evidenceError } = await supabase
+        .from("reminder_logs")
+        .select("id, status, invoice_id, invoices!inner(id, status)")
+        .eq("id", body.reminder_id)
+        .eq("invoice_id", body.invoice_id)
+        .eq("user_id", context.user.id)
+        .maybeSingle();
+
+      if (evidenceError) {
+        console.error(
+          `[api/onboarding/status] Evidence lookup failed for user ${context.user.id}: ` +
+          evidenceError.message
+        );
+        return NextResponse.json(
+          { success: false, message: "We couldn't confirm your setup. Please try again." },
+          { status: 500 }
+        );
+      }
+
+      // No row means the pairing is wrong, one of them does not exist, the
+      // invoice was deleted (the inner join drops it), or neither is theirs.
+      // All are answered identically so the endpoint cannot be used to probe
+      // which ids exist on other accounts.
+      if (!evidence) {
+        console.warn(
+          `[api/onboarding/status] Rejected completion for user ${context.user.id}: ` +
+          `reminder ${body.reminder_id} / invoice ${body.invoice_id} did not resolve.`
+        );
+        return NextResponse.json(
+          { success: false, message: "Setup could not be confirmed. Please try again." },
+          { status: 422 }
+        );
+      }
+
+      // Which reminder states count as a finished onboarding.
+      //
+      // `pending` is the expected one: prepared, waiting for review, nothing
+      // sent. That is exactly what the flow promises.
+      //
+      // `sent` also counts. Between finishing the form and this request the user
+      // may legitimately have approved the reminder themselves in another tab —
+      // the approval route is the only path that sets `sent`, and it enforces
+      // its own eligibility and approval checks. Refusing completion there would
+      // punish someone for having engaged MORE than the flow asked. It remains
+      // true that this endpoint sends nothing.
+      //
+      // `dismissed` and `failed` do not count. Dismissed means the user threw
+      // the reminder away, and failed means it never got out — neither is the
+      // reviewable outcome onboarding exists to deliver.
+      const ACCEPTABLE = new Set(["pending", "sent"]);
+      if (!ACCEPTABLE.has(evidence.status)) {
+        console.warn(
+          `[api/onboarding/status] Rejected completion for user ${context.user.id}: ` +
+          `reminder ${body.reminder_id} has status '${evidence.status}'.`
+        );
+        return NextResponse.json(
+          {
+            success: false,
+            message:
+              "That reminder is no longer waiting for review, so setup can't be marked complete.",
+          },
+          { status: 409 }
+        );
+      }
     }
   }
 

@@ -64,12 +64,17 @@ test("onboarding — and only onboarding — requires reference and mobile", () 
   assert.ok(onboarding.customer_phone, "onboarding requires a mobile number");
 });
 
-test("the onboarding-only rules are exactly three, and no more", () => {
+test("the onboarding-only rules are exactly two, and both are about FIELDS", () => {
   // ADDED AFTER A PROTOTYPE TRIED TO DROP ONE. Making the reference optional
   // may well be right, but it is a product decision about the Add Invoice
   // CONTRACT and must be taken on its own merits — not carried in as a side
   // effect of an onboarding redesign. This pins the rule set so any change to
   // it has to be deliberate and visible in a diff.
+  //
+  // It was three. The third was a due-date restriction requiring an
+  // already-overdue invoice, and it has been deleted: WHEN an invoice is due
+  // is a fact about the invoice, never a condition of being allowed to record
+  // it. What remains is only which fields must be filled in.
   const complete = dashboardMinimum({
     invoice_reference: "INV-1042",
     customer_phone: "07700 900000",
@@ -81,15 +86,27 @@ test("the onboarding-only rules are exactly three, and no more", () => {
   for (const [field, broken] of [
     ["invoice_reference", { invoice_reference: "" }],
     ["customer_phone", { customer_phone: "" }],
-    // Onboarding ends on a reminder that exists NOW, so a schedule checkpoint
-    // has to have been reached already.
-    ["due_date", { due_date: "2099-01-01" }],
   ] as const) {
     assert.deepEqual(
       Object.keys(validateInvoiceForm({ ...complete, ...broken }, { requireOnboardingFields: true })),
       [field]
     );
   }
+
+  // A future due date is not an error on EITHER surface.
+  const future = { ...complete, due_date: "2099-01-01" };
+  assert.deepEqual(validateInvoiceForm(future, { requireOnboardingFields: true }), {});
+  assert.deepEqual(validateInvoiceForm(future), {});
+
+  // And the option that could reintroduce the restriction is gone, not merely
+  // unset — so it cannot be switched back on without deliberately rebuilding
+  // it. `today` is the only remaining ValidateOptions member besides the
+  // field flag.
+  const FORM_SRC = readFileSync(join(ROOT, "lib/invoice-form.ts"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  assert.equal(/requireReminderEligibility/.test(FORM_SRC), false);
+  assert.equal(/prepareEligibility/.test(FORM_SRC), false,
+    "the validator must not consult reminder eligibility at all");
 });
 
 // ── The labels must match those rules ──────────────────────────────────────

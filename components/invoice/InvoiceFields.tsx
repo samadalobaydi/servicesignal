@@ -428,10 +428,14 @@ export function InvoiceFields({
                 <p id="inv-due-date-err" className="field-err">{err("due_date")}</p>
               ) : (
                 <p id="inv-due-date-help" className="field-help">
-                  {/* The overdue requirement is a real onboarding rule
-                      (checkOnboardingDueDate), not styling — so this sentence
-                      stays variant-specific while the field itself does not. */}
-                  Type dd/mm/yyyy or use the calendar.{isOnboarding ? " Must already be overdue." : ""}
+                  {/* IDENTICAL ON BOTH SURFACES.
+                      Onboarding used to append "Must already be overdue.",
+                      mirroring a validator rule that has since been deleted.
+                      Nothing about the real due date is a matter for the
+                      surface collecting it: an invoice due next week is
+                      ordinary data, and telling a customer otherwise invites
+                      them to type a date that is not true. */}
+                  Type dd/mm/yyyy or use the calendar.
                 </p>
               )}
             </div>
@@ -552,11 +556,16 @@ export function InvoiceFields({
 
           {/* ONBOARDING SHOWS A LIVE PLAN, NOT THE GENERIC PRESET SUMMARY.
               The shared summary ("On the due date, then 3 and 7 days overdue")
-              is correct in the dashboard, where an invoice may not be due yet.
-              Here the invoice is required to be ALREADY overdue, so that
-              sentence both describes checkpoints that have passed and promises
+              describes a plan from the START of an invoice's life. That is fine
+              on the dashboard, and wrong here whenever the invoice is ALREADY
+              overdue: it describes checkpoints that have passed and promises
               more reminders than will ever arrive — an invoice entered 12 days
-              overdue on Standard receives exactly one. See
+              overdue on Standard receives exactly one.
+
+              Onboarding no longer requires an overdue invoice, so this now
+              serves both cases: describeScheduleFromDueDate reads from today
+              either way, naming what is ready now for a past-dated invoice and
+              the full remaining plan for a future-dated one. See
               lib/onboarding-schedule.ts. Falls back to the shared summary until
               a due date has been entered. */}
 

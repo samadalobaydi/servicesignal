@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useInvoiceForm } from "@/components/invoice/useInvoiceForm";
 import { InvoiceFields } from "@/components/invoice/InvoiceFields";
+import { prepareEligibility } from "@/lib/reminder-schedule";
+import { formatDate } from "@/lib/invoices";
 import { ReminderReview, type ReminderPreview } from "./ReminderReview";
 import {
   cleanBusinessName,
@@ -83,6 +85,18 @@ async function loadPreparedChannels(reminderId: string): Promise<ReminderPreview
   }
 }
 
+/** A saved invoice with no reachable checkpoint yet — the Case B payload. */
+interface AddedInvoice {
+  invoiceId: string;
+  dueDate: string;
+  /**
+   * The date the earliest remaining checkpoint is reached — prepareEligibility's
+   * own answer, computed from the invoice's due date and the plan the owner
+   * chose. Fixed arithmetic, not a promise that anything will happen.
+   */
+  eligibleFrom: string | null;
+}
+
 export function OnboardingFlow({
   initialBusinessName,
   email,
@@ -109,11 +123,33 @@ export function OnboardingFlow({
    *
    *   1 — business-name prerequisite (only when the name is missing)
    *   2 — invoice form
-   *   3 — reminder review
+   *   3 — reminder review          (a checkpoint has been reached)
+   *   4 — invoice added, nothing to review yet (no checkpoint reached)
    *
-   * The visible progress is deliberately two steps; see visibleStep below.
+   * 3 and 4 are the two honest endings, chosen by the invoice's own lifecycle
+   * rather than by anything onboarding wants to happen. The visible progress
+   * is two steps in both cases; see visibleStep below.
    */
-  const [step, setStep] = useState<1 | 2 | 3>(needsBusinessName ? 1 : 2);
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(needsBusinessName ? 1 : 2);
+  /**
+   * The saved invoice, when it produced nothing to review yet.
+   *
+   * `eligibleFrom` is the date the earliest remaining checkpoint is reached —
+   * computed by prepareEligibility from the invoice's OWN due date and
+   * schedules, which is the same rule the daily job uses to decide what to
+   * prepare. It is a forecast the system genuinely keeps, not a guess.
+   */
+  const [added, setAdded] = useState<AddedInvoice | null>(null);
+  /**
+   * A saved future-dated invoice whose COMPLETION has not been recorded.
+   *
+   * `added` is set only once the server has banked the outcome, so the success
+   * screen cannot appear before onboarding is genuinely finished. This holds
+   * the same payload while that write is outstanding, which keeps the invoice
+   * form retired — resubmitting it would create a second invoice for the same
+   * job, the exact duplicate this lifecycle change exists to prevent.
+   */
+  const [pendingCompletion, setPendingCompletion] = useState<AddedInvoice | null>(null);
   /** The prepared reminder, once review has it. Completion depends on this. */
   const [preview, setPreview] = useState<ReminderPreview | null>(null);
   const [businessName, setBusinessName] = useState(initialBusinessName);
@@ -147,19 +183,15 @@ export function OnboardingFlow({
   /** Scoped root for the first-error search — see focusFirstError. */
   const invoiceFormRef = useRef<HTMLFormElement>(null);
 
-  // Onboarding is the one surface that requires a schedule which can produce a
-  // reminder today — the whole point is to end on one the user can look at.
-  const invoiceState = useInvoiceForm({
-    requireReminderEligibility: true,
-    requireOnboardingFields: true,
-  });
+  const invoiceState = useInvoiceForm({ requireOnboardingFields: true });
 
   /**
    * The step number the USER sees, or null when this phase is not a numbered
    * step at all.
    *
-   * Onboarding is two steps: add the invoice, review the reminder. Everything
-   * else is machinery and must not inflate the count —
+   * Onboarding is two steps: add the invoice, then whatever the invoice
+   * actually produced. Everything else is machinery and must not inflate the
+   * count —
    *
    *   business-name prerequisite → null. It only appears when the name is
    *     missing, so numbering it would make the flow appear to be a different
@@ -168,11 +200,19 @@ export function OnboardingFlow({
    *   retry after a preparation failure → null. A failure is not progress, and
    *     numbering it would imply the user had advanced by hitting an error.
    *
-   * Both a successful first preparation and a successful retry land on the
-   * review phase, so both show "Step 2 of 2".
+   * Steps 3 and 4 are both step 2 of 2 — the customer has finished either way.
+   * Only the LABEL differs, because "Ready to review" is false when nothing is
+   * eligible yet. A false step is worse than a plain one.
    */
   const visibleStep: 1 | 2 | null =
-    pendingInvoiceId ? null : step === 2 ? 1 : step === 3 ? 2 : null;
+    pendingInvoiceId || pendingCompletion
+      ? null
+      : step === 2
+      ? 1
+      : step === 3 || step === 4
+      ? 2
+      : null;
+  const secondStepLabel = step === 4 ? "Added" : "Ready to review";
 
   // Guarantee a profile row exists, using the canonical creation path.
   //
@@ -267,6 +307,65 @@ export function OnboardingFlow({
   }, []);
 
   /**
+   * The single PATCH that records an onboarding outcome. Records only — it
+   * navigates nothing and shows nothing.
+   *
+   * Split out from `finish` because Case B has to record WITHOUT leaving: the
+   * outcome must already be banked before the "Invoice added" screen claims
+   * the setup is done. Everything else still uses `finish`, which is this plus
+   * a navigation, so there remains exactly one place that writes the status.
+   *
+   * `eligibleNow` is a distinct result rather than an error string, because it
+   * is recoverable and the recovery is specific — see completeWithoutReminder.
+   */
+  const recordStatus = useCallback(
+    async (
+      status: "skipped" | "completed",
+      // reminder_id is omitted when the invoice produced nothing to review.
+      // The server does NOT take that on trust — it re-derives eligibility
+      // from the stored invoice; see app/api/onboarding/status.
+      evidence?: { invoice_id: string; reminder_id?: string }
+    ): Promise<
+      | { ok: true }
+      | { ok: false; eligibleNow: true }
+      | { ok: false; eligibleNow: false; message: string }
+    > => {
+      try {
+        const res = await fetch("/api/onboarding/status", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          // `completed` must name what it produced. The server re-checks that
+          // the invoice and reminder exist, are this user's, are joined to one
+          // another, and that the reminder is still reviewable.
+          body: JSON.stringify({ status, ...evidence }),
+        });
+        if (!res.ok) {
+          const payload = await res.json().catch(() => null);
+          // The invoice reached its first checkpoint between being created and
+          // this request. Not a failure of the customer's — see the recovery.
+          if (payload?.reason === "eligible_now") return { ok: false, eligibleNow: true };
+          return {
+            ok: false,
+            eligibleNow: false,
+            message:
+              payload?.message ??
+              "We couldn't save your setup progress. Please reload and try again.",
+          };
+        }
+      } catch {
+        return {
+          ok: false,
+          eligibleNow: false,
+          message:
+            "We couldn't reach ServiceSignal. Please check your connection and try again.",
+        };
+      }
+      return { ok: true };
+    },
+    []
+  );
+
+  /**
    * Records the outcome, then leaves — but ONLY if the record succeeded.
    *
    * Navigating regardless would be a loop: the status would still be
@@ -279,27 +378,15 @@ export function OnboardingFlow({
     async (
       status: "skipped" | "completed",
       destination = "/dashboard",
-      evidence?: { invoice_id: string; reminder_id: string }
+      evidence?: { invoice_id: string; reminder_id?: string }
     ): Promise<boolean> => {
-      try {
-        const res = await fetch("/api/onboarding/status", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          // `completed` must name what it produced. The server re-checks that
-          // the invoice and reminder exist, are this user's, are joined to one
-          // another, and that the reminder is still reviewable.
-          body: JSON.stringify({ status, ...evidence }),
-        });
-        if (!res.ok) {
-          const payload = await res.json().catch(() => null);
-          setFailure(
-            payload?.message ??
-              "We couldn't save your setup progress. Please reload and try again."
-          );
-          return false;
-        }
-      } catch {
-        setFailure("We couldn't reach ServiceSignal. Please check your connection and try again.");
+      const result = await recordStatus(status, evidence);
+      if (!result.ok) {
+        setFailure(
+          result.eligibleNow
+            ? "We couldn't save your setup progress. Please reload and try again."
+            : result.message
+        );
         return false;
       }
 
@@ -307,7 +394,7 @@ export function OnboardingFlow({
       router.refresh();
       return true;
     },
-    [router]
+    [router, recordStatus]
   );
 
   const skip = useCallback(async () => {
@@ -410,6 +497,84 @@ export function OnboardingFlow({
     );
     if (!left) setBusy(false);
   }, [preview, finish]);
+
+  /**
+   * Banks the Case B outcome, and only then shows it.
+   *
+   * ── WHY COMPLETION IS NOT ON THE BUTTON ──────────────────────────────────
+   *
+   * It used to be: the screen appeared, and the PATCH ran when the customer
+   * pressed "Go to Active Chasing". Two things went wrong with that.
+   *
+   *   1. Closing the tab on that screen left a real invoice behind with the
+   *      status still `required`. The dashboard gate would send them back
+   *      through onboarding, where the form is blank — so the natural thing to
+   *      do is enter the same invoice again.
+   *   2. The screen can sit open across the invoice's first checkpoint, most
+   *      obviously over midnight. The server re-derives eligibility on every
+   *      reminder-less completion, so it would by then find a schedule and
+   *      answer 422 — correctly, and with no way out for the customer.
+   *
+   * Recording first fixes (1) outright. For (2) the answer is not to weaken
+   * the server check but to LISTEN to it: `eligible_now` means the invoice has
+   * become preparable, so the honest response is to give the customer the
+   * review they would have had a minute earlier. They land on the real
+   * reminder, having seen it, and completion is then recorded with the full
+   * reminder evidence. Nothing bypasses review, and nobody is stranded.
+   *
+   * Used by the first attempt and by the retry, so both behave identically.
+   */
+  const completeWithoutReminder = useCallback(
+    async (payload: AddedInvoice) => {
+      const result = await recordStatus("completed", { invoice_id: payload.invoiceId });
+
+      if (result.ok) {
+        setAdded(payload);
+        setPendingCompletion(null);
+        setFailure(null);
+        setStep(4);
+        setBusy(false);
+        return;
+      }
+
+      if (result.eligibleNow) {
+        // The checkpoint arrived while we were here. prepareAndReview owns
+        // `busy` and moves to step 3 on success, or parks the invoice for
+        // retry — the same handling any eligible invoice gets.
+        setPendingCompletion(null);
+        await prepareAndReview(payload.invoiceId);
+        return;
+      }
+
+      // Recorded nothing. The invoice is real, so the form stays retired and
+      // the customer is offered the write again rather than a blank form.
+      setPendingCompletion(payload);
+      setFailure(result.message);
+      setBusy(false);
+    },
+    [recordStatus, prepareAndReview]
+  );
+
+  const retryCompletion = useCallback(async () => {
+    if (!pendingCompletion) return;
+    setBusy(true);
+    setFailure(null);
+    await completeWithoutReminder(pendingCompletion);
+  }, [pendingCompletion, completeWithoutReminder]);
+
+  /**
+   * The forward action from the "Invoice added" ending — NAVIGATION ONLY.
+   *
+   * By the time this screen renders, `completed` is already recorded. Pressing
+   * this decides nothing about the customer's setup; it only takes them to the
+   * invoice they just created.
+   */
+  const goToAddedInvoice = useCallback(() => {
+    if (!added) return;
+    const params = new URLSearchParams({ invoice: added.invoiceId });
+    router.push(`/dashboard/chasing?${params.toString()}`);
+    router.refresh();
+  }, [added, router]);
 
   const submitName = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -532,6 +697,35 @@ export function OnboardingFlow({
         }
       }
 
+      // ── WHICH ENDING THIS INVOICE EARNS ─────────────────────────────
+      //
+      // Asked of the INVOICE, using the same function the Prepare Reminder
+      // control and /api/reminders/prepare use, with `alreadySent` empty
+      // because the row was created a moment ago. So the flow follows the
+      // lifecycle rather than the lifecycle being bent to suit the flow.
+      //
+      // Preparing anyway would mean either a reminder_logs row for a
+      // checkpoint that has not been reached — premature work the daily job
+      // would then duplicate or skip — or invented preview content with
+      // nothing behind it. Both are worse than saying so.
+      const eligibility = prepareEligibility(
+        invoice.reminder_schedules ?? [],
+        invoice.reminders_sent ?? [],
+        invoice.due_date
+      );
+
+      if (!eligibility.schedule) {
+        setPendingInvoiceId(null);
+        // Records BEFORE showing anything. completeWithoutReminder owns the
+        // step, the busy flag and the failure message from here.
+        await completeWithoutReminder({
+          invoiceId: invoice.id,
+          dueDate: invoice.due_date,
+          eligibleFrom: eligibility.eligibleFrom ?? null,
+        });
+        return;
+      }
+
       // Hand straight to the shared preparation path, so the first attempt and
       // any later retry behave identically. Unconditional: it runs whether or
       // not the default-link write above succeeded.
@@ -567,7 +761,7 @@ export function OnboardingFlow({
         {visibleStep && (
           <ol className={styles.rail} aria-label="Setup progress">
             <li className={visibleStep >= 1 ? styles.railOn : styles.railOff}>Add invoice</li>
-            <li className={visibleStep >= 2 ? styles.railOn : styles.railOff}>Ready to review</li>
+            <li className={visibleStep >= 2 ? styles.railOn : styles.railOff}>{secondStepLabel}</li>
           </ol>
         )}
 
@@ -625,6 +819,67 @@ export function OnboardingFlow({
               </button>
             </div>
           </form>
+        ) : step === 4 && added ? (
+          /*
+           * CASE B — the invoice is real, and nothing is due to be prepared
+           * yet. Deliberately small: the customer has not done anything wrong
+           * and must not be handed another full screen as a consolation.
+           *
+           * ── WHY IT DESCRIBES THE SCHEDULE RATHER THAN PROMISING AN ACTION ─
+           *
+           * The first version said "We'll prepare the SMS and the email on 6
+           * September, ready for you to review." That is an unconditional
+           * promise about a future action, and the action is conditional:
+           *
+           *   - the founding-beta allowance is finite, and at 10 / 10 the
+           *     Prepare Reminder control is already refused by
+           *     allowancePreflight — so a reminder the customer cannot act on
+           *     is not one we can promise them;
+           *   - the daily job also skips an invoice that has since been paid,
+           *     archived, or left without a deliverable customer email.
+           *
+           * None of that belongs on this screen, and spelling it out would put
+           * billing copy in front of someone who has just added their first
+           * invoice. The fix is not a disclaimer — it is to stop claiming
+           * something conditional. Both facts below are unconditional: the due
+           * date is the one they typed, and the checkpoint date is fixed
+           * arithmetic on the plan they chose (due date + SCHEDULE_DAY offset),
+           * stored on their invoice. Neither depends on anything happening.
+           *
+           * Nothing implies a message has been sent, because none has, and
+           * SMS and email are named together as one reminder — which is also
+           * exactly what one unit of the allowance is.
+           */
+          <div>
+            <p className={styles.eyebrow}>Step complete</p>
+            <h1 className={styles.title}>Invoice added</h1>
+            <p className={styles.sub}>
+              {!added.eligibleFrom ? (
+                // No remaining checkpoint at all. Says only what is certain.
+                <>It&rsquo;s due on {formatDate(added.dueDate)}.</>
+              ) : added.eligibleFrom === added.dueDate ? (
+                // The common case: the due date IS the first checkpoint.
+                // Written as one clause so the same date is not read twice.
+                <>
+                  It&rsquo;s due on {formatDate(added.dueDate)}, and that&rsquo;s when its
+                  first reminder — SMS and email — is scheduled.
+                </>
+              ) : (
+                <>
+                  It&rsquo;s due on {formatDate(added.dueDate)}. Its first reminder — SMS
+                  and email — is scheduled for {formatDate(added.eligibleFrom)}.
+                </>
+              )}
+            </p>
+
+            <div className={styles.actions}>
+              {/* Not disabled by `busy`, and it awaits nothing: onboarding is
+                  already recorded as completed by the time this renders. */}
+              <button type="button" className={styles.primary} onClick={goToAddedInvoice}>
+                Go to Active Chasing
+              </button>
+            </div>
+          </div>
         ) : step === 3 && preview ? (
           <ReminderReview
             preview={preview}
@@ -632,6 +887,40 @@ export function OnboardingFlow({
             onContinue={goToReminders}
             onLater={skip}
           />
+        ) : pendingCompletion ? (
+          /*
+           * The invoice saved; the completion write did not. Deliberately NOT
+           * the "Invoice added" screen — that screen states the setup is done,
+           * and it is not yet.
+           *
+           * The form is not offered again. It is blank, and a customer looking
+           * at a blank form after a failure reasonably re-enters the invoice
+           * they just created. The only forward action is the write that
+           * failed.
+           */
+          <div>
+            <h1 className={styles.title}>Your invoice is saved</h1>
+            <p className={styles.sub}>
+              Nothing needs adding again. We just couldn&rsquo;t finish saving your
+              setup — this is usually temporary.
+            </p>
+
+            <div className={styles.actions}>
+              <button
+                type="button"
+                className={styles.primary}
+                onClick={retryCompletion}
+                disabled={busy}
+              >
+                {busy ? "Finishing…" : "Try again"}
+              </button>
+              {/* Records `skipped`, which is true: they are choosing to leave
+                  setup unfinished. Their invoice stays exactly where it is. */}
+              <button type="button" className={styles.skip} onClick={skip} disabled={busy}>
+                Finish this later
+              </button>
+            </div>
+          </div>
         ) : pendingInvoiceId ? (
           // The invoice exists; its reminder does not yet. The form is retired
           // because re-submitting would create a second invoice for the same
@@ -672,7 +961,12 @@ export function OnboardingFlow({
                 again. */}
             <p className={styles.eyebrow}>Your account is ready</p>
             <h1 className={styles.title}>
-              Let&rsquo;s get your first overdue invoice ready.
+              {/* NOT "your first overdue invoice". The flow now accepts any
+                  real due date, so promising an overdue one in the heading
+                  would tell a customer with an invoice due next week that they
+                  are in the wrong place — the exact pressure this pass
+                  removed from the validator. */}
+              Let&rsquo;s get your first invoice ready.
             </h1>
             <p className={styles.sub}>
               {/* Plural, and symmetrical: the owner reviews an SMS and an
@@ -680,7 +974,7 @@ export function OnboardingFlow({
                   as the main one. Scoped to THESE reminders rather than stated
                   as a permanent product guarantee, because Auto mode is
                   planned and an absolute claim here would age badly. */}
-              Add your customer, what they owe and when it was due. ServiceSignal
+              Add your customer, what they owe and when it&rsquo;s due. ServiceSignal
               prepares the SMS and the email, and you review both before anything
               goes out. Takes about a minute.
             </p>

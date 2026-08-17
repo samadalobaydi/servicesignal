@@ -15,9 +15,7 @@
  */
 
 import type { InvoiceFormData, ReminderSchedule, ReminderTone } from "@/types";
-import { prepareEligibility } from "@/lib/reminder-schedule";
-import { formatDate } from "@/lib/invoices";
-import { parseAmount, checkOnboardingDueDate } from "@/lib/invoice-input";
+import { parseAmount, isValidIsoDate } from "@/lib/invoice-input";
 
 /**
  * A blank form. Its schedules deliberately match the Standard preset, so the
@@ -104,20 +102,29 @@ export type InvoiceFormErrors = Partial<Record<keyof InvoiceFormData, string>>;
 export const INVOICE_REFERENCE_MAX = 40;
 export const JOB_DESCRIPTION_MAX = 200;
 
+/**
+ * ── `requireReminderEligibility` HAS BEEN REMOVED ─────────────────────────
+ *
+ * It required the invoice's schedule to produce a reminder that could be
+ * prepared TODAY, and onboarding was the only caller. Its error read:
+ *
+ *   "This schedule's first reminder isn't due until 22 August. Pick an
+ *    earlier reminder day, or an invoice that's already due, so you can see
+ *    a reminder now."
+ *
+ * That is the product asking the customer to change real data — the invoice
+ * they chose, or the plan they wanted — so the flow could show itself off. A
+ * legitimate customer joining with an invoice due next week has done nothing
+ * wrong, and there is nothing to correct.
+ *
+ * The option is deleted rather than merely unset, so it cannot be switched
+ * back on without deliberately reintroducing it. Whether a reminder can be
+ * prepared right now is still a real question — it is simply asked AFTER the
+ * invoice is saved, by prepareEligibility(), and it decides which outcome
+ * screen the customer sees. It no longer decides whether their invoice is
+ * allowed to exist.
+ */
 export interface ValidateOptions {
-  /**
-   * Require that the schedule produces a reminder that can be prepared TODAY.
-   *
-   * Off by default, and that default matters. The dashboard's job is to record
-   * invoices, including ones due next month — demanding an immediately-eligible
-   * schedule there would reject ordinary, correct data and would be a genuine
-   * regression in existing behaviour.
-   *
-   * Onboarding turns it on, because its whole purpose is to walk someone to a
-   * reminder they can look at. Letting them finish with an invoice due in three
-   * weeks would end the flow on an empty queue and no explanation.
-   */
-  requireReminderEligibility?: boolean;
   /** Injectable for tests and for deterministic server-side checking. */
   today?: Date;
   /**
@@ -163,7 +170,10 @@ export function validateInvoiceForm(
   if (parseAmount(form.amount) === null)
     errors.amount = "Enter an amount greater than £0";
 
+  // Required, and a real calendar date — but NOTHING about where it sits
+  // relative to today. A due date in the future is ordinary, correct data.
   if (!form.due_date) errors.due_date = "Due date is required";
+  else if (!isValidIsoDate(form.due_date)) errors.due_date = "Enter a valid date as dd/mm/yyyy";
 
   if (form.reminder_schedules.length === 0)
     errors.reminder_schedules = "Pick at least one reminder";
@@ -182,18 +192,12 @@ export function validateInvoiceForm(
 
   // Onboarding-only requirements. Applied nowhere else, so the dashboard form
   // keeps accepting the invoices it always has.
+  //
+  // NOTE what is NOT here any more: a due-date restriction. Onboarding used to
+  // demand an already-overdue invoice so it could guarantee an immediate
+  // reminder preview. Both surfaces now accept any real due date, and the
+  // difference between them is only which fields are mandatory.
   if (options.requireOnboardingFields) {
-    // Onboarding needs an invoice that is ALREADY overdue: the flow ends on a
-    // prepared reminder, and a reminder only exists once a schedule checkpoint
-    // has been reached. Checked here so the message names the real problem
-    // rather than surfacing as an opaque eligibility failure later.
-    if (form.due_date && !errors.due_date) {
-      const problem = checkOnboardingDueDate(form.due_date);
-      if (problem === "invalid") errors.due_date = "Enter a valid date as dd/mm/yyyy";
-      else if (problem === "not_overdue")
-        errors.due_date = "Use an invoice that is already overdue, so you can see a real reminder now.";
-    }
-
     if (!form.invoice_reference.trim())
       errors.invoice_reference = "Invoice reference is required";
 
@@ -201,30 +205,6 @@ export function validateInvoiceForm(
       errors.customer_phone = "Mobile number is required";
     else if (!UK_MOBILE_PATTERN.test(form.customer_phone.trim()))
       errors.customer_phone = "Enter a valid mobile number";
-  }
-
-  // Only meaningful once the date and schedule are individually valid —
-  // otherwise this would stack a confusing second message under a field the
-  // user has not filled in yet.
-  if (
-    options.requireReminderEligibility &&
-    !errors.due_date &&
-    !errors.reminder_schedules
-  ) {
-    const eligibility = prepareEligibility(
-      form.reminder_schedules,
-      [],
-      form.due_date,
-      options.today
-    );
-    if (!eligibility.schedule) {
-      errors.reminder_schedules =
-        eligibility.blockedReason === "not_yet_due" && eligibility.eligibleFrom
-          ? `This schedule's first reminder isn't due until ${formatDate(
-              eligibility.eligibleFrom
-            )}. Pick an earlier reminder day, or an invoice that's already due, so you can see a reminder now.`
-          : "Pick at least one reminder";
-    }
   }
 
   return errors;

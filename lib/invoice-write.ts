@@ -49,18 +49,20 @@ export type InvoiceWriteResult =
 /**
  * Validates with the SAME module the browser used, then inserts.
  *
- * `requireReminderEligibility` is the route's decision. Onboarding sets it so
- * the flow cannot end on an invoice that produces no reviewable reminder; the
- * dashboard's ordinary path must never set it, because recording an invoice
- * due next month is legitimate and rejecting it would be a regression.
+ * `requireOnboardingFields` is the route's decision, and it now governs FIELDS
+ * only. A `requireReminderEligibility` option used to sit beside it and let
+ * onboarding refuse an invoice whose first reminder was not yet due; it has
+ * been removed, because recording an invoice due next month is legitimate on
+ * every surface. When the reminder becomes preparable is decided after the
+ * write, by prepareEligibility(), and it changes what the customer is shown —
+ * never whether their invoice may be saved.
  */
 export async function createInvoiceForUser(
   supabase: SupabaseClient,
   form: InvoiceFormData,
-  options: { requireReminderEligibility?: boolean; requireOnboardingFields?: boolean } = {}
+  options: { requireOnboardingFields?: boolean } = {}
 ): Promise<InvoiceWriteResult> {
   const errors = validateInvoiceForm(form, {
-    requireReminderEligibility: options.requireReminderEligibility,
     requireOnboardingFields: options.requireOnboardingFields,
   });
   if (Object.keys(errors).length > 0) {

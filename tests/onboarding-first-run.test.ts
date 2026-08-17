@@ -62,7 +62,7 @@ test("onboarding never asks for information the account already holds", () => {
   // that always rendered step 1 with the name pre-filled — which is a
   // confirmation screen for something nobody asked to confirm.
   assert.match(PAGE, /const needsBusinessName = isBusinessNameBlank\(businessName\)/);
-  assert.match(FLOW, /useState<1 \| 2 \| 3>\(needsBusinessName \? 1 : 2\)/,
+  assert.match(FLOW, /useState<1 \| 2 \| 3 \| 4>\(needsBusinessName \? 1 : 2\)/,
     "the flow must open on the invoice step when the name is known");
 
   // Email: displayed as a fact, never collected. No input may bind to it.
@@ -234,7 +234,7 @@ test("the two payload builders produce byte-identical inserts", () => {
   return createInvoiceForUser(
     fakeSupabase as never,
     form,
-    { requireReminderEligibility: true, requireOnboardingFields: true }
+    { requireOnboardingFields: true }
   ).then((result) => {
     assert.equal(result.ok, true, "the shared validator must accept this form");
     assert.ok(serverRow);
@@ -428,16 +428,27 @@ test("an unreadable onboarding status refuses the flow — including migration_a
 
   // No bypass anywhere else, either: the status PATCH is unconditional and
   // navigation happens only after it succeeds.
-  const finish = bodyOf(FLOW, "const finish = useCallback");
-  assert.equal(/recordProgress|skipStatus|dormant/i.test(finish), false,
+  //
+  // The PATCH now lives in recordStatus, which `finish` wraps — one writer,
+  // two callers. Both halves are checked.
+  const record = bodyOf(FLOW, "const recordStatus = useCallback");
+  assert.match(record, /\/api\/onboarding\/status/);
+  assert.match(record, /method: "PATCH"/);
+  assert.equal(/recordProgress|skipStatus|dormant/i.test(record), false,
     "there must be no switch that skips recording the outcome");
   assert.equal(/recordProgress/.test(PAGE), false);
-  const patch = finish.indexOf("/api/onboarding/status");
+  assert.match(record, /if \(!res\.ok\) \{[\s\S]{0,600}?ok: false/,
+    "a non-OK response must never be reported as recorded");
+
+  const finish = bodyOf(FLOW, "const finish = useCallback");
+  const call = finish.indexOf("await recordStatus(status, evidence)");
   const nav = finish.indexOf("router.push(destination)");
-  assert.ok(patch > -1 && nav > patch,
+  assert.ok(call > -1 && nav > call,
     "the flow may only leave AFTER the outcome is recorded");
-  assert.match(finish, /if \(!res\.ok\) \{[\s\S]{0,400}?return false;/,
+  assert.match(finish, /if \(!result\.ok\) \{[\s\S]{0,400}?return false;/,
     "a failed record must keep the user here with a message, never bounce them");
+  assert.equal(/\/api\/onboarding\/status/.test(finish), false,
+    "there must remain exactly one place that writes the status");
 });
 
 test("the dashboard gate is unchanged and still fails open", () => {
@@ -487,11 +498,15 @@ test("the onboarding surface uses the dashboard colour system", () => {
 test("the flow is two steps because two things happen", () => {
   assert.match(FLOW, /Step \{visibleStep\} of 2/);
   assert.match(FLOW, />Add invoice</);
-  assert.match(FLOW, />Ready to review</);
+  // The second label is DERIVED, because "Ready to review" is false when the
+  // invoice has no reachable checkpoint yet. See the dedicated test below.
+  assert.match(FLOW, /\{secondStepLabel\}</);
   // The business-name prerequisite and the retry screen are machinery and
   // must render no number — a flow that appears to be a different length for
   // different users, or that counts an error as progress, is worse than none.
-  assert.match(FLOW, /pendingInvoiceId \? null : step === 2 \? 1 : step === 3 \? 2 : null/);
+  // Neither retry state renders a number: a failure is not progress.
+  assert.match(FLOW, /pendingInvoiceId \|\| pendingCompletion\s*\?\s*null/);
+  assert.match(FLOW, /step === 3 \|\| step === 4\s*\?\s*2/);
   assert.equal(/Step 3 of|of 3/.test(FLOW), false, "no invented third step");
 });
 

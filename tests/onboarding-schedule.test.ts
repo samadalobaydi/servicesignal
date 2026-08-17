@@ -105,5 +105,25 @@ test("a not-yet-due invoice is never told a reminder is ready", () => {
   future.setUTCDate(future.getUTCDate() + 10);
   const plan = planFromDueDate(STANDARD, future.toISOString().slice(0, 10), TODAY);
   assert.equal(plan.now, null);
-  assert.match(describePlan(plan), /^First reminder at the due date\./);
+
+  // NOW AN ORDINARY CASE. Onboarding used to reject an invoice that was not
+  // already overdue, so this branch was defensive and named only the first
+  // checkpoint. A customer can now legitimately join with an invoice due next
+  // week, so the sentence has to be the WHOLE forward-looking plan.
+  const sentence = describePlan(plan);
+  assert.equal(
+    sentence,
+    "First reminder at the due date, then at 3 days overdue and 7 days overdue."
+  );
+  // The two claims that would be false.
+  assert.equal(/ready to review/i.test(sentence), false);
+  assert.equal(/sent/i.test(sentence), false);
+});
+
+test("a single remaining checkpoint reads as one sentence, not a list", () => {
+  const future = new Date(TODAY);
+  future.setUTCDate(future.getUTCDate() + 30);
+  const plan = planFromDueDate(["overdue_14_days"], future.toISOString().slice(0, 10), TODAY);
+  assert.equal(plan.now, null);
+  assert.equal(describePlan(plan), "First reminder at 14 days overdue.");
 });

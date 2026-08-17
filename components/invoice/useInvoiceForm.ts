@@ -13,8 +13,6 @@ import {
 } from "@/lib/invoice-form";
 
 export interface UseInvoiceFormOptions {
-  /** See ValidateOptions — off by default so the dashboard cannot regress. */
-  requireReminderEligibility?: boolean;
   /** Onboarding-only field requirements. Off by default, same reason. */
   requireOnboardingFields?: boolean;
   /** Starting values. Only the fields given are overlaid on the blank form. */
@@ -47,7 +45,7 @@ export interface InvoiceFormState {
  * so folding those in here would force it to opt out of its own container.
  */
 export function useInvoiceForm(options: UseInvoiceFormOptions = {}): InvoiceFormState {
-  const { requireReminderEligibility = false, requireOnboardingFields = false, initial } = options;
+  const { requireOnboardingFields = false, initial } = options;
 
   const build = useCallback(
     (): InvoiceFormData => ({ ...EMPTY_INVOICE_FORM, ...initial }),
@@ -123,13 +121,10 @@ export function useInvoiceForm(options: UseInvoiceFormOptions = {}): InvoiceForm
   }, []);
 
   const validateAndGet = useCallback((): InvoiceFormData | null => {
-    const found = validateInvoiceForm(form, {
-      requireReminderEligibility,
-      requireOnboardingFields,
-    });
+    const found = validateInvoiceForm(form, { requireOnboardingFields });
     setErrors(found);
     return Object.keys(found).length === 0 ? normaliseInvoiceForm(form) : null;
-  }, [form, requireReminderEligibility, requireOnboardingFields]);
+  }, [form, requireOnboardingFields]);
 
   return { form, errors, preset, setField, toggleSchedule, selectPreset, reset, validateAndGet };
 }
