@@ -300,11 +300,35 @@ export function SignupForm({
         // this fix exists to keep away from a new customer. replace() drops
         // the consumed page from the stack instead of stacking on top of it.
         //
-        // The DESTINATION is unchanged and still correct: the dashboard layout
-        // remains the single routing authority, sending "required" accounts to
-        // the onboarding flow and leaving everyone else in place. The defect
-        // was the navigation mechanism, not the target.
-        window.location.replace("/dashboard");
+        // ── WHY THE DESTINATION IS /onboarding, NOT /dashboard ───────
+        //
+        // RESTORED. This pushed /onboarding until 603dd3f, which changed it to
+        // /dashboard on the reasoning that the dashboard layout is "the single
+        // routing authority" and would forward a new account itself:
+        //
+        //     required → gate redirects to /onboarding
+        //     completed / exempt → stays on the dashboard
+        //
+        // The first line of that is an assumption about the LIVE DATABASE. The
+        // gate reads profiles.onboarding_status, and if that column is absent,
+        // unreadable, or holds anything but "required", getVerifiedContext
+        // returns a non-"ready" kind and shouldRedirectToOnboarding fails OPEN
+        // — correctly, because it must never trap anyone. The consequence is
+        // that a brand-new customer lands on an empty Overview, which is
+        // precisely what Preview testing found.
+        //
+        // Account creation is the ONE moment this code knows, first-hand and
+        // without asking the database anything, that the account is brand new:
+        // POST /api/beta/account has just returned success for it. Routing on
+        // that fact is deterministic. Routing on a column is not.
+        //
+        // The gate is unchanged and still does its job for every other entry
+        // into /dashboard. This is not a second authority over onboarding
+        // STATUS — it is the destination for one specific transition.
+        //
+        // The MECHANISM is untouched from 60480fe: still a full document
+        // navigation, still replace(). Only the target string differs.
+        window.location.replace("/onboarding");
         return;
       } catch {
         setError("We couldn't reach ServiceSignal. Please check your connection and try again.");

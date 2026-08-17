@@ -465,9 +465,13 @@ test("the dashboard gate is unchanged and still fails open", () => {
 
 test("the post-signup hard-navigation fix is intact", () => {
   const signup = code("components/auth/SignupForm.tsx");
-  assert.match(signup, /window\.location\.replace\("\/dashboard"\)/,
+  // The DESTINATION moved to /onboarding — see
+  // tests/fresh-account-onboarding-routing.test.ts. What this test protects is
+  // the mechanism: a full document navigation that replaces the spent /signup
+  // entry, never a soft push.
+  assert.match(signup, /window\.location\.replace\("\/onboarding"\)/,
     "the /#access regression fix is a hard navigation and must stay one");
-  assert.equal(/router\.(push|replace)\("\/dashboard"\)/.test(signup), false,
+  assert.equal(/router\.(push|replace)\("\/(dashboard|onboarding)"\)/.test(signup), false,
     "router.push + refresh is the race this fix removed");
 });
 

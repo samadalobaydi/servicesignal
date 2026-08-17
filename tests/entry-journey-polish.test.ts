@@ -121,7 +121,12 @@ test("account creation navigates hard, and never re-renders /signup", () => {
   // /signup has been spent, so leaving it in history means Back returns to a
   // continuation route with no cookie — which renders BetaAccessRequired, the
   // exact screen this whole fix exists to keep away from a new customer.
-  assert.match(success, /window\.location\.replace\("\/dashboard"\)/,
+  // DESTINATION CHANGED DELIBERATELY, mechanism unchanged. See
+  // tests/fresh-account-onboarding-routing.test.ts: routing a brand-new
+  // account through the dashboard made its first screen depend on
+  // profiles.onboarding_status being readable, and when it is not the gate
+  // fails open to an empty Overview. This test owns the MECHANISM.
+  assert.match(success, /window\.location\.replace\("\/onboarding"\)/,
     "success must be a full document navigation that replaces the consumed page");
   assert.equal(/window\.location\.assign\(/.test(success), false,
     "assign leaves the spent /signup entry directly behind /dashboard");
@@ -132,13 +137,13 @@ test("account creation navigates hard, and never re-renders /signup", () => {
   assert.equal(/router\.push\(/.test(success), false,
     "a soft push can race the auth cookies @supabase/ssr is still writing");
 
-  // The destination is unchanged: the dashboard gate still routes.
-  assert.equal(/replace\("\/onboarding"\)/.test(success), false,
-    "the dashboard remains the single routing authority");
+  // A fresh account must not pass through the dashboard on the way.
+  assert.equal(/replace\("\/dashboard"\)/.test(success), false,
+    "landing on Overview before onboarding is the regression this restores");
 
-  // The profile still exists before the gate reads it.
+  // The profile still exists before onboarding reads it.
   const profileIdx = form.indexOf('fetch("/api/profile"');
-  const navIdx = form.indexOf('window.location.replace("/dashboard")');
+  const navIdx = form.indexOf('window.location.replace("/onboarding")');
   assert.ok(profileIdx > -1 && navIdx > profileIdx);
 });
 

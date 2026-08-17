@@ -1,9 +1,9 @@
-import { redirect } from "next/navigation";
 import { getVerifiedContext, onboardingView, statusOf } from "@/lib/onboarding";
 import { isBusinessNameBlank } from "@/lib/business-name";
 import { OnboardingFlow } from "@/components/onboarding/OnboardingFlow";
 import { OnboardingAllSet } from "@/components/onboarding/OnboardingAllSet";
 import { OnboardingUnavailable } from "@/components/onboarding/OnboardingUnavailable";
+import { OnboardingAccountNotReady } from "@/components/onboarding/OnboardingAccountNotReady";
 
 export const metadata = { title: "Set up ServiceSignal" };
 
@@ -43,7 +43,13 @@ export const dynamic = "force-dynamic";
 export default async function OnboardingPage() {
   const context = await getVerifiedContext();
 
-  if (!context) redirect("/login?next=/onboarding");
+  // NOT redirect("/login?next=/onboarding").
+  //
+  // middleware already guarantees a session on this route, so /login would
+  // bounce straight back to /dashboard — see OnboardingAccountNotReady for the
+  // full loop. Explained rather than redirected, and no onboarding status is
+  // claimed, because none was read.
+  if (!context) return <OnboardingAccountNotReady />;
 
   const view = onboardingView(context);
 
