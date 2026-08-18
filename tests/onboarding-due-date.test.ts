@@ -251,11 +251,28 @@ test("preparation is attempted only when a checkpoint has been reached", () => {
 
 test("a future-dated invoice is never told a reminder is ready to review", () => {
   const added = FLOW.slice(FLOW.indexOf("step === 4 && added"));
-  const screen = added.slice(0, added.indexOf("step === 3 && preview"));
+  // Whitespace collapsed — JSX wraps sentences across lines.
+  const screen = added.slice(0, added.indexOf("step === 3 && preview")).replace(/\s+/g, " ");
 
   assert.match(screen, />Invoice added</);
   assert.match(screen, /formatDate\(added\.eligibleFrom\)/);
   assert.match(screen, /formatDate\(added\.dueDate\)/);
+
+  // The heading is the outcome, and it is stated ONCE. An eyebrow above it
+  // ("Step complete") labelled the same state a second time, and the rail
+  // already reads "Added".
+  assert.equal(/styles\.eyebrow/.test(screen), false,
+    "the added state must carry no eyebrow");
+  const headings = screen.match(/<h1 /g) ?? [];
+  assert.equal(headings.length, 1);
+
+  // The two sentences, exactly. "The same day" rather than the date repeated.
+  assert.match(screen,
+    /It&rsquo;s due on \{formatDate\(added\.dueDate\)\}\. Your first reminder is scheduled for the same day\./);
+  assert.match(screen,
+    /It&rsquo;s due on \{formatDate\(added\.dueDate\)\}\. Your first reminder is scheduled for \{formatDate\(added\.eligibleFrom\)\}\./);
+  // The two are chosen by comparing the dates, not by anything else.
+  assert.match(screen, /added\.eligibleFrom === added\.dueDate \?/);
 
   for (const lie of [
     /ready (to|for) review/i, /ready now/i, /we'?ve sent/i, /has been sent/i,
@@ -264,13 +281,22 @@ test("a future-dated invoice is never told a reminder is ready to review", () =>
     assert.equal(lie.test(screen), false, `the added state must not claim: ${lie}`);
   }
 
-  // Equal channels, still — named together, because one reminder IS the pair.
-  assert.match(screen, /SMS and email/);
+  // NOT re-explained here. The invoice step has already said ServiceSignal
+  // prepares both, with symmetrical wording; repeating it on the outcome
+  // screen re-teaches what a reminder is to someone who has just been told.
+  assert.equal(/SMS/.test(screen), false, "the added state must not re-list the channels");
+  assert.equal(/email/i.test(screen), false);
+
+  // So the equality guarantee is asserted where the claim is actually made.
+  assert.match(FLOW, /prepares the SMS and the email/);
 });
 
 test("the added state promises no future action ServiceSignal might not take", () => {
   const added = FLOW.slice(FLOW.indexOf("step === 4 && added"));
-  const screen = added.slice(0, added.indexOf("step === 3 && preview"));
+  // Whitespace collapsed: JSX wraps a sentence across lines, so "is scheduled"
+  // can arrive as "is\n  scheduled" and a literal match silently fails on a
+  // formatting change rather than a meaning change.
+  const screen = added.slice(0, added.indexOf("step === 3 && preview")).replace(/\s+/g, " ");
 
   // WHAT WENT WRONG: it said "We'll prepare the SMS and the email on 6
   // September, ready for you to review." Unconditional, and the action is

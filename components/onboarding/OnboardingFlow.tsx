@@ -851,25 +851,32 @@ export function OnboardingFlow({
            * exactly what one unit of the allowance is.
            */
           <div>
-            <p className={styles.eyebrow}>Step complete</p>
+            {/* NO EYEBROW. "Step complete" labelled the state twice — the rail
+                already reads "Added" — and the heading is the outcome. */}
             <h1 className={styles.title}>Invoice added</h1>
             <p className={styles.sub}>
               {!added.eligibleFrom ? (
                 // No remaining checkpoint at all. Says only what is certain.
                 <>It&rsquo;s due on {formatDate(added.dueDate)}.</>
               ) : added.eligibleFrom === added.dueDate ? (
-                // The common case: the due date IS the first checkpoint.
-                // Written as one clause so the same date is not read twice.
+                // The common case: the due date IS the first checkpoint. "The
+                // same day" rather than the date again, so it is not read twice.
                 <>
-                  It&rsquo;s due on {formatDate(added.dueDate)}, and that&rsquo;s when its
-                  first reminder — SMS and email — is scheduled.
+                  It&rsquo;s due on {formatDate(added.dueDate)}. Your first reminder is
+                  scheduled for the same day.
                 </>
               ) : (
                 <>
-                  It&rsquo;s due on {formatDate(added.dueDate)}. Its first reminder — SMS
-                  and email — is scheduled for {formatDate(added.eligibleFrom)}.
+                  It&rsquo;s due on {formatDate(added.dueDate)}. Your first reminder is
+                  scheduled for {formatDate(added.eligibleFrom)}.
                 </>
               )}
+              {/* NOT "SMS and email". The invoice step has already said
+                  ServiceSignal prepares both, and the channels are equal
+                  there — repeating it here re-explains what a reminder is to
+                  someone who has just been told. It also stays a statement
+                  about the SCHEDULE, which is fixed, rather than about what we
+                  will do, which is conditional. */}
             </p>
 
             <div className={styles.actions}>
