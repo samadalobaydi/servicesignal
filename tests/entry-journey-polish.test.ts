@@ -137,8 +137,12 @@ test("account creation navigates hard, and never re-renders /signup", () => {
   assert.equal(/router\.push\(/.test(success), false,
     "a soft push can race the auth cookies @supabase/ssr is still writing");
 
-  // A fresh account must not pass through the dashboard on the way.
-  assert.equal(/replace\("\/dashboard"\)/.test(success), false,
+  // A fresh account must not pass through the dashboard on the way. Scoped to
+  // the code AFTER the reconciled branch — an Auth user that already existed
+  // does go to /dashboard, deliberately, so "/dashboard" now appears in this
+  // handler and an unscoped check would prove nothing.
+  const fresh = success.slice(success.indexOf('window.location.replace("/onboarding")'));
+  assert.equal(/replace\("\/dashboard"\)/.test(fresh), false,
     "landing on Overview before onboarding is the regression this restores");
 
   // The profile still exists before onboarding reads it.

@@ -328,6 +328,35 @@ export function SignupForm({
         //
         // The MECHANISM is untouched from 60480fe: still a full document
         // navigation, still replace(). Only the target string differs.
+        //
+        // ── NEW ACCOUNT vs RECONCILED ACCOUNT ────────────────────────
+        //
+        // THE BUG THIS FIXES. /api/beta/account answers `reconciled: true`
+        // when admin.createUser reported the address is already registered —
+        // an EXISTING Auth user, not one created by this request. The route
+        // treats that as success (the desired end state is reached, and it is
+        // the correct backstop for a request that created the user but died
+        // before consuming its token), and the browser signs in normally.
+        //
+        // Routing that account to /onboarding sent an established customer
+        // into first-run setup, where it read their real status and answered
+        // "Your account is ready — there's nothing to set up". That screen is
+        // correct for the status; the destination was wrong.
+        //
+        // The distinction is the ROUTE'S, made server-side from what Supabase
+        // Auth actually did, and it is the only authority that can tell the
+        // two apart — by the time the browser has a session, a reconciled
+        // account and a new one look identical.
+        //
+        // Deliberately NOTHING is written for a reconciled account. Their
+        // onboarding_status is legitimate — completed, exempt or skipped — and
+        // stamping it `required` because they revisited signup would drag a
+        // long-standing customer back through first-run setup.
+        if (payload?.reconciled) {
+          window.location.replace("/dashboard");
+          return;
+        }
+
         window.location.replace("/onboarding");
         return;
       } catch {

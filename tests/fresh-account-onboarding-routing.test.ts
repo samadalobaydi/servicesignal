@@ -74,14 +74,100 @@ test("successful account creation navigates directly to /onboarding", () => {
   assert.match(creationBranch.slice(nav), /^window\.location\.replace\("\/onboarding"\);\s*return;/);
 });
 
+/**
+ * The genuinely-new-account path: everything AFTER the reconciled branch.
+ *
+ * SCOPED DELIBERATELY. A reconciled account — an Auth user that already
+ * existed, which /api/beta/account reports with `reconciled: true` — goes to
+ * /dashboard, so "/dashboard" legitimately appears in this handler now. An
+ * unscoped search would match that and prove nothing.
+ */
+const newAccountPath = (() => {
+  const guard = creationBranch.indexOf("if (payload?.reconciled) {");
+  assert.ok(guard > -1, "the new/reconciled distinction must exist");
+  const after = creationBranch.indexOf("}", creationBranch.indexOf('replace("/dashboard")', guard));
+  assert.ok(after > guard);
+  return creationBranch.slice(after);
+})();
+
 test("successful account creation does NOT land on the dashboard first", () => {
   // Landing on Overview before onboarding is the failure this restores.
-  assert.equal(/window\.location\.(replace|assign)\("\/dashboard"\)/.test(creationBranch), false,
-    "account creation must not route through the dashboard");
-  assert.equal(/router\.(push|replace)\("\/dashboard"\)/.test(creationBranch), false);
+  assert.equal(/window\.location\.(replace|assign)\("\/dashboard"\)/.test(newAccountPath), false,
+    "a genuinely new account must not route through the dashboard");
+  assert.equal(/router\.(push|replace)\("\/dashboard"\)/.test(newAccountPath), false);
+  assert.match(newAccountPath, /window\.location\.replace\("\/onboarding"\)/);
 
   // The EXISTING-account sign-in path is untouched and still uses `next`.
   assert.match(SIGNUP, /const next = searchParams\.get\("next"\) \?\? "\/dashboard";/);
+});
+
+test("a reconciled account is NOT sent into first-run onboarding", () => {
+  // THE OBSERVED FAILURE. /api/beta/account answers `reconciled: true` when
+  // createUser reported the address is already registered — an EXISTING Auth
+  // user. Routing that account to /onboarding showed an established customer
+  // "Your account is ready — there's nothing to set up", which is the correct
+  // reading of a real `exempt` status at the wrong destination.
+  const reconciled = creationBranch.slice(
+    creationBranch.indexOf("if (payload?.reconciled) {"),
+    creationBranch.indexOf('window.location.replace("/onboarding")')
+  );
+  assert.match(reconciled, /window\.location\.replace\("\/dashboard"\);\s*return;/);
+  assert.equal(/replace\("\/onboarding"\)/.test(reconciled), false,
+    "an existing account must not be sent to first-run setup");
+
+  // The guard comes BEFORE the onboarding navigation, so it cannot fall past.
+  const guardIdx = creationBranch.indexOf("if (payload?.reconciled)");
+  const onboardingIdx = creationBranch.indexOf('window.location.replace("/onboarding")');
+  assert.ok(guardIdx > -1 && onboardingIdx > guardIdx);
+
+  // Still a hard navigation, still replace, on BOTH paths.
+  assert.equal(/router\.(push|replace)\(/.test(creationBranch), false);
+  assert.equal(/window\.location\.assign\(/.test(creationBranch), false);
+});
+
+test("nothing writes onboarding_status during account creation", () => {
+  // NOT the fix. Stamping `required` from the account route would need a
+  // fourth writer, would have to run for reconciled users too unless guarded,
+  // and a mistake there turns a long-standing `completed` or `exempt` customer
+  // back into a first-run one. The state is already established three
+  // independent ways — see the required-state test below.
+  const route = code("app/api/beta/account/route.ts");
+  assert.equal(/onboarding_status/.test(route), false,
+    "the account-creation route must not write onboarding status");
+  assert.equal(/from\("profiles"\)/.test(route), false,
+    "profiles is created by exactly one path, and it is not this one");
+
+  // And the client writes none either — it only asks the canonical path to run.
+  assert.equal(/onboarding_status/.test(SIGNUP), false);
+  assert.match(SIGNUP, /await fetch\("\/api\/profile", \{ cache: "no-store" \}\)/);
+});
+
+test("a genuinely new account reaches `required` three independent ways", () => {
+  // 1. THE COLUMN DEFAULT. Migration 005 sets it after backfilling, so it
+  //    applies only to rows created from then on.
+  const migration = readFileSync(join(ROOT, "supabase/sql/005_onboarding_status.sql"), "utf8");
+  assert.match(migration, /alter column onboarding_status set default 'required'/);
+  //    …and `exempt` is written by exactly ONE statement in the whole system:
+  //    the backfill of rows that already existed when 005 ran. That is why a
+  //    profile reading `exempt` cannot have been created after the migration.
+  assert.match(migration, /set onboarding_status = 'exempt'\s*\n\s*where onboarding_status is null;/);
+
+  // 2. THE EXPLICIT WRITE, in the one place a profile is created.
+  const profile = code("app/api/profile/route.ts");
+  assert.match(profile, /\.update\(\{ onboarding_status: "required" \}\)/);
+  assert.match(profile, /\.insert\(seededBusinessName \? \{ business_name: seededBusinessName \} : \{\}\)/);
+  const inserts = profile.match(/\.insert\(/g) ?? [];
+  assert.equal(inserts.length, 1, "exactly one profile insert may exist");
+
+  // 3. THE READ ITSELF, for the window before that row exists.
+  assert.match(ONBOARDING_LIB,
+    /if \(!profile\) \{\s*return \{\s*kind: "ready",\s*user: verified,\s*status: "required",/);
+
+  // And the client forces (2) to run BEFORE navigating, so the gate never
+  // races a profile that does not exist yet.
+  const warm = SIGNUP.indexOf('fetch("/api/profile"');
+  const nav = SIGNUP.indexOf('window.location.replace("/onboarding")');
+  assert.ok(warm > -1 && nav > warm);
 });
 
 test("the hard-navigation fix survives the destination change", () => {
@@ -193,6 +279,32 @@ test("required still renders the flow, and completed/exempt still do not", () =>
   // And the flow still opens on the invoice step when the name is known.
   assert.match(code("components/onboarding/OnboardingFlow.tsx"),
     /useState<1 \| 2 \| 3 \| 4>\(needsBusinessName \? 1 : 2\)/);
+  assert.match(code("components/onboarding/OnboardingAllSet.tsx"),
+    /const finished = status === "completed";/);
+});
+
+test("a fresh account cannot render OnboardingAllSet, and terminal states stay terminal", () => {
+  // OnboardingAllSet is reachable ONLY from completed or exempt. A brand-new
+  // account is neither: `required` and `skipped` both render the flow.
+  assert.match(ONBOARDING_LIB,
+    /return context\.status === "required" \|\| context\.status === "skipped" \? "flow" : "all_set";/);
+  assert.match(PAGE, /if \(view === "all_set"\) return <OnboardingAllSet/);
+
+  // completed and exempt are terminal — nothing a client sends moves an
+  // account out of them, so a revisit to signup cannot reset one.
+  assert.match(ONBOARDING_LIB, /completed: \[\],\s*exempt: \[\],/);
+  // skipped is unchanged: it resumes, and it is idempotent.
+  assert.match(ONBOARDING_LIB, /skipped: \["skipped", "completed"\],/);
+  assert.match(ONBOARDING_LIB, /required: \["skipped", "completed"\],/);
+
+  // And only `skipped` or `completed` may ever be written by a client.
+  assert.match(code("app/api/onboarding/status/route.ts"),
+    /const WRITABLE: readonly OnboardingStatus\[\] = \["skipped", "completed"\];/);
+
+  // The two all-set wordings are still distinguished, which is what made the
+  // Preview screen diagnosable: "Your account is ready" is exempt, not
+  // completed — and exempt is only ever written by 005's backfill of rows that
+  // predate it.
   assert.match(code("components/onboarding/OnboardingAllSet.tsx"),
     /const finished = status === "completed";/);
 });
