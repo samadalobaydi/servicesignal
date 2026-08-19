@@ -42,17 +42,31 @@ interface AuthShellProps {
   children: React.ReactNode;
   footer?: React.ReactNode;
   /**
-   * Optional reassurance panel. When omitted — signup, forgot-password and
-   * reset-password — the centred-card layout below is used unchanged.
+   * Optional product panel. Used by /signup, where someone is deciding whether
+   * to start and the product still has to be explained.
    */
   aside?: React.ReactNode;
+  /**
+   * Single focused column — no panel, no card, no shadow.
+   *
+   * For /login. A returning customer has already been sold the product and is
+   * here to do one thing, so the page is deliberately simpler than signup: the
+   * same lockup, typography, inputs and button, on nothing but the page
+   * background.
+   *
+   * It reuses the SPLIT structure rather than the centred card below, because
+   * the card is a boxed panel with a border and a 40px shadow — the generic
+   * admin-login look. /forgot-password and /reset-password pass neither prop
+   * and keep that card exactly as it was.
+   */
+  focused?: boolean;
 }
 
-export function AuthShell({ children, footer, aside }: AuthShellProps) {
-  // ── Split layout: /login only ────────────────────────────────────────────
-  if (aside) {
+export function AuthShell({ children, footer, aside, focused = false }: AuthShellProps) {
+  // ── Column layouts: /signup (with panel) and /login (without) ────────────
+  if (aside || focused) {
     return (
-      <div className={split.root}>
+      <div className={aside ? split.root : `${split.root} ${split.rootSingle}`}>
         <div className={split.formCol}>
           <div className={split.formInner}>
             {/* The Landing Page 2.0 lockup: the mark asset plus real HTML

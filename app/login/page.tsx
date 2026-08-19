@@ -9,7 +9,6 @@ import {
   AuthShell, AuthHeading, AuthError, AuthInput, PasswordInput,
   SubmitButton, BRAND_BLUE,
 } from "@/components/auth/AuthShell";
-import { LoginAside } from "@/components/auth/LoginAside";
 import splitStyles from "@/components/auth/auth-split.module.css";
 
 function LoginForm() {
@@ -80,8 +79,22 @@ function LoginForm() {
   };
 
   return (
+    /*
+     * FOCUSED, not split.
+     *
+     * The navy panel that stood here explained what ServiceSignal does and
+     * showed an example approval queue. That belongs on /signup, where someone
+     * is deciding whether to start. A returning customer has already decided;
+     * re-pitching the product to them on the way in is noise, so it has been
+     * removed rather than rewritten, and nothing promotional replaces it.
+     *
+     * `focused` renders the SAME form column on its own — same lockup, same
+     * typography, same inputs, same button — so this page is simpler than
+     * signup without becoming a different visual language. Deliberately not
+     * the centred-card layout, which is a bordered box with a 40px shadow.
+     */
     <AuthShell
-      aside={<LoginAside />}
+      focused
       footer={
         <>
           {/* Account creation leads; returning to the landing page is a quieter

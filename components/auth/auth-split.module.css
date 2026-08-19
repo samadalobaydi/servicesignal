@@ -1,14 +1,20 @@
 /*
- * Split layout for the sign-in page only.
+ * Column layouts for the account pages.
  *
  * A CSS Module rather than an addition to app/globals.css: the class names
  * cannot collide with the .lp-*, .dash-* or .v2-* systems, and this work stays
  * in its own file instead of entangling with the substantial uncommitted
  * changes already sitting in globals.css.
  *
- * These rules only apply when AuthShell is given an `aside`: /login and
- * /signup. Forgot-password and reset-password pass none and keep the centred
- * card. Shared by two pages now, so a change here affects both.
+ * TWO LAYOUTS, ONE FORM COLUMN.
+ *
+ *   /signup  .root                — form column beside the product panel
+ *   /login   .root + .rootSingle  — the same form column, alone and centred
+ *
+ * /forgot-password and /reset-password pass neither and keep AuthShell's
+ * centred card. The form column itself is shared, so the lockup, heading,
+ * inputs, button and footer are identical on both pages by construction — the
+ * only difference is what sits beside them.
  */
 
 .root {
@@ -29,6 +35,32 @@
   width: 100%;
   max-width: 440px;
   margin-inline: auto;
+}
+
+/* ── Focused single column: /login ────────────────────────────────────────
+ *
+ * A returning customer does not need the product explained again, so the navy
+ * panel is gone rather than rewritten — and nothing promotional replaces it.
+ *
+ * Deliberately NOT a card. No border, no shadow, no panel: the form sits
+ * directly on the page, which is what keeps this from reading as a generic
+ * boxed admin login. Everything inside is the shared form column, so the
+ * typography, inputs and button are unchanged.
+ *
+ * Only three things differ from the split layout: one column at every width,
+ * a slightly wider measure (460px, within the 440–480 range and enough for the
+ * label/"Forgot your password?" row to breathe), and no bottom-margin lift —
+ * that lift exists solely to align the form with a panel headline that no
+ * longer exists here.
+ */
+.rootSingle {
+  grid-template-columns: 1fr;
+}
+.rootSingle .formCol {
+  padding: 3rem 1.5rem 3.5rem;
+}
+.rootSingle .formInner {
+  max-width: 460px;
 }
 
 /* AuthHeading ships a Tailwind mb-7 (1.75rem). Scoped to this layout only, so
@@ -123,45 +155,10 @@
   max-width: 46ch;
 }
 
-.points {
-  margin: 1.9rem 0 0 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 1.05rem;
-}
-.point {
-  display: flex;
-  gap: 0.7rem;
-  align-items: flex-start;
-}
-.tick {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 19px;
-  height: 19px;
-  margin-top: 1px;
-  border-radius: 999px;
-  background: rgba(122, 162, 245, 0.18);
-  color: #7ba2f5;
-}
-.pointTitle {
-  display: block;
-  font-weight: 650;
-  font-size: 0.88rem;
-  line-height: 1.35;
-  color: #ffffff;
-}
-.pointLine {
-  display: block;
-  margin-top: 0.15rem;
-  color: #93a3ba;
-  font-size: 0.82rem;
-  line-height: 1.5;
-  max-width: 40ch;
-}
+/* .points / .point / .tick / .pointTitle / .pointLine were LoginAside's three
+   reassurance bullets. That panel has been removed rather than rewritten, and
+   SignupAside uses its own .journey list, so these rules had no remaining
+   consumer and are deleted with the component. */
 
 /* ── Product artefact: approval-queue preview ─────────────────────────────
    One card padding rather than per-section padding, and exactly one divider.
@@ -314,6 +311,17 @@
        panel headline. Nothing moves independently. */
     margin-bottom: 4.5rem;
   }
+  /* One column at every width, and no lift: there is no panel headline to
+     align with, so raising the form would just push it off centre. */
+  .rootSingle {
+    grid-template-columns: 1fr;
+  }
+  .rootSingle .formCol {
+    padding: 3rem 1.5rem 4rem;
+  }
+  .rootSingle .formInner {
+    margin-bottom: 0;
+  }
   .aside {
     display: flex;
     flex-direction: column;
@@ -332,6 +340,11 @@
 @media (min-width: 1280px) {
   .formCol {
     padding: 3rem 4.5rem;
+  }
+  /* The wide-screen padding above is there to hold the form away from the
+     panel edge. Alone and centred, the measure does that on its own. */
+  .rootSingle .formCol {
+    padding: 3rem 1.5rem 4rem;
   }
   .aside {
     padding: 3rem 4rem;
@@ -352,6 +365,11 @@
 @media (max-width: 480px) {
   .formCol {
     padding: 1.75rem 1.15rem 2.25rem;
+  }
+  /* Naturally single-column already — it never had a second one. The only
+     change is a little more room at the top now that nothing follows it. */
+  .rootSingle .formCol {
+    padding: 2.25rem 1.15rem 2.75rem;
   }
   .lockupMark {
     height: 29px;
