@@ -4,7 +4,9 @@ import { join } from "path";
 import {
   EmailLayout,
   EmailHeader,
+  EmailBrandHeader,
   EmailFooter,
+  BrandFooter,
   PrimaryButton,
   ContentSection,
   HelperText,
@@ -50,20 +52,48 @@ function ConfirmSignupTemplate() {
   );
 }
 
+/**
+ * The password-recovery email.
+ *
+ * ── WHY THIS ONE DIFFERS FROM ConfirmSignupTemplate ABOVE ────────────────
+ *
+ * It was built with EmailHeader and EmailFooter, which put a 220px
+ * servicesignal-auth-logo.png and the retired "AUTOMATED INVOICE CHASING FOR
+ * UK BUSINESSES." tagline above the content, and a support address, website
+ * link and copyright line below it. Neither belongs on a security email:
+ *
+ *   - the tagline is a claim the approval-first product no longer makes, and
+ *     it was removed from the auth pages for the same reason;
+ *   - the logo treatment is a marketing lockup, not a transactional one;
+ *   - every extra link in the footer is one more thing a recipient has to
+ *     evaluate while deciding whether the message is genuine. A reset email
+ *     should contain exactly ONE actionable thing.
+ *
+ * EmailBrandHeader is the same small mark-plus-live-text lockup the sending
+ * emails already use (BetaAccessEmail, WelcomeEmail), so this now matches the
+ * mail ServiceSignal actually sends rather than an older presentation.
+ *
+ * ── THE TOKEN IS UNTOUCHED ───────────────────────────────────────────────
+ *
+ * {{ .ConfirmationURL }} is passed as a literal string to PrimaryButton's
+ * href and appears exactly once in the output. Nothing here parses, rebuilds,
+ * appends to or re-encodes it — the URL Supabase supplies is authoritative,
+ * and generate() below refuses to write the file if it is missing.
+ */
 function ResetPasswordTemplate() {
   return (
     <EmailLayout previewText="Reset your ServiceSignal password.">
-      <EmailHeader />
+      <EmailBrandHeader marginBottom={20} />
       <ContentSection heading="Reset your password">
-        We received a request to reset your ServiceSignal password. Follow the button below
-        to choose a new one.
+        We received a request to reset the password for your ServiceSignal account.
+        Use the button below to choose a new password.
       </ContentSection>
       <PrimaryButton href={CONFIRMATION_URL_TOKEN}>Reset password</PrimaryButton>
       <HelperText center>
-        If you didn&apos;t request this, you can safely ignore this email — your password
-        will not be changed.
+        If you didn&apos;t request this, you can safely ignore this email. Your password
+        won&apos;t change unless you use the reset link.
       </HelperText>
-      <EmailFooter />
+      <BrandFooter />
     </EmailLayout>
   );
 }
