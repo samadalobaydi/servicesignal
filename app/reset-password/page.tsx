@@ -77,20 +77,30 @@ function ResetPasswordForm() {
     setLoading(false);
   };
 
+  /*
+   * FOCUSED, like /login and /forgot-password. See the note on the sibling
+   * page: this replaces AuthShell's centred card and its oversized retired-
+   * tagline logo, reusing the mode built for /login rather than adding a
+   * fourth presentation. Nothing about the reset itself changed.
+   */
   if (done) {
     return (
-      <AuthShell>
-        <div className="text-center py-4">
-          <div className="w-14 h-14 rounded-full mx-auto mb-5 flex items-center justify-center" style={{ background: "#ecfdf5", border: "2px solid #059669" }}>
+      <AuthShell
+        focused
+        footer={
+          <p className="text-sm" style={{ color: "#64748b" }}>
+            <Link href="/login" style={{ color: BRAND_BLUE, fontWeight: 600 }}>Go to sign in →</Link>
+          </p>
+        }
+      >
+        <div>
+          <div className="w-14 h-14 rounded-full mb-5 flex items-center justify-center" style={{ background: "#ecfdf5", border: "2px solid #059669" }}>
             <svg width="24" height="24" fill="none" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" stroke="#059669" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </div>
-          <h1 style={{ fontSize: "1.35rem", fontWeight: 700, color: "#0f172a" }}>Password updated</h1>
-          <p className="text-sm mt-2" style={{ color: "#64748b", lineHeight: 1.6 }}>
+          <h1 style={{ fontSize: "1.55rem", fontWeight: 700, color: "#0f172a", letterSpacing: "-0.02em" }}>Password updated</h1>
+          <p className="text-sm mt-1.5" style={{ color: "#64748b", lineHeight: 1.55 }}>
             Your password has been changed successfully. You can now sign in with your new password.
           </p>
-          <Link href="/login" className="inline-block mt-6 text-sm" style={{ color: BRAND_BLUE, fontWeight: 600 }}>
-            Go to sign in →
-          </Link>
         </div>
       </AuthShell>
     );
@@ -98,6 +108,7 @@ function ResetPasswordForm() {
 
   return (
     <AuthShell
+      focused
       footer={
         <p className="text-sm" style={{ color: "#64748b" }}>
           Link expired?{" "}

@@ -163,16 +163,18 @@ test("authentication, routing and session handling are untouched", () => {
   assert.match(LOGIN, /useEffect\(\(\) => \{\s*const stored = readSignupPrefill\(\)\?\.email;/);
 });
 
-test("the other auth pages keep the centred card exactly as it was", () => {
-  // They pass neither prop, so they fall through to the card branch.
-  for (const page of ["app/forgot-password/page.tsx", "app/reset-password/page.tsx"]) {
-    const src = code(page);
-    assert.equal(/aside=|focused/.test(src), false, `${page} must keep the card`);
-    assert.match(src, /<AuthShell/);
-  }
-  assert.match(SHELL, /maxWidth: 530,/);
-  assert.match(SHELL, /boxShadow: "0 12px 40px rgba\(15, 23, 42, 0\.08\)"/);
-  assert.match(SHELL, /focused = false/, "the card must remain the default");
+test("the focused mode is shared, and /login is not special-cased", () => {
+  // /forgot-password and /reset-password now use the SAME mode — see
+  // tests/auth-layout-consistency.test.ts. What matters here is that /login
+  // gained nothing bespoke in the process: no per-page class, no override.
+  // No bespoke LAYOUT hook. splitStyles is used for the shared footer classes,
+  // which /signup uses identically — that is reuse, not a special case.
+  assert.equal(/rootSingle|loginOnly|formInner|formCol/.test(LOGIN), false,
+    "/login must reach the layout through AuthShell alone");
+  const splitUses = Array.from(LOGIN.matchAll(/splitStyles\.(\w+)/g)).map((m) => m[1]);
+  assert.deepEqual(Array.from(new Set(splitUses)).sort(), ["footerPrimary", "footerSecondary"]);
+  assert.match(SHELL, /focused = false/,
+    "focused must stay opt-in, so a new page cannot acquire it by accident");
 });
 
 test("no orphaned auth component is left behind", () => {

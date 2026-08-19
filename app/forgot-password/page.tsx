@@ -37,21 +37,47 @@ export default function ForgotPasswordPage() {
     setLoading(false);
   };
 
+  /*
+   * FOCUSED, like /login.
+   *
+   * Both states previously fell through to AuthShell's centred-card branch,
+   * which renders the oversized servicesignal-auth-logo.png — a stacked lockup
+   * carrying the retired "AUTOMATED INVOICE CHASING FOR UK BUSINESSES" tagline
+   * — above a bordered, shadowed box. Beside the new sign-in page that read as
+   * a different product.
+   *
+   * `focused` is the mode built for /login: the same small mark-plus-wordmark
+   * lockup, the same ~460px measure, no card. Reused rather than reimplemented,
+   * so these three pages cannot drift apart, and /login is untouched.
+   *
+   * Left-aligned, not centred. The success state used `text-center`, which sat
+   * a centred block under a left-aligned lockup. Nothing else about it changed:
+   * same icon, same copy, same destination.
+   */
   if (sent) {
     return (
-      <AuthShell>
-        <div className="text-center py-4">
-          <div className="w-14 h-14 rounded-full mx-auto mb-5 flex items-center justify-center" style={{ background: "#ecfdf5", border: "2px solid #059669" }}>
+      <AuthShell
+        focused
+        footer={
+          <p className="text-sm" style={{ color: "#64748b" }}>
+            <Link href="/login" style={{ color: BRAND_BLUE, fontWeight: 600 }}>Back to sign in →</Link>
+          </p>
+        }
+      >
+        <div>
+          <div className="w-14 h-14 rounded-full mb-5 flex items-center justify-center" style={{ background: "#ecfdf5", border: "2px solid #059669" }}>
             <svg width="24" height="24" fill="none" viewBox="0 0 24 24"><path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke="#059669" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </div>
-          <h1 style={{ fontSize: "1.35rem", fontWeight: 700, color: "#0f172a" }}>Check your inbox</h1>
-          <p className="text-sm mt-2" style={{ color: "#64748b", lineHeight: 1.6 }}>
+          {/* Matches AuthHeading's scale so "Check your inbox" and "Reset your
+              password" are the same size — they are alternate states of one
+              page. AuthHeading itself is not used here because this subtitle
+              contains the address as markup, and its `subtitle` prop is a
+              string. */}
+          <h1 style={{ fontSize: "1.55rem", fontWeight: 700, color: "#0f172a", letterSpacing: "-0.02em" }}>Check your inbox</h1>
+          <p className="text-sm mt-1.5" style={{ color: "#64748b", lineHeight: 1.55 }}>
             If an account exists for <span style={{ fontWeight: 600, color: "#0f172a" }}>{email}</span>,
             we&apos;ve sent a link to reset your password.
           </p>
-          <Link href="/login" className="inline-block mt-6 text-sm" style={{ color: BRAND_BLUE, fontWeight: 600 }}>
-            Back to sign in →
-          </Link>
         </div>
       </AuthShell>
     );
@@ -59,6 +85,7 @@ export default function ForgotPasswordPage() {
 
   return (
     <AuthShell
+      focused
       footer={
         <p className="text-sm" style={{ color: "#64748b" }}>
           Remembered it?{" "}
