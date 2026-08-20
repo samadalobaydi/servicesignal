@@ -153,7 +153,11 @@ test("the retired tagline and the oversized auth logo are gone", () => {
 test("the footer is the product name and nothing more", () => {
   assert.equal(HTML.includes("support@servicesignal.app"), false,
     "a support address is another thing to evaluate on a phishing-shaped email");
-  assert.equal(HTML.includes("www.servicesignal.app"), false);
+  // A LINK to the website, not the string — the brand mark's src legitimately
+  // contains www.servicesignal.app now that assets use the canonical origin.
+  // The earlier substring check conflated the two and failed on the image.
+  assert.equal(/href="https:\/\/(www\.)?servicesignal\.app\/?"/.test(HTML), false,
+    "the footer must carry no website link");
   assert.equal(/Need help\?/.test(HTML), false);
   assert.equal(/©/.test(HTML), false);
 
@@ -184,6 +188,45 @@ test("it renders in the ServiceSignal palette at an email-safe width", () => {
   for (const src of HTML.match(/src="([^"]+)"/g) ?? []) {
     assert.match(src, /src="https:\/\//, `${src} must be an absolute URL`);
   }
+});
+
+test("every email asset is served from the canonical origin, with no redirect", () => {
+  // MEASURED, not assumed. Against the live site:
+  //
+  //   https://servicesignal.app/branding/servicesignal-mark.png
+  //     → 308 redirect
+  //   https://www.servicesignal.app/branding/servicesignal-mark.png
+  //     → 200 image/png
+  //
+  // The apex is a redirect to the origin, not the origin. A mail client — or
+  // the sandboxed dashboard preview that surfaced this — fetches an <img>
+  // directly, and a cross-origin redirect is the hop those fetches are least
+  // willing to follow. Absolute is therefore not sufficient; it has to be
+  // CANONICAL, or the image silently breaks again.
+  const CANONICAL = "https://www.servicesignal.app";
+
+  const sources = Array.from(HTML.matchAll(/src="([^"]+)"/g)).map((m) => m[1]);
+  assert.ok(sources.length > 0, "the email must carry the brand mark");
+  for (const src of sources) {
+    assert.ok(src.startsWith(`${CANONICAL}/`),
+      `${src} must be served from ${CANONICAL} — the apex 308s`);
+  }
+
+  // The apex must not appear anywhere, in any attribute. A negative lookahead
+  // rather than a plain substring test, because the canonical origin CONTAINS
+  // the apex as a suffix — "https://www.servicesignal.app".includes(
+  // "servicesignal.app") is true, so a naive check can never pass.
+  assert.equal(/https:\/\/(?!www\.)servicesignal\.app/.test(HTML), false,
+    "the redirecting apex must not appear in the generated email");
+
+  // And the single shared constant both templates render from.
+  //
+  // Strips WHOLE comment lines only. A bare /\/\/.*$/ also matched the "//"
+  // inside "https://", truncating the very value under test to `"https:` and
+  // failing for a reason that had nothing to do with the assertion.
+  const theme = read("emails/theme.ts").replace(/^\s*\/\/.*$/gm, "");
+  assert.match(theme, /assetsBaseUrl:\s*"https:\/\/www\.servicesignal\.app",/);
+  assert.equal(/"https:\/\/(?!www\.)servicesignal\.app"/.test(theme), false);
 });
 
 test("the preview line is transactional", () => {
@@ -227,12 +270,61 @@ test("confirm-signup was left alone by this pass", () => {
   // entirely. It would need this same treatment before any public signup path
   // returns.
   assert.ok(CONFIRM_HTML.includes("AUTOMATED INVOICE CHASING"),
-    "confirm-signup is untouched — it still has the old header");
+    "confirm-signup keeps the old header — it was not converted");
   assert.ok(CONFIRM_HTML.includes("servicesignal-auth-logo"));
   assert.match(GENERATOR, /function ConfirmSignupTemplate\(\)[\s\S]{0,600}<EmailHeader \/>/);
   assert.match(GENERATOR, /function ConfirmSignupTemplate\(\)[\s\S]{0,600}<EmailFooter \/>/);
   // And its own placeholder is intact.
   assert.equal((CONFIRM_HTML.match(/\{\{ \.ConfirmationURL \}\}/g) ?? []).length, 1);
+
+  // The ONE thing it legitimately inherits: the canonical asset origin. The
+  // generator writes both files from one shared constant, so a hostname fix
+  // necessarily reaches this file too — and it was pointing at the same
+  // redirecting apex, so leaving it behind would keep a known-broken URL.
+  assert.ok(CONFIRM_HTML.includes("https://www.servicesignal.app/branding/servicesignal-auth-logo.png"));
+  assert.equal(/https:\/\/(?!www\.)servicesignal\.app/.test(CONFIRM_HTML), false);
+
+  // ── AND NOTHING ELSE ────────────────────────────────────────────────
+  //
+  // "Only the hostname may change" is the actual contract, and until this was
+  // added nothing enforced it — a mutant that rewrote the CTA to "Verify now"
+  // regenerated cleanly and every test still passed. Its copy is pinned here
+  // so a future run of the generator cannot quietly edit an email that is out
+  // of scope for whatever pass is running.
+  for (const fragment of [
+    ">Confirm your email address<",
+    "Follow the button below to confirm this email address and finish setting up your ServiceSignal account.",
+    ">Confirm email address<",
+    "This link expires shortly and can only be used once.",
+    "Need help?",
+    "support@servicesignal.app",
+    "All rights reserved",
+  ]) {
+    assert.ok(CONFIRM_HTML.includes(fragment),
+      `confirm-signup lost "${fragment}" — this pass may change its hostname and nothing else`);
+  }
+});
+
+test("the shared brand header is what BetaAccessEmail and WelcomeEmail render", () => {
+  // The blast radius of emailTheme.assetsBaseUrl, asserted rather than
+  // asserted-about. These two are LIVE emails sent through Resend; the reset
+  // template is a static file pasted into Supabase. All three draw the mark
+  // from the same component and therefore the same constant.
+  for (const f of ["emails/templates/BetaAccessEmail.tsx", "emails/templates/WelcomeEmail.tsx"]) {
+    const src = read(f);
+    assert.match(src, /<EmailBrandHeader marginBottom=\{20\} \/>/, `${f} must render the shared header`);
+    assert.equal(/servicesignal-mark\.png|assetsBaseUrl|https:\/\/(www\.)?servicesignal\.app\/branding/.test(src), false,
+      `${f} must not hard-code an asset URL of its own`);
+  }
+
+  // One component owns the mark URL, and it builds it from the constant.
+  const header = read("emails/components/EmailBrandHeader.tsx");
+  assert.match(header, /src=\{`\$\{emailTheme\.assetsBaseUrl\}\/branding\/servicesignal-mark\.png`\}/);
+
+  const owners = ["emails/components/EmailBrandHeader.tsx", "emails/components/EmailHeader.tsx", "emails/theme.ts"];
+  for (const f of owners) {
+    assert.ok(read(f).includes("assetsBaseUrl"), `${f} is a known consumer of the constant`);
+  }
 });
 
 // ── Nothing in the auth path moved ─────────────────────────────────────────

@@ -51,7 +51,32 @@ export const emailTheme = {
     // environment the sending code happens to run in. This must always
     // be the real production origin, with no exception. Update if the
     // production domain ever changes.
-    "https://servicesignal.app",
+    //
+    // ── WHY www., AND WHY THE APEX WAS WRONG ──────────────────────────
+    //
+    // This read "https://servicesignal.app" and the brand mark rendered
+    // broken. Measured against the live site, not inferred:
+    //
+    //   https://servicesignal.app/branding/servicesignal-mark.png
+    //     → 308 redirect
+    //   https://www.servicesignal.app/branding/servicesignal-mark.png
+    //     → 200 image/png
+    //
+    // The apex is not the origin; it is a redirect to it. An <img> in an
+    // email is fetched by the mail client — or, in the case that surfaced
+    // this, by a sandboxed dashboard preview iframe — and a cross-origin
+    // redirect is exactly the hop those fetches are least willing to
+    // follow. Naming the canonical origin removes the hop entirely.
+    //
+    // BLAST RADIUS, stated plainly: this constant is consumed by
+    // EmailBrandHeader (BetaAccessEmail, WelcomeEmail and the static
+    // reset-password template), EmailHeader (the static confirm-signup
+    // template) and emailBanner. Every one of them was pointing at the
+    // redirecting apex, so every one of them is corrected by this line —
+    // and any future mistake in it would break all of them together.
+    // That is the cost of one shared constant, and it is the right
+    // trade: the alternative is the same hostname written in five places.
+    "https://www.servicesignal.app",
 } as const;
 
 // The Welcome email's dashboard CTA link now lives in lib/app-urls.ts
