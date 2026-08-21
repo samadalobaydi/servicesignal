@@ -276,9 +276,68 @@ export function getAppBaseUrl(): string {
   return PRODUCTION_ORIGIN;
 }
 
-/** The PKCE code-exchange callback. Optionally forwards a `next` destination. */
+/**
+ * The origin a PKCE code must be exchanged on.
+ *
+ * ── WHY THIS IS NOT getAppBaseUrl() ───────────────────────────────────────
+ *
+ * THE BUG. A password reset requested from a Vercel Preview arrived correctly,
+ * and clicking it landed on PRODUCTION with "This password reset link has
+ * expired or already been used".
+ *
+ * The link was wrong before Supabase ever saw it. getAppBaseUrl() begins with
+ * vercelPreviewOrigin(), which reads VERCEL_ENV, VERCEL_URL and
+ * PREVIEW_APP_URL — all deliberately server-only. In the browser Next inlines
+ * only NEXT_PUBLIC_* variables, so those three evaluate to `undefined`, the
+ * preview correction can never fire, and resolution falls through to
+ * NEXT_PUBLIC_APP_URL. That is one project-wide value naming production, and
+ * it is compiled into the client bundle as a literal:
+ *
+ *     let e = r.env.VERCEL_ENV;          // undefined in the browser
+ *     let t = "https://servicesignal.app";  // NEXT_PUBLIC_APP_URL, inlined
+ *
+ * So every Preview asked Supabase to send the customer to production.
+ *
+ * ── WHY window.location.origin IS THE CORRECT ANSWER, NOT A WORKAROUND ────
+ *
+ * PKCE stores its code_verifier in a cookie on the origin that STARTED the
+ * flow (createBrowserClient, lib/supabase-browser.ts). The exchange has to
+ * happen on that same origin or the cookie is never sent and
+ * exchangeCodeForSession fails with no verifier — which is exactly the
+ * "expired or already used" message, arrived at by a completely different
+ * cause. The browser's own origin is therefore not merely a good guess here;
+ * it is the ONLY value that can work.
+ *
+ * ── AND WHY IT IS NOT THE SPOOFING RISK THIS FILE GUARDS AGAINST ──────────
+ *
+ * The warning at the top of vercelPreviewOrigin() is about SERVER-rendered
+ * emails, where a request-derived origin (Host, X-Forwarded-Host, Origin)
+ * would let an attacker have someone else's token mailed to a host they
+ * control. Nothing of that shape applies here: this runs in the victim's own
+ * browser, on a page they are already looking at, and an attacker who can
+ * change window.location.origin already owns the page. The real control is
+ * Supabase's redirect allow-list, which rejects any origin not listed —
+ * server-side, where it cannot be bypassed.
+ *
+ * Server-side callers keep the existing resolution untouched.
+ */
+function getPkceExchangeOrigin(): string {
+  if (typeof window !== "undefined") return window.location.origin;
+  return getAppBaseUrl();
+}
+
+/**
+ * The PKCE code-exchange callback. Optionally forwards a `next` destination.
+ *
+ * SHARED WITH OAUTH — SocialButtons passes its own `next`. That is not a
+ * collision to work around: OAuth is the same PKCE flow with the same
+ * browser-held verifier, so it had the identical latent fault and takes the
+ * identical fix. It is dormant today only because ENABLED_OAUTH_PROVIDERS is
+ * empty, which means this correction lands before the first provider is
+ * switched on rather than after someone reports it.
+ */
 export function getAuthCallbackUrl(next?: string): string {
-  const base = `${getAppBaseUrl()}/auth/callback`;
+  const base = `${getPkceExchangeOrigin()}/auth/callback`;
   return next ? `${base}?next=${encodeURIComponent(next)}` : base;
 }
 
@@ -287,6 +346,11 @@ export function getAuthCallbackUrl(next?: string): string {
  * through /auth/callback (PKCE code exchange) rather than /reset-password
  * directly — recovery links carry the same ?code= as OAuth, and without
  * this hop updateUser() would run with no session, failing every time.
+ *
+ * Called from a client component, so it resolves to the browser's own origin
+ * — see getPkceExchangeOrigin. Supabase must have that origin in
+ * Authentication → URL Configuration → Redirect URLs, or it substitutes the
+ * Site URL and the customer lands on production again.
  */
 export function getResetPasswordRedirectUrl(): string {
   return getAuthCallbackUrl("/reset-password");
