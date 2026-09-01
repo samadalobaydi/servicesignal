@@ -358,6 +358,7 @@ export async function POST(request: NextRequest) {
           schedule,
           customerName: invoice.customer_name,
           senderName,
+          senderKind: identity.kind,
           amount: invoice.amount,
           dueDate: invoice.due_date,
           paymentLink: invoice.payment_link,

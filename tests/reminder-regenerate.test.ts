@@ -49,6 +49,16 @@ function resolvedSenderName(db: FakeApprovalDb): string {
   );
 }
 
+function resolvedSenderKind(db: FakeApprovalDb): "business" | "personal" | null {
+  return (
+    resolveSenderIdentity({
+      preference: db.senderIdentity,
+      businessName: db.businessName,
+      personalName: db.personalName,
+    })?.kind ?? null
+  );
+}
+
 function factsFor(db: FakeApprovalDb): ReminderFacts {
   const row = db.get();
   return {
@@ -56,6 +66,7 @@ function factsFor(db: FakeApprovalDb): ReminderFacts {
     schedule: row.schedule,
     customerName: row.invoice.customerName,
     senderName: resolvedSenderName(db),
+    senderKind: resolvedSenderKind(db),
     amount: row.invoice.amount,
     dueDate: row.invoice.dueDate,
     paymentLink: row.invoice.paymentLink,
@@ -93,7 +104,7 @@ function withStoredOriginals(
 async function tokenForCurrent(db: FakeApprovalDb): Promise<string> {
   const reminder = await db.loadReminder(REMINDER_ID);
   assert.ok(reminder);
-  const composed = composeReminderContent(reminder, resolvedSenderName(db), "owner@example.com");
+  const composed = composeReminderContent(reminder, resolvedSenderName(db), resolvedSenderKind(db), "owner@example.com");
   return issueReviewToken({ userId: OWNER, reminderId: REMINDER_ID, contentHash: composed.hash });
 }
 

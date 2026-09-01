@@ -62,17 +62,6 @@ export function todaysSchedule(
   return scheduleForDaysFromDue(daysFromDue(dueDateISO, today));
 }
 
-/** Human-readable description of a schedule, used in email copy. */
-export function scheduleTimingPhrase(schedule: ReminderSchedule): string {
-  switch (schedule) {
-    case "before_due_3_days": return "is due in 3 days";
-    case "due_today":         return "is due today";
-    case "overdue_3_days":    return "is now 3 days overdue";
-    case "overdue_7_days":    return "is now 7 days overdue";
-    case "overdue_14_days":   return "is now 14 days overdue";
-  }
-}
-
 /** Chronological order of all schedules, earliest first. */
 export const SCHEDULE_CHRONOLOGY: ReminderSchedule[] = [
   "before_due_3_days",

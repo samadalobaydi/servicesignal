@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
-import { getResendClient, REMINDER_FROM } from "@/lib/resend";
+import { getResendClient } from "@/lib/resend";
 import { getTwilioConfig, sendTwilioSms } from "@/lib/twilio";
 import { isAcceptedTwilioStatus } from "@/lib/twilio-send-state";
 import type {
@@ -541,7 +541,6 @@ export function makeApprovalDeps(
     allowance: makeAllowanceStore(userId),
     mailer,
     texter,
-    from: REMINDER_FROM,
     userId,
     userEmail,
     log: (level, message) => {

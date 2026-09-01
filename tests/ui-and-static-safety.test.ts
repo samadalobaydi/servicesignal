@@ -23,7 +23,8 @@ import {
   makeStoredReminder,
 } from "./support/fakes";
 import { retryReminderChannel } from "@/lib/reminder-approval";
-import { resolveSenderIdentity } from "@/lib/sender-identity";
+import { resolveSenderIdentity, reminderFromHeader } from "@/lib/sender-identity";
+import { REMINDER_FROM_ADDRESS } from "@/lib/resend";
 
 /**
  * SCENARIOS 46–50.
@@ -612,7 +613,16 @@ test("66. [static] every display resolution reads through the canonical resolver
     const code = stripComments(readFileSync(join(ROOT, file), "utf8"));
     assert.equal(/resolveBusinessName\(/.test(code), false,
       `${file} must not call the retired resolveBusinessName`);
-    assert.match(code, /resolveSenderIdentityForDisplay\(\{\s*preference:/, `${file} must read through the canonical resolver with an explicit preference`);
+    // Either canonical resolver is acceptable — resolveSenderIdentityForDisplay()
+    // when only the display string is needed, resolveSenderIdentity() directly
+    // when the caller also needs .kind (for SMS wording). What matters is that
+    // it is ONE of the two, called with an explicit `preference`, never a
+    // re-implemented fallback chain.
+    assert.match(
+      code,
+      /resolveSenderIdentity(ForDisplay)?\(\{\s*preference:/,
+      `${file} must read through a canonical resolver with an explicit preference`
+    );
   }
 });
 
@@ -631,4 +641,116 @@ test("66c. [static] the dormant Auto cron branch strict-resolves identity before
   assert.ok(sendIdx > -1, "the Auto branch must still call sendAndUpdateLog when it does run");
   assert.ok(gateIdx < sendIdx, "the strict identity gate must sit BEFORE the provider call");
   assert.match(autoBranch.slice(gateIdx, sendIdx), /if \(!identity\)/, "must refuse (not merely check) before proceeding");
+});
+
+test("66d. [static] the dormant Auto cron branch sends under the SAME resolved-identity From header as Approve/Retry, never the generic REMINDER_FROM", () => {
+  // The defect this guards: the branch built subject/body correctly from
+  // the resolved senderName, but dispatched via sendAndUpdateLog(), which
+  // hardcoded `from: REMINDER_FROM` ("ServiceSignal <...>") regardless — so
+  // a customer would see a body signed by the resolved identity under a
+  // From name that said "ServiceSignal". One coherent rule across every
+  // send path means this branch must build its From header the identical
+  // way lib/reminder-approval.ts does: reminderFromHeader(identity.senderName, ...).
+  const code = stripComments(readFileSync(join(ROOT, "app/api/cron/send-reminders/route.ts"), "utf8"));
+  const autoBranch = code.slice(code.indexOf("if (isAutoMode) {"));
+
+  assert.match(
+    autoBranch,
+    /from:\s*reminderFromHeader\(identity\.senderName,\s*REMINDER_FROM_ADDRESS\)/,
+    "the auto-send call must build its From header from the just-resolved strict identity"
+  );
+  assert.equal(/from:\s*REMINDER_FROM[,)]/.test(autoBranch), false,
+    "must never fall back to the generic REMINDER_FROM once an identity has been resolved");
+
+  const sendIdx = autoBranch.indexOf("sendAndUpdateLog(");
+  const fromIdx = autoBranch.indexOf("from: reminderFromHeader(");
+  assert.ok(fromIdx > sendIdx, "the resolved From header must be part of the sendAndUpdateLog() call itself");
+});
+
+// ── Cleanup pass: the stale generic ApprovalDeps.from dependency ───────────
+
+test("67. [static] ApprovalDeps declares no generic 'from' field — nothing to rediscover a hardcoded ServiceSignal value through", () => {
+  const approval = stripComments(readFileSync(join(ROOT, "lib/reminder-approval.ts"), "utf8"));
+  const ifaceStart = approval.indexOf("export interface ApprovalDeps {");
+  assert.ok(ifaceStart > -1, "ApprovalDeps must still exist");
+  const ifaceEnd = approval.indexOf("\n}", ifaceStart);
+  const iface = approval.slice(ifaceStart, ifaceEnd);
+  assert.equal(/^\s*from\s*:/m.test(iface), false,
+    "ApprovalDeps must not declare a from field — every send composes its own resolved-identity header instead");
+});
+
+test("67b. [static] makeApprovalDeps() sets no generic from default, and lib/resend.ts exports no generic REMINDER_FROM constant", () => {
+  const wiring = stripComments(readFileSync(join(ROOT, "lib/approval-wiring.ts"), "utf8"));
+  assert.equal(/from\s*:\s*REMINDER_FROM\b/.test(wiring), false,
+    "makeApprovalDeps must not default to a generic from value");
+  assert.equal(/import\s*\{[^}]*\bREMINDER_FROM\b[^_][^}]*\}\s*from\s*"@\/lib\/resend"/.test(wiring), false,
+    "the generic REMINDER_FROM constant must not even be imported here");
+
+  const resend = readFileSync(join(ROOT, "lib/resend.ts"), "utf8");
+  assert.equal(/export const REMINDER_FROM\s*=/.test(resend), false,
+    "lib/resend.ts must not export a generic ServiceSignal From constant for reminders");
+  assert.match(resend, /export const REMINDER_FROM_ADDRESS/,
+    "the address constant itself must still exist — only the generic display-name constant is gone");
+});
+
+// ── Owner-facing preview: no redundant identity, no raw transport address ──
+
+test("68. [static] no owner-facing preview surface renders the raw transport address", () => {
+  for (const file of [
+    "components/dashboard/ReminderReviewPanel.tsx",
+    "components/onboarding/ReminderReview.tsx",
+  ]) {
+    const code = readFileSync(join(ROOT, file), "utf8");
+    assert.equal(/reminders@servicesignal\.app/.test(code), false,
+      `${file} must never render the raw transport address as owner-facing text`);
+  }
+});
+
+test("69. [static] neither preview API builds its owner-facing 'delivered by' text from the send-time RFC-5322 header", () => {
+  // reminderFromHeader() composes the ACTUAL email header (identity + raw
+  // address) — correct for a send, but exactly the redundant, address-leaking
+  // text ("Buildscape Ltd · delivered by Buildscape Ltd <reminders@...>")
+  // when reused for a preview screen. Preview text must be a fixed platform
+  // label instead.
+  for (const file of [
+    "app/api/reminders/[id]/content/route.ts",
+    "app/api/onboarding/reminder-preview/route.ts",
+  ]) {
+    const code = readFileSync(join(ROOT, file), "utf8");
+    assert.equal(/deliveredBy:\s*reminderFromHeader\(/.test(code), false,
+      `${file} must not build owner-facing preview text from the send-time header builder`);
+    assert.match(code, /deliveredBy:\s*SENDER_DISPLAY_FALLBACK/,
+      `${file} must use the fixed platform label instead`);
+  }
+});
+
+// ── Transport domain vs. customer-facing identity ───────────────────────────
+
+test("70. the ServiceSignal transport domain still exists and still appears in the real send-time header — this is expected and acceptable", () => {
+  // The correct guarantee is narrower than "ServiceSignal never appears
+  // anywhere": ServiceSignal is not the customer-facing CHASING IDENTITY,
+  // but its domain may still be the sending infrastructure. This test locks
+  // down that the address itself is untouched by the identity-presentation
+  // fixes, so a future change cannot quietly also change infrastructure.
+  assert.equal(REMINDER_FROM_ADDRESS, "reminders@servicesignal.app");
+  const header = reminderFromHeader("Buildscape Ltd", REMINDER_FROM_ADDRESS);
+  assert.match(header, /<reminders@servicesignal\.app>$/, "the transport address is still the real send address");
+  assert.notEqual(header, "Buildscape Ltd", "but it is never presented AS the identity — only alongside it, in the header's address part");
+});
+
+// ── senderKind threaded consistently across the whole lifecycle ────────────
+
+test("71. [static] every real content-generation call site threads senderKind, not just senderName", () => {
+  const sites = [
+    "app/api/reminders/prepare/route.ts",
+    "lib/reminder-approval.ts",
+    "lib/reminder-regenerate.ts",
+    "lib/reminder-review.ts",
+    "app/api/reminders/[id]/content/route.ts",
+    "lib/invoice-lifecycle-db.ts",
+  ];
+  for (const file of sites) {
+    const code = readFileSync(join(ROOT, file), "utf8");
+    assert.match(code, /senderKind:/, `${file} must pass senderKind alongside senderName, so SMS wording is never guessed from the name string`);
+  }
 });

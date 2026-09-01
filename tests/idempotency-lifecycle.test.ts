@@ -53,7 +53,7 @@ test("31. repeated requests for the same active attempt compute the same key", a
   const db = new FakeApprovalDb();
   const reminder = await db.loadReminder(REMINDER_ID);
   assert.ok(reminder);
-  const composed = composeReminderContent(reminder, "Wilson Plumbing", "owner@example.com");
+  const composed = composeReminderContent(reminder, "Wilson Plumbing", "business", "owner@example.com");
 
   const a = idempotencyKeyFor(REMINDER_ID, composed.hash, 1);
   const b = idempotencyKeyFor(REMINDER_ID, composed.hash, 1);
@@ -146,10 +146,11 @@ test("34. changed content produces a different key", async () => {
   const reminder = await db.loadReminder(REMINDER_ID);
   assert.ok(reminder);
 
-  const original = composeReminderContent(reminder, "Wilson Plumbing", "owner@example.com");
+  const original = composeReminderContent(reminder, "Wilson Plumbing", "business", "owner@example.com");
   const changed = composeReminderContent(
     { ...reminder, invoice: { ...reminder.invoice, amount: 999 } },
     "Wilson Plumbing",
+    "business",
     "owner@example.com"
   );
 

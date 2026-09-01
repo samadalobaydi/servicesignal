@@ -244,6 +244,7 @@ export async function regenerateReminder(
     schedule: reminder.schedule,
     customerName: reminder.invoice.customerName,
     senderName,
+    senderKind: identity.kind,
     amount: reminder.invoice.amount,
     dueDate: reminder.invoice.dueDate,
     paymentLink: reminder.invoice.paymentLink,

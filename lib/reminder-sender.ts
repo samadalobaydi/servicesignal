@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getResendClient, REMINDER_FROM } from "@/lib/resend";
+import { getResendClient } from "@/lib/resend";
 import type { ReminderSchedule } from "@/types";
 
 /**
@@ -15,13 +15,22 @@ export async function sendAndUpdateLog(params: {
   logId: string;
   to: string;
   replyTo?: string;
+  /**
+   * The resolved sender identity's From header (reminderFromHeader() —
+   * lib/sender-identity.ts), built by the caller from the SAME strict
+   * identity it already resolved to reach this call. Never the generic
+   * REMINDER_FROM constant: this is the second real send path (alongside
+   * Approve/Retry), and a hardcoded "ServiceSignal" From here would
+   * contradict a body/subject that correctly names the resolved identity.
+   */
+  from: string;
   subject: string;
   html: string;
   text: string;
   invoiceId: string;
   schedule: ReminderSchedule;
 }): Promise<boolean> {
-  const { supabase, logId, to, replyTo, subject, html, text, invoiceId, schedule } = params;
+  const { supabase, logId, to, replyTo, from, subject, html, text, invoiceId, schedule } = params;
 
   const resend = getResendClient();
 
@@ -35,7 +44,7 @@ export async function sendAndUpdateLog(params: {
 
   try {
     const { error: sendError } = await resend.emails.send({
-      from: REMINDER_FROM,
+      from,
       to,
       replyTo,
       subject,

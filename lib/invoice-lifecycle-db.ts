@@ -5,7 +5,7 @@ import {
 } from "./invoice-lifecycle-service";
 import { CHANNEL_SELECT, type ChannelRow } from "./reminder-channel-store";
 import { generateReminderContent } from "./reminder-content";
-import { resolveSenderIdentityForDisplay } from "./sender-identity";
+import { resolveSenderIdentity, SENDER_DISPLAY_FALLBACK } from "./sender-identity";
 import type { Invoice } from "@/types";
 
 /**
@@ -89,17 +89,23 @@ export function makeLifecycleDb(supabase: SupabaseClient, admin: SupabaseClient 
         .eq("user_id", userId)
         .maybeSingle();
 
+      // Display/edit-refresh only — see the note in content/route.ts. Resolved
+      // directly (not via resolveSenderIdentityForDisplay()) so .kind is
+      // available too, for the same natural SMS wording every real send path
+      // uses — null only when there is no real identity behind the placeholder.
+      const identity = resolveSenderIdentity({
+        preference: profile?.sender_identity ?? null,
+        businessName: profile?.business_name,
+        personalName: profile?.personal_name,
+      });
+
       // The SAME generator the prepare path uses, fed the proposed values.
       const content = generateReminderContent({
         tone: (inv as { reminder_tone: Invoice["reminder_tone"] }).reminder_tone,
         schedule: (rem as { schedule: string }).schedule as Invoice["reminder_schedules"][number],
         customerName: patch.customer_name,
-        // Display/edit-refresh only — see the note in content/route.ts.
-        senderName: resolveSenderIdentityForDisplay({
-          preference: profile?.sender_identity ?? null,
-          businessName: profile?.business_name,
-          personalName: profile?.personal_name,
-        }),
+        senderName: identity?.senderName ?? SENDER_DISPLAY_FALLBACK,
+        senderKind: identity?.kind ?? null,
         amount: patch.amount,
         dueDate: patch.due_date,
         paymentLink: patch.payment_link || null,

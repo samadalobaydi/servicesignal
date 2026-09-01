@@ -157,16 +157,17 @@ function openingFactSentence(
       return `${lead} ${what} for ${amountStr}, due on ${dueStr}.`;
     case "due_today":
       return `${lead} ${what} for ${amountStr}, due today.`;
-    case "overdue": {
-      // Final states the age explicitly; the others keep it lighter. All
-      // three name the amount and the original due date, which is the
-      // evidence the recipient actually needs.
-      const age =
-        tone === "final"
-          ? ` and is now ${status.days} ${status.days === 1 ? "day" : "days"} overdue`
-          : "";
-      return `${lead} ${what} for ${amountStr}, which was due on ${dueStr}${age}.`;
-    }
+    case "overdue":
+      // The explicit due date, not a calculated day-count — "which was due
+      // on 25 Aug 2026", never "12 days overdue". A relative count is only
+      // ever as fresh as the moment it was generated; this reminder's
+      // content is composed once and stored (lib/reminder-content.ts) and
+      // may be read or approved well after that, so a day-count baked in at
+      // generation time can go stale or read as inconsistent. The explicit
+      // date is true for as long as the message exists. This applies to
+      // every tone alike — "final" is firmer through `lead` and the closing
+      // request, not through a bigger number.
+      return `${lead} ${what} for ${amountStr}, which was due on ${dueStr}.`;
   }
 }
 

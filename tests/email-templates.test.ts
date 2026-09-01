@@ -77,6 +77,27 @@ test("final tone overdue subject is distinct and still carries the identity", ()
   assert.match(subject, /Buildscape Ltd/);
 });
 
+// ── Date rule: explicit due date, never a calculated day-count ─────────────
+
+test("final-tone overdue body states the explicit due date, never a calculated day-count", () => {
+  const dueDate = isoDaysAgo(12);
+  const dueStr = formatDate(dueDate);
+  const { text } = base({ tone: "final", dueDate });
+  assert.match(text, new RegExp(`which was due on ${dueStr}\\.`), "must name the explicit due date");
+  assert.equal(/\d+ days? overdue/i.test(text), false, "must not append a calculated day-count");
+  assert.equal(/is now/i.test(text), false, "the old 'and is now N days overdue' clause must be gone");
+});
+
+test("every tone states the same explicit due date for the same overdue invoice", () => {
+  const dueDate = isoDaysAgo(5);
+  const dueStr = formatDate(dueDate);
+  for (const tone of ["friendly", "firm", "final"] as const) {
+    const { text } = base({ tone, dueDate });
+    assert.match(text, new RegExp(`due on ${dueStr}`), `${tone} must name the explicit due date`);
+    assert.equal(/\d+ days? (overdue|ago)/i.test(text), false, `${tone} must not use relative day-count wording`);
+  }
+});
+
 test("subject avoids spammy/aggressive wording", () => {
   const { subject } = base({ tone: "final", dueDate: "2020-01-01" });
   assert.equal(/urgent|act now|final notice!!!|warning/i.test(subject), false);

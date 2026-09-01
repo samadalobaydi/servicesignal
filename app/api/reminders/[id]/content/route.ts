@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServer } from "@/lib/supabase-server";
-import { resolveSenderIdentityForDisplay, reminderFromHeader } from "@/lib/sender-identity";
-import { REMINDER_FROM_ADDRESS } from "@/lib/resend";
+import { resolveSenderIdentity, SENDER_DISPLAY_FALLBACK } from "@/lib/sender-identity";
 import {
   currentContent,
   originalContent,
@@ -84,12 +83,16 @@ async function load(
 
   // Display/edit only — never a send gate, so a neutral placeholder (never
   // the account email) is acceptable here even though the real send path
-  // refuses outright when identity isn't resolvable.
-  const senderName = resolveSenderIdentityForDisplay({
+  // refuses outright when identity isn't resolvable. Resolved directly
+  // (not via resolveSenderIdentityForDisplay()) so senderKind is available
+  // too, for the same natural SMS wording every real send path uses — null
+  // only when there is no real identity behind the placeholder.
+  const identity = resolveSenderIdentity({
     preference: profile?.sender_identity ?? null,
     businessName: profile?.business_name,
     personalName: profile?.personal_name,
   });
+  const senderName = identity?.senderName ?? SENDER_DISPLAY_FALLBACK;
 
   return {
     reminderId: row.id,
@@ -102,6 +105,7 @@ async function load(
       schedule: row.schedule,
       customerName: row.invoices.customer_name,
       senderName,
+      senderKind: identity?.kind ?? null,
       amount: row.invoices.amount,
       dueDate: row.invoices.due_date,
       paymentLink: row.invoices.payment_link,
@@ -130,7 +134,12 @@ async function respond(
       email: {
         to: loaded.emailTo,
         from: loaded.facts.senderName,
-        deliveredBy: reminderFromHeader(loaded.facts.senderName, REMINDER_FROM_ADDRESS),
+        // A fixed platform-attribution label, never the raw transport
+        // address and never the identity name repeated — see
+        // reminderFromHeader() (lib/sender-identity.ts) for the ACTUAL
+        // RFC 5322 header, which is a send-time concern, not owner-facing
+        // preview text.
+        deliveredBy: SENDER_DISPLAY_FALLBACK,
         repliesTo: loaded.replyTo,
         subject: current.email.subject,
         body: current.email.body,

@@ -9,7 +9,9 @@ import { getTodayLondonDate } from "@/lib/date-status";
 import {
   resolveSenderIdentity,
   resolveSenderIdentityForDisplay,
+  reminderFromHeader,
 } from "@/lib/sender-identity";
+import { REMINDER_FROM_ADDRESS } from "@/lib/resend";
 import type { Invoice, Profile } from "@/types";
 
 interface RunSummary {
@@ -320,6 +322,9 @@ export async function GET(request: NextRequest) {
         logId: insertedLog.id,
         to: invoice.customer_email,
         replyTo: userEmailMap.get(invoice.user_id) || undefined,
+        // The same resolved identity just gated on above, in the same
+        // header shape Approve/Retry use — never the generic REMINDER_FROM.
+        from: reminderFromHeader(identity.senderName, REMINDER_FROM_ADDRESS),
         subject,
         html,
         text,

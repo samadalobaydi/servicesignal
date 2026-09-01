@@ -24,6 +24,7 @@ const FACTS: ReminderFacts = {
   schedule: "overdue_7_days",
   customerName: "Dave Morrison",
   senderName: "Oakfield Plumbing",
+  senderKind: "business",
   amount: 1240,
   dueDate: "2026-07-26", // 12 days before NOW
   paymentLink: null,
@@ -60,7 +61,7 @@ test("the SMS carries the invoice facts and identifies the business", () => {
   assert.match(body, /INV-1042/);
   assert.match(body, /bathroom leak repair/);
   assert.match(body, /£1,240(?!\.)/, "FACTS' £1,240 is a whole-pound amount — SMS drops the .00");
-  assert.match(body, /12 days overdue/);
+  assert.match(body, /was due on 26 Jul 2026/);
   assert.ok(body.length <= SMS_MAX_LENGTH, `length ${body.length} within bound`);
 });
 
@@ -69,7 +70,7 @@ test("the no-payment-link SMS matches the reviewed structure exactly", () => {
   assert.equal(
     body,
     "Hi Dave, this is Oakfield Plumbing. INV-1042 for bathroom leak repair, " +
-      "£1,240 is 12 days overdue. Please pay at your earliest convenience. " +
+      "£1,240 was due on 26 Jul 2026. Please pay at your earliest convenience. " +
       "Reply if you need payment details."
   );
 });
@@ -79,7 +80,7 @@ test("the payment-link SMS is concise and does not duplicate the email's extra s
   assert.equal(
     body,
     "Hi Dave, this is Oakfield Plumbing. INV-1042 for bathroom leak repair, " +
-      "£1,240 is 12 days overdue. Please pay here: https://pay.example.com/inv-1042"
+      "£1,240 was due on 26 Jul 2026. Please pay here: https://pay.example.com/inv-1042"
   );
   // No reply-for-details offer once a link exists — that sentence exists
   // only for the no-link case, and repeating it here would be exactly the
@@ -119,6 +120,7 @@ test("[audit] representative Stage B example: character/segment count, no-paymen
     schedule: "overdue_7_days" as const,
     customerName: "Sam Alobaydi",
     senderName: "Buildscape Ltd", // representative — see the identity report for why the real value could not be read
+    senderKind: "business" as const,
     amount: 1500,
     dueDate: "2026-08-18",
     paymentLink: null,
@@ -126,7 +128,7 @@ test("[audit] representative Stage B example: character/segment count, no-paymen
     jobDescription: null,
   };
   const body = buildReminderSms(stageB, new Date("2026-08-27T12:00:00Z"));
-  assert.equal(body.length, 144, `expected 144 chars, got ${body.length}: ${body}`);
+  assert.equal(body.length, 149, `expected 149 chars, got ${body.length}: ${body}`);
   // ≤160 GSM-7 chars → exactly 1 segment (the single-segment cap, not the
   // 153/segment concatenated rate — that only applies once this is exceeded).
   assert.ok(body.length <= 160, "target: this representative example fits a single GSM-7 segment");
@@ -138,6 +140,7 @@ test("[audit] representative Stage B example: character/segment count, with paym
     schedule: "overdue_7_days" as const,
     customerName: "Sam Alobaydi",
     senderName: "Buildscape Ltd",
+    senderKind: "business" as const,
     amount: 1500,
     dueDate: "2026-08-18",
     paymentLink: "https://pay.example.com/inv003",
@@ -145,7 +148,7 @@ test("[audit] representative Stage B example: character/segment count, with paym
     jobDescription: null,
   };
   const body = buildReminderSms(stageB, new Date("2026-08-27T12:00:00Z"));
-  assert.equal(body.length, 116, `expected 116 chars, got ${body.length}: ${body}`);
+  assert.equal(body.length, 121, `expected 121 chars, got ${body.length}: ${body}`);
   assert.ok(body.length <= 160, "this example fits a single GSM-7 segment");
 });
 
@@ -183,14 +186,13 @@ test("the SMS is written for SMS, not derived from the email", () => {
   assert.equal(/Thank you,|Thanks so much,|Regards,/.test(g.sms.body), false, "no email sign-off");
 });
 
-test("SMS timing is computed live, not from the schedule label", () => {
+test("SMS timing names the explicit due date, computed live — not a calculated day-count, not from the schedule label", () => {
   const yesterday = new Date(NOW);
   yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-  const body = buildReminderSms(
-    { ...FACTS, dueDate: yesterday.toISOString().slice(0, 10) },
-    NOW
-  );
-  assert.match(body, /was due yesterday/, "1 day overdue is not '1 days overdue'");
+  const dueDate = yesterday.toISOString().slice(0, 10);
+  const body = buildReminderSms({ ...FACTS, dueDate }, NOW);
+  assert.match(body, /was due on 6 Aug 2026/);
+  assert.equal(/\d+ days? overdue/i.test(body), false, "no calculated day-count in customer-facing SMS");
 });
 
 test("every tone produces a usable SMS in both payment states", () => {
@@ -201,6 +203,42 @@ test("every tone produces a usable SMS in both payment states", () => {
       assert.match(body, /Oakfield Plumbing/);
     }
   }
+});
+
+test("a business identity uses 'this is {name}' in the SMS", () => {
+  const g = generateReminderContent(FACTS, NOW); // FACTS.senderKind === "business"
+  assert.match(g.sms.body, /this is Oakfield Plumbing/);
+  assert.equal(/Oakfield Plumbing here/.test(g.sms.body), false, "must not use the personal phrasing for a business identity");
+});
+
+test("a personal identity uses natural '{name} here' wording in the SMS, resolved from senderKind — never guessed from the name string", () => {
+  const personalFacts: ReminderFacts = { ...FACTS, senderName: "Sam Alobaydi", senderKind: "personal" };
+  const g = generateReminderContent(personalFacts, NOW);
+
+  assert.match(g.sms.body, /Sam Alobaydi here/, "personal identity reads naturally, not 'this is Sam Alobaydi'");
+  assert.equal(/this is Sam Alobaydi/.test(g.sms.body), false, "must not use the business phrasing for a personal identity");
+  assert.equal(/Oakfield Plumbing/.test(g.sms.body), false, "no leftover business-identity wording");
+  assert.equal(/ServiceSignal/.test(g.sms.body), false, "ServiceSignal must never become the chasing identity");
+
+  // And the email agrees — one generation call, one senderName, both channels.
+  assert.match(g.email.subject, /Sam Alobaydi/);
+  assert.match(g.email.body, /Sam Alobaydi\s*$/, "sign-off uses the personal identity");
+});
+
+test("a business named after a person still gets the business phrasing — senderKind decides, not the shape of the name", () => {
+  // "Sam Alobaydi Plumbing" looks exactly like a personal name plus a word.
+  // Only the account's own business/personal PREFERENCE may decide the
+  // wording — never a heuristic over the string itself.
+  const trickyFacts: ReminderFacts = { ...FACTS, senderName: "Sam Alobaydi Plumbing", senderKind: "business" };
+  const g = generateReminderContent(trickyFacts, NOW);
+  assert.match(g.sms.body, /this is Sam Alobaydi Plumbing/);
+  assert.equal(/Sam Alobaydi Plumbing here/.test(g.sms.body), false);
+});
+
+test("SMS wording falls back to business-style phrasing when senderKind is null (a display-only placeholder with no real identity behind it)", () => {
+  const placeholderFacts: ReminderFacts = { ...FACTS, senderName: "ServiceSignal", senderKind: null };
+  const body = buildReminderSms(placeholderFacts, NOW);
+  assert.match(body, /this is ServiceSignal/);
 });
 
 // ── Payment link truthfulness, both channels ────────────────────────────────
@@ -294,16 +332,21 @@ test("the generated original survives every edit and is returned verbatim", () =
 });
 
 test("restore does not regenerate — a rolled-over due date cannot change it", () => {
-  const stored = storedFrom();
+  // Due in 5 days at generation time ("upcoming"), so a LIVE regeneration
+  // after the due date has passed would flip the wording from "is due on"
+  // to "was due on" — a divergence explicit-date wording still exposes,
+  // even though it no longer depends on a stale day-count.
+  const upcomingFacts: ReminderFacts = { ...FACTS, dueDate: "2026-08-12" };
+  const stored = storedFrom(upcomingFacts);
   const edited: StoredReminderContent = { ...stored, sms: withSmsEdit(stored.sms!, "custom") };
 
-  // Ten days pass. A regenerating restore would now say "22 days overdue".
+  // Ten days pass — the due date is now in the past.
   const later = new Date(NOW);
   later.setUTCDate(later.getUTCDate() + 10);
 
-  const restored = currentContent({ ...edited, sms: withSmsRestored(edited.sms!) }, FACTS, later);
+  const restored = currentContent({ ...edited, sms: withSmsRestored(edited.sms!) }, upcomingFacts, later);
   assert.equal(restored.sms.body, stored.sms!.generatedBody);
-  assert.match(restored.sms.body, /12 days overdue/, "the original wording is preserved");
+  assert.match(restored.sms.body, /is due on 12 Aug 2026/, "the original wording is preserved, not flipped to 'was due on'");
 });
 
 test("typing back to the original clears the edited flag", () => {

@@ -1,6 +1,7 @@
 import type { ReminderTone, ReminderSchedule } from "@/types";
+import type { SenderIdentityKind } from "./sender-identity";
 import { getInvoiceDueStatus } from "./date-status";
-import { formatCurrency } from "./invoices";
+import { formatCurrency, formatDate } from "./invoices";
 import { greetingName } from "./email-templates";
 
 /**
@@ -32,6 +33,8 @@ export interface BuildReminderSmsParams {
   customerName: string;
   /** The resolved customer-facing sender identity — business_name OR personal_name, whichever the account chose. Never the account's login/contact email. */
   senderName: string;
+  /** "business" or "personal" — picks the natural phrasing in openingPhrase(). NULL for a display-only placeholder with no real resolved identity; see lib/reminder-content.ts's ReminderFacts.senderKind. */
+  senderKind: SenderIdentityKind | null;
   amount: number;
   /** ISO date. */
   dueDate: string;
@@ -55,7 +58,7 @@ export const SMS_MAX_LENGTH = 480;
  * The single "what is owed and when" sentence — this is the SMS's second
  * sentence, after the greeting+identity line, not a mid-sentence fragment.
  *
- * The reference stands alone ("INV003 for £1,500 is 9 days overdue"), not
+ * The reference stands alone ("INV003 for £1,500 was due on 25 Aug 2026"), not
  * prefixed with "Invoice" — one fewer word costs nothing in clarity (the
  * reference format itself already reads as an invoice number) and every
  * character matters once a message is one GSM-7 unit from a second segment.
@@ -87,18 +90,26 @@ function formatCurrencyForSms(amount: number): string {
   return full.endsWith(".00") ? full.slice(0, -3) : full;
 }
 
-/** The timing clause, computed live from the due date — never from the label. */
+/**
+ * The timing clause. Names the explicit due date, never a calculated
+ * day-count — "was due on 25 Aug 2026", never "is 9 days overdue" or "was
+ * due yesterday". A relative count is only as fresh as the moment it was
+ * generated; this SMS is composed once and stored (lib/reminder-content.ts)
+ * and may be read well after that, so the explicit date is the only wording
+ * that stays true for as long as the message exists. `status.kind` still
+ * decides WHICH clause applies — that classification does not go stale
+ * because it is only ever used to pick a branch, never printed as a number.
+ */
 function timingPhrase(dueDate: string, now: Date): string {
   const status = getInvoiceDueStatus(dueDate, now);
+  const dueStr = formatDate(dueDate);
   switch (status.kind) {
     case "upcoming":
-      return "is due shortly";
+      return `is due on ${dueStr}`;
     case "due_today":
       return "is due today";
     case "overdue":
-      return status.days === 1
-        ? "was due yesterday"
-        : `is ${status.days} days overdue`;
+      return `was due on ${dueStr}`;
   }
 }
 
@@ -131,10 +142,28 @@ function paymentPhrase(tone: ReminderTone, paymentLink: string | null): string {
   }
 }
 
-/** Greeting AND identity in one sentence — SMS has no From header, so this is the only place the sender is named. */
-function openingPhrase(tone: ReminderTone, customerName: string, senderName: string): string {
+/**
+ * Greeting AND identity in one sentence — SMS has no From header, so this is
+ * the only place the sender is named.
+ *
+ * "this is {name}" reads naturally for a business ("this is Buildscape
+ * Ltd") but stiffly for a person ("this is Sam Alobaydi" — nobody
+ * introduces themselves that way over text). "{name} here" is the personal
+ * equivalent. The choice comes from the account's own resolved
+ * business/personal preference (senderKind), never guessed from the shape
+ * of senderName — a business can be named "Sam Alobaydi Plumbing" and a
+ * person can be named almost anything, so no heuristic over the string
+ * itself could tell these apart reliably.
+ */
+function openingPhrase(
+  tone: ReminderTone,
+  customerName: string,
+  senderName: string,
+  senderKind: SenderIdentityKind | null
+): string {
   const name = greetingName(customerName);
   const greet = tone === "final" ? `${name},` : `Hi ${name},`;
+  if (senderKind === "personal") return `${greet} ${senderName} here.`;
   return `${greet} this is ${senderName}.`;
 }
 
@@ -150,11 +179,11 @@ export function buildReminderSms(
   now: Date = new Date()
 ): string {
   const {
-    tone, customerName, senderName, amount, dueDate,
+    tone, customerName, senderName, senderKind, amount, dueDate,
     paymentLink = null, invoiceReference = null, jobDescription = null,
   } = params;
 
-  const opening = openingPhrase(tone, customerName, senderName);
+  const opening = openingPhrase(tone, customerName, senderName, senderKind);
   const timing = timingPhrase(dueDate, now);
   const money = formatCurrencyForSms(amount);
   const fact = factSentence(invoiceReference, jobDescription, money, timing);

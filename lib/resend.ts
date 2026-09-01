@@ -36,8 +36,14 @@ export function getResendClient(): Resend | null {
  */
 export const REMINDER_FROM_ADDRESS = "reminders@servicesignal.app";
 
-/** The generic, no-identity-resolved fallback. Prefer reminderFromHeader() (lib/sender-identity.ts) wherever a resolved sender identity is available. */
-export const REMINDER_FROM = `ServiceSignal <${REMINDER_FROM_ADDRESS}>`;
+// There is deliberately NO generic "ServiceSignal <...>" From constant for
+// reminder sends. Every reminder send path (Prepare/Approve/Retry/Regenerate,
+// and the dormant Auto cron path) must build its From header from a resolved
+// sender identity via reminderFromHeader() (lib/sender-identity.ts) — never
+// a hardcoded fallback that could silently ship "ServiceSignal" as the
+// customer-facing chasing identity. A stale REMINDER_FROM constant used to
+// sit in ApprovalDeps unread, and once did leak into the dormant Auto path's
+// actual send call; both were removed for exactly this reason.
 
 export const SUPPORT_ADDRESS = "support@servicesignal.app";
 export const SUPPORT_FROM = `ServiceSignal <${SUPPORT_ADDRESS}>`;

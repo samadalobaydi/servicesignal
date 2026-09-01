@@ -384,13 +384,15 @@ export async function freshToken(
     (await db.loadReminder(reminderId)) ?? (await db.loadReminder(REMINDER_ID));
   if (!reminder) throw new Error(`fixture reminder ${reminderId} is not loadable`);
 
+  const fixtureIdentity = resolveSenderIdentity({
+    preference: db.senderIdentity,
+    businessName: db.businessName,
+    personalName: db.personalName,
+  });
   const composed = composeReminderContent(
     reminder,
-    resolveSenderIdentity({
-      preference: db.senderIdentity,
-      businessName: db.businessName,
-      personalName: db.personalName,
-    })?.senderName ?? "ServiceSignal",
+    fixtureIdentity?.senderName ?? "ServiceSignal",
+    fixtureIdentity?.kind ?? null,
     userEmail
   );
 
@@ -626,7 +628,6 @@ export function makeDeps(
     texter: mailer instanceof FakeMailer ? mirroringTexter(mailer) : new FakeTexter(),
     channelDb: new FakeChannelDb(),
     allowance: new FakeAllowanceStore(),
-    from: "ServiceSignal <reminders@servicesignal.app>",
     userId: OWNER,
     userEmail: "owner@example.com",
     log: () => {},

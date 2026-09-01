@@ -8,6 +8,7 @@ import {
   senderIdentityMissingReason,
   missingSenderIdentityMessage,
   type SenderIdentityPreference,
+  type SenderIdentityKind,
 } from "./sender-identity";
 import { REMINDER_FROM_ADDRESS } from "./resend";
 import {
@@ -228,7 +229,6 @@ export interface ApprovalDeps {
   texter: Texter | null;
   /** Per-channel lifecycle on reminder_channel_messages. Required, same reason. */
   channelDb: ChannelDb;
-  from: string;
   userId: string;
   userEmail: string | null;
   now?: () => Date;
@@ -301,6 +301,7 @@ function refuse(
 export function composeReminderContent(
   reminder: ApprovalReminder,
   senderName: string,
+  senderKind: SenderIdentityKind | null,
   replyTo: string | null,
   now: Date = new Date()
 ): {
@@ -317,6 +318,7 @@ export function composeReminderContent(
     schedule: reminder.schedule,
     customerName: reminder.invoice.customerName,
     senderName,
+    senderKind,
     amount: reminder.invoice.amount,
     dueDate: reminder.invoice.dueDate,
     paymentLink: reminder.invoice.paymentLink,
@@ -815,6 +817,7 @@ export async function approveAndSendReminder(
   const { subject, html, text, smsBody, hash: currentHash } = composeReminderContent(
     reminder,
     senderName,
+    identity.kind,
     deps.userEmail
   );
 
@@ -1279,6 +1282,7 @@ export async function retryReminderChannel(
   const { subject, html, text, smsBody, hash } = composeReminderContent(
     reminder,
     senderName,
+    identity.kind,
     deps.userEmail
   );
 

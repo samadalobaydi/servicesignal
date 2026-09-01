@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import type { ReminderTone, ReminderSchedule } from "@/types";
+import type { SenderIdentityKind } from "./sender-identity";
 import { buildReminderEmail } from "./email-templates";
 import { buildReminderSms } from "./reminder-sms";
 
@@ -98,6 +99,17 @@ export interface ReminderFacts {
   customerName: string;
   /** The resolved customer-facing sender identity — business_name OR personal_name, whichever the account chose. Never the account's login/contact email. */
   senderName: string;
+  /**
+   * Which kind senderName is — "business" or "personal" — so SMS wording can
+   * read naturally for each ("this is Buildscape Ltd" vs "Sam Alobaydi
+   * here") without guessing from the string itself. NULL only when senderName
+   * is itself a display-only placeholder with no real resolved identity
+   * behind it (an unconfigured account being shown a preview) — never a
+   * license to guess; buildReminderSms() falls back to the business-style
+   * phrasing for null, which is what every caller already produced before
+   * this field existed.
+   */
+  senderKind: SenderIdentityKind | null;
   amount: number;
   dueDate: string;
   paymentLink?: string | null;

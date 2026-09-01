@@ -158,6 +158,12 @@ function sanitiseForHeader(value: string): string {
  * evaluated against the From address's domain, not this string, so this
  * cannot break deliverability or provider configuration; it only changes
  * what the recipient's mail client shows as the sender's name.
+ *
+ * DELIBERATELY NOT "{name} via ServiceSignal". The From name is the single
+ * most visible surface a customer sees — it is what their inbox list shows
+ * before they even open the message — so it is held to the same rule as the
+ * body and sign-off: the resolved identity, alone. ServiceSignal never
+ * appears inside it.
  */
 export function reminderFromHeader(senderName: string, fromAddress: string): string {
   const safeName = sanitiseForHeader(senderName);
@@ -169,5 +175,5 @@ export function reminderFromHeader(senderName: string, fromAddress: string): str
   const needsQuoting = /[",<>]/.test(safeName);
   const displayName = needsQuoting ? `"${safeName.replace(/"/g, '\\"')}"` : safeName;
 
-  return `${displayName} via ServiceSignal <${fromAddress}>`;
+  return `${displayName} <${fromAddress}>`;
 }

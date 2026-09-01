@@ -266,6 +266,11 @@ export async function loadReminderReview(
     schedule: reminder.schedule,
     customerName: invoice.customer_name,
     senderName,
+    // Display-only, same as senderName above — strictIdentity is resolved
+    // strictly (for identityDrifted) but reused here purely for wording;
+    // null (unconfigured) falls back to the business-style SMS phrasing,
+    // same as the display placeholder itself does.
+    senderKind: strictIdentity?.kind ?? null,
     amount: invoice.amount,
     dueDate: invoice.due_date,
     paymentLink: invoice.payment_link,

@@ -3,8 +3,7 @@ import { getSupabaseServer } from "@/lib/supabase-server";
 import { getVerifiedContext } from "@/lib/onboarding";
 import { isUuid } from "@/lib/onboarding-handoff";
 import { buildReminderEmail } from "@/lib/email-templates";
-import { resolveSenderIdentityForDisplay, reminderFromHeader } from "@/lib/sender-identity";
-import { REMINDER_FROM_ADDRESS } from "@/lib/resend";
+import { resolveSenderIdentityForDisplay, SENDER_DISPLAY_FALLBACK } from "@/lib/sender-identity";
 import type { ReminderSchedule, ReminderTone } from "@/types";
 
 /**
@@ -113,14 +112,14 @@ export async function GET(request: Request) {
   return NextResponse.json({
     success: true,
     reminderId: reminder.id,
-    // The REAL delivery model, not a flattering approximation. The message is
-    // sent from ServiceSignal's reminders address, with the resolved identity
-    // as the visible From display name — see reminderFromHeader() and the
-    // matching dispatchChannels() call in lib/reminder-approval.ts, which
-    // this must stay identical to. Reply-To is set per-send to the owner's
+    // A fixed platform-attribution label for the preview UI, never the raw
+    // transport address and never the identity name repeated. The ACTUAL
+    // send-time From header is built by reminderFromHeader() (see
+    // dispatchChannels() in lib/reminder-approval.ts) — a send-time
+    // concern, not preview text. Reply-To is set per-send to the owner's
     // account email (see approve/route.ts), so a customer replying reaches
     // the trade.
-    deliveredBy: reminderFromHeader(senderName, REMINDER_FROM_ADDRESS),
+    deliveredBy: SENDER_DISPLAY_FALLBACK,
     repliesTo: context.user.email,
     invoiceId: reminder.invoice_id,
     status: reminder.status,

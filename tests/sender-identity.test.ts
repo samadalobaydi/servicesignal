@@ -165,14 +165,21 @@ const ADDRESS = "reminders@servicesignal.app";
 test("reminderFromHeader builds an identity-aware display name around the fixed address", () => {
   assert.equal(
     reminderFromHeader("Buildscape Ltd", ADDRESS),
-    "Buildscape Ltd via ServiceSignal <reminders@servicesignal.app>"
+    "Buildscape Ltd <reminders@servicesignal.app>"
   );
+});
+
+test("reminderFromHeader never inserts ServiceSignal into a resolved identity's display name", () => {
+  // The From name is the single most visible customer-facing surface — an
+  // inbox list shows it before the message is even opened — so it is held
+  // to the same rule as the body and sign-off: the resolved identity alone.
+  assert.equal(/ServiceSignal/.test(reminderFromHeader("Buildscape Ltd", ADDRESS)), false);
 });
 
 test("reminderFromHeader works identically for a personal identity", () => {
   assert.equal(
     reminderFromHeader("Sam Alobaydi", ADDRESS),
-    "Sam Alobaydi via ServiceSignal <reminders@servicesignal.app>"
+    "Sam Alobaydi <reminders@servicesignal.app>"
   );
 });
 
@@ -183,7 +190,7 @@ test("reminderFromHeader never changes the underlying address — only the displ
 
 test("reminderFromHeader quotes a display name containing header-syntax characters", () => {
   const header = reminderFromHeader('Smith, Jones & Co', ADDRESS);
-  assert.match(header, /^"Smith, Jones & Co" via ServiceSignal <reminders@servicesignal\.app>$/);
+  assert.match(header, /^"Smith, Jones & Co" <reminders@servicesignal\.app>$/);
 });
 
 test("reminderFromHeader strips CR/LF — never allows header injection", () => {
