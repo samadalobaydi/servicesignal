@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { getTwilioConfig, fetchTwilioMessage } from "@/lib/twilio";
+import {
+  reconcileSmsChannels,
+  SMS_RECONCILE_STATUSES,
+  type SmsReconcileDb,
+  type SmsReconcileSummary,
+} from "@/lib/sms-reconcile";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { getResendClient } from "@/lib/resend";
 import { isAuthorisedCronRequest } from "@/lib/cron-auth";
@@ -55,6 +62,130 @@ function mapRow(row: {
 }
 
 const SELECT = "id, status, send_started_at, provider_message_id, provider_last_event";
+
+/**
+ * How many SMS channel rows one run may ask Twilio about.
+ *
+ * Deliberately modest: each is a separate HTTP call, and a cron that spends
+ * minutes polling is one that gets killed halfway through.
+ */
+const SMS_RECONCILE_LIMIT = 25;
+
+/**
+ * Phase 4 — SMS DELIVERY.
+ *
+ * ── WHY THIS IS A SEPARATE PASS AND NOT AN EXTENSION OF PHASES 1-3 ───────
+ *
+ * Those phases read reminder_logs, whose status answers "did anything reach the
+ * customer". SMS delivery is a per-CHANNEL question and lives on
+ * reminder_channel_messages, so it needs its own query, its own provider and
+ * its own classifier — Twilio's `sent` means "handed to the carrier, receipt
+ * pending", the opposite of Resend's.
+ *
+ * THE PARENT IS NEVER TOUCHED HERE. reminder_logs.status stays exactly where it
+ * is: a carrier rejection on one channel does not change whether the reminder
+ * as a whole reached the customer, and migration 011's dispatched-final trigger
+ * would refuse the write anyway. Only the child row moves.
+ *
+ * Nothing is ever written unless the outcome is CERTAIN — see
+ * lib/sms-reconcile.ts. In flight, unrecognised, and lookup-failed all leave
+ * the row alone for the next run.
+ */
+function makeSmsDb(admin: SupabaseClient): SmsReconcileDb {
+  return {
+    async listReconcilable(limit) {
+      const { data, error } = await admin
+        .from("reminder_channel_messages")
+        .select(
+          "id, status, provider_message_id, provider_last_event, send_attempt_count, last_reconciled_at"
+        )
+        .eq("channel", "sms")
+        // A READ filter — which rows are worth a Twilio call. The WRITE is
+        // guarded on the snapshot below, not on this set.
+        .in("status", SMS_RECONCILE_STATUSES as string[])
+        .not("provider_message_id", "is", null)
+        // Oldest-reconciled first, so a backlog drains rather than one slice of
+        // it being re-asked every run.
+        .order("last_reconciled_at", { ascending: true, nullsFirst: true })
+        .limit(limit);
+
+      if (error) throw new Error(error.message);
+
+      return (data ?? []).map((row) => ({
+        id: row.id as string,
+        status: row.status as string,
+        providerMessageId: row.provider_message_id as string,
+        providerLastEvent: (row.provider_last_event as string | null) ?? null,
+        sendAttemptCount: (row.send_attempt_count as number | null) ?? 0,
+        lastReconciledAt: (row.last_reconciled_at as string | null) ?? null,
+      }));
+    },
+
+    async applyIfUnchanged({ snapshot, patch }) {
+      // COMPARE-AND-SET against the exact row that was read. Every column of the
+      // snapshot is in the predicate; a broad `.in("status", …)` set is NOT a
+      // substitute, because it matches rows a concurrent run has already
+      // rewritten within the same status.
+      //
+      // `.is` rather than `.eq` for the nullable columns: in PostgREST `eq.null`
+      // compares with `= NULL`, which is never true, so a first-ever
+      // reconciliation would silently match nothing.
+      let query = admin
+        .from("reminder_channel_messages")
+        .update(patch)
+        .eq("id", snapshot.id)
+        .eq("status", snapshot.status)
+        .eq("provider_message_id", snapshot.providerMessageId)
+        .eq("send_attempt_count", snapshot.sendAttemptCount);
+
+      query =
+        snapshot.providerLastEvent === null
+          ? query.is("provider_last_event", null)
+          : query.eq("provider_last_event", snapshot.providerLastEvent);
+
+      query =
+        snapshot.lastReconciledAt === null
+          ? query.is("last_reconciled_at", null)
+          : query.eq("last_reconciled_at", snapshot.lastReconciledAt);
+
+      // `.select("id")` is what makes the zero-row case VISIBLE. Without it
+      // PostgREST returns no rows and no error, and a CAS that matched nothing
+      // is indistinguishable from one that succeeded.
+      const { data, error } = await query.select("id");
+
+      if (error) return { kind: "error", message: error.message };
+      return (data?.length ?? 0) > 0 ? { kind: "applied" } : { kind: "stale" };
+    },
+  };
+}
+
+async function reconcileSmsDelivery(
+  admin: SupabaseClient,
+  at: string
+): Promise<SmsReconcileSummary> {
+  const empty: SmsReconcileSummary = {
+    checked: 0,
+    delivered: 0,
+    undelivered: 0,
+    unresolved: 0,
+    stale: 0,
+    errors: 0,
+  };
+
+  const config = getTwilioConfig();
+  if (!config) return empty;
+
+  return reconcileSmsChannels(
+    {
+      db: makeSmsDb(admin),
+      provider: { lookup: (sid) => fetchTwilioMessage(config, sid) },
+      limit: SMS_RECONCILE_LIMIT,
+      log: (level, message) =>
+        level === "error" ? console.error(message) : console.warn(message),
+    },
+    at
+  );
+}
 
 /** Non-terminal provider events — the only ones phase 3 re-asks about. */
 const UNRESOLVED_EVENTS = ["queued", "scheduled", "delivery_delayed"];
@@ -188,9 +319,15 @@ export async function GET(request: NextRequest) {
       `stillUnknown=${summary.stillUnknown} errors=${summary.errors.length}`
   );
 
+  // Phase 4. Runs AFTER the parent phases and never touches reminder_logs, so
+  // it cannot interfere with them — a failure here leaves the email
+  // reconciliation results intact.
+  const sms = await reconcileSmsDelivery(admin, new Date().toISOString());
+
   return NextResponse.json({
     success: true,
     summary,
+    sms,
     staleAfterSeconds: SEND_LEASE_SECONDS,
     maxRowsPerRun: MAX_ROWS_PER_RUN,
   });

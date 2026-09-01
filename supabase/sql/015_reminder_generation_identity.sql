@@ -1,0 +1,79 @@
+-- =============================================================================
+-- Migration 015: reminder_logs.generated_sender_name
+-- =============================================================================
+--
+-- THE DEFECT THIS CLOSES
+--
+-- A reminder's stored subject/body (reminder_channel_messages) is written
+-- ONCE at preparation and never rewritten — see migration 010's comment on
+-- generated_subject/generated_body. The visible From header and the review
+-- hash, by contrast, are resolved FRESH on every Approve/Retry (migration
+-- 014's sender-identity work). If the account's sender_identity changes
+-- AFTER a reminder is prepared but before it is approved, the From header
+-- moves to the new identity while the stored subject/body — including the
+-- sign-off and footer — still read the old one. The dispatched email
+-- self-contradicts: "From: New Trading Name Ltd" over a body signed
+-- "Thank you, Buildscape Ltd". Reloading the review page does not fix this,
+-- because it re-mints a token from the CURRENT identity against the SAME
+-- frozen body, which makes the token valid while the mismatch ships anyway.
+--
+-- THE FIX
+--
+-- Record which identity produced the content that is now frozen, at the
+-- moment it is frozen, so Approve/Retry can compare it against the identity
+-- they just resolved fresh — and refuse, rather than merge the two — on any
+-- mismatch.
+--
+-- WHY reminder_logs, NOT reminder_channel_messages
+--
+-- generateReminderContent() is called ONCE per reminder and produces BOTH
+-- channels together from one set of facts (see lib/reminder-content.ts) —
+-- one identity, not two independently-timestamped ones. A single column on
+-- the parent avoids two channel rows ever being able to disagree about which
+-- identity produced them.
+--
+-- NULL MEANS
+--
+--   - a genuinely legacy reminder (no stored content at all) — never a
+--     drift risk, because currentContent() composes it live from the CURRENT
+--     identity on every read, so there is nothing frozen to drift from; OR
+--   - a non-legacy reminder prepared before this migration/code shipped —
+--     the identity that produced its stored content was never recorded.
+--
+-- lib/reminder-content.ts's identityHasDrifted() treats the second case as a
+-- MISMATCH by construction (a stored, non-legacy reminder with no known
+-- generation identity cannot be proven coherent, so the safe answer is to
+-- require a fresh preparation rather than assume agreement). This means any
+-- reminder already pending, failed, or partially-sent at the moment this
+-- ships will need to be dismissed and re-prepared before it can be approved
+-- — the correct, conservative failure mode, not a bug.
+--
+-- WHAT THIS DOES NOT COVER — SEE THE ENGINEERING REPORT
+--
+-- update_invoice_with_refresh() (migration 012) ALSO regenerates
+-- generated_subject/generated_body, on an invoice edit, entirely inside
+-- Postgres. This migration does not extend that function to also write
+-- generated_sender_name — doing so needs its own migration and its own
+-- review, and is called out as a separate, currently-unfixed gap.
+--
+-- =============================================================================
+
+alter table public.reminder_logs
+  add column if not exists generated_sender_name text null;
+
+comment on column public.reminder_logs.generated_sender_name is
+  'The resolved sender identity (business_name or personal_name) that produced the currently-stored reminder_channel_messages content. Written once, at the same moment that content is generated, and never rewritten by the application prepare path. NULL for legacy reminders (no stored content — always composed live, never stale) and for reminders that predate this column. Read by lib/reminder-approval.ts to refuse Approve/Retry when the freshly-resolved current identity no longer matches the identity the stored content was generated under, rather than dispatching a message whose From header and body disagree about who it is from.';
+
+-- =============================================================================
+-- ROLLBACK
+-- =============================================================================
+--
+-- Deploy application code that no longer reads generated_sender_name BEFORE
+-- rolling back the database, the same ordering migration 014's rollback
+-- note describes — otherwise every Approve/Retry selecting this column
+-- errors until the code catches up.
+--
+--   begin;
+--     alter table public.reminder_logs
+--       drop column if exists generated_sender_name;
+--   commit;

@@ -274,11 +274,13 @@ test("required still renders the flow, and completed/exempt still do not", () =>
     "a non-null assertion would hide exactly this mistake from the compiler");
 
   assert.match(PAGE, /if \(view === "all_set"\) return <OnboardingAllSet status=\{statusOf\(context\)\} \/>;/);
-  assert.match(PAGE, /needsBusinessName=\{needsBusinessName\}/);
+  assert.match(PAGE, /needsSenderIdentity=\{needsSenderIdentity\}/);
 
-  // And the flow still opens on the invoice step when the name is known.
+  // And the flow still opens on the invoice step when the identity choice
+  // is already known — gated on sender_identity, not business_name (see
+  // the sender-identity onboarding pass).
   assert.match(code("components/onboarding/OnboardingFlow.tsx"),
-    /useState<1 \| 2 \| 3 \| 4>\(needsBusinessName \? 1 : 2\)/);
+    /useState<1 \| 2 \| 3 \| 4>\(needsSenderIdentity \? 1 : 2\)/);
   assert.match(code("components/onboarding/OnboardingAllSet.tsx"),
     /const finished = status === "completed";/);
 });

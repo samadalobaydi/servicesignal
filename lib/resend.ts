@@ -34,7 +34,10 @@ export function getResendClient(): Resend | null {
  *   support@   — beta access, welcome, account and legal contact. Replies come
  *                to a monitored ServiceSignal mailbox.
  */
-export const REMINDER_FROM = "ServiceSignal <reminders@servicesignal.app>";
+export const REMINDER_FROM_ADDRESS = "reminders@servicesignal.app";
+
+/** The generic, no-identity-resolved fallback. Prefer reminderFromHeader() (lib/sender-identity.ts) wherever a resolved sender identity is available. */
+export const REMINDER_FROM = `ServiceSignal <${REMINDER_FROM_ADDRESS}>`;
 
 export const SUPPORT_ADDRESS = "support@servicesignal.app";
 export const SUPPORT_FROM = `ServiceSignal <${SUPPORT_ADDRESS}>`;

@@ -2702,6 +2702,20 @@ html { scroll-behavior: smooth; }
 }
 .ss-btn-destructive:hover:not(:disabled) { background: #b91c1c; }
 .ss-btn-destructive:disabled { opacity: 0.55; cursor: default; }
+
+/* ── Mark Paid confirmation ────────────────────────────────────────────────
+   A centred modal dialog (see ActiveChasingList.tsx), not an anchored
+   popover — an absolute-positioned panel anchored to the button ran off the
+   right edge of the viewport whenever Mark Paid sat mid-row on a real
+   dashboard width. The modal shell itself is plain Tailwind utility classes
+   inline in the component (matching NextStepModal's pattern), so it needs
+   no positioning rules here; only the inner text/action layout is shared. */
+.ss-markpaid-confirm-body {
+  font-size: 0.875rem; line-height: 1.5; color: var(--dash-text);
+}
+.ss-markpaid-confirm-actions {
+  display: flex; gap: 0.5rem; margin-top: 0.85rem;
+}
 .ss-btn-destructive:focus-visible { outline: 2px solid var(--dash-red); outline-offset: 2px; }
 
 @media (max-width: 640px) {

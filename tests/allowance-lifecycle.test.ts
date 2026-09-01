@@ -335,7 +335,7 @@ test("[static] the trigger covers the bulk paths that have no service layer", ()
   // immediately rather than waiting for the trigger. That is defence in depth
   // over the same rule, not a competing one — the trigger would delete the
   // same row moments later when the status write lands.
-  const approve = readFileSync(join(ROOT, "app/api/reminders/[id]/approve/route.ts"), "utf8");
+  const approve = readFileSync(join(ROOT, "lib/approval-wiring.ts"), "utf8");
   assert.match(approve, /release_reminder_allowance/);
   assert.match(approve, /p_reminder_log_id: reminderLogId/, "scoped to one reminder");
 });
@@ -450,7 +450,7 @@ test("[static] BYPASS #1 — the cap is not a caller-supplied parameter", () => 
 
   // And no caller passes it.
   for (const file of [
-    "app/api/reminders/[id]/approve/route.ts",
+    "lib/approval-wiring.ts",
     "app/api/cron/send-reminders/route.ts",
   ]) {
     const raw = readFileSync(join(ROOT, file), "utf8");
@@ -716,7 +716,7 @@ test("[static] the banner's read path is exactly what the grants permit", () => 
 });
 
 test("[static] the app calls the mutating RPCs with a service-role client", () => {
-  const approve = readFileSync(join(ROOT, "app/api/reminders/[id]/approve/route.ts"), "utf8");
+  const approve = readFileSync(join(ROOT, "lib/approval-wiring.ts"), "utf8");
   const cron = readFileSync(join(ROOT, "app/api/cron/send-reminders/route.ts"), "utf8");
 
   // authenticated no longer has EXECUTE, so a session client would 403.
@@ -736,8 +736,20 @@ test("[static] the app calls the mutating RPCs with a service-role client", () =
 
   // The user id is derived from the verified session, never from the body.
   assert.match(approve, /p_user_id: userId/);
-  assert.match(approve, /makeAllowanceStore\(user\.id\)/);
-  assert.match(approve, /await supabase\.auth\.getUser\(\)/);
+  assert.match(approve, /makeAllowanceStore\(userId\)/);
+
+  // getUser() now lives in the ROUTES — both of them. Asserted on each rather
+  // than on the wiring, so a route that forgot to verify the session before
+  // handing an id to makeApprovalDeps is caught.
+  for (const route of [
+    "app/api/reminders/[id]/approve/route.ts",
+    "app/api/reminders/[id]/channels/[channel]/retry/route.ts",
+  ]) {
+    const src = readFileSync(join(ROOT, route), "utf8");
+    assert.match(src, /await supabase\.auth\.getUser\(\)/, `${route} must verify the session`);
+    assert.match(src, /makeApprovalDeps\(supabase, user\.id, user\.email \?\? null\)/,
+      `${route} must pass the VERIFIED id, never one from the request`);
+  }
 
   // A missing service-role key fails closed rather than skipping the cap.
   assert.match(approve, /if \(!admin\) \{/);

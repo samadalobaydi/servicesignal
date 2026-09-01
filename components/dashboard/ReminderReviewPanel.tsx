@@ -5,10 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ReminderReviewData } from "@/lib/reminder-review";
 import { formatCurrency, formatDate } from "@/lib/invoices";
-import { approveReminder } from "@/lib/reminders";
+import { approveReminder, retryReminderChannel, regenerateReminder } from "@/lib/reminders";
+import { CHANNEL_LABEL } from "@/lib/reminder-aggregate";
 import { SEND_STATE_COPY } from "@/lib/reminder-send-state";
 import { ALLOWANCE_EXHAUSTED_STATE } from "@/lib/allowance-claim";
 import { FOUNDING_BETA_ALLOWANCE } from "@/lib/beta-allowance";
+import { useDashboard } from "./DashboardProvider";
+import { useRefetchBetaAllowance } from "./BetaAllowanceContext";
 
 /**
  * The review interface. The ONLY place a prepared reminder can be sent from.
@@ -41,6 +44,8 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 
 export function ReminderReviewPanel({ data }: { data: ReminderReviewData }) {
   const router = useRouter();
+  const { refetchAfterReminderAction } = useDashboard();
+  const refetchAllowance = useRefetchBetaAllowance();
 
   /**
    * `busy` is the client-side duplicate guard: the first click flips it and the
@@ -66,6 +71,67 @@ export function ReminderReviewPanel({ data }: { data: ReminderReviewData }) {
    * prepared SMS and email are still on the page below.
    */
   const [allowanceExhausted, setAllowanceExhausted] = useState(false);
+  /**
+   * Per-channel recovery state.
+   *
+   * Separate from `busy` because the two actions are different: `busy` guards
+   * approving the whole reminder, this guards resending ONE channel of a
+   * reminder that has already partly gone.
+   */
+  const [retrying, setRetrying] = useState(false);
+  const [retryMessage, setRetryMessage] = useState<string | null>(null);
+
+  /**
+   * Set when Approve/Retry refused with state "identity_drift" — the sender
+   * identity changed since this reminder's stored content was generated and
+   * "reload" cannot repair that (reloading re-reads the SAME frozen content).
+   * The only way forward is to regenerate it. Seeded from data.identityDrifted
+   * so the page can offer this BEFORE the owner ever clicks Approve, not only
+   * after a failed attempt.
+   */
+  const [identityDrifted, setIdentityDrifted] = useState(data.identityDrifted);
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenerateMessage, setRegenerateMessage] = useState<string | null>(null);
+
+  const onRegenerate = async () => {
+    if (regenerating) return;
+    setRegenerating(true);
+    setRegenerateMessage(null);
+
+    const result = await regenerateReminder(data.reminderId);
+
+    if (!result.success) {
+      setRegenerateMessage(result.message);
+      setRegenerating(false);
+      return;
+    }
+
+    // The page must re-read: subject, body, SMS body, and the review token
+    // are all now different — the stored content was just rewritten.
+    router.refresh();
+  };
+
+  const onRetryChannel = async () => {
+    if (retrying || !data.retryableChannel) return;
+    setRetrying(true);
+    setRetryMessage(null);
+
+    const result = await retryReminderChannel(data.reminderId, data.retryableChannel);
+
+    if (!result.success) {
+      setRetryMessage(result.message);
+      if (result.state === "identity_drift") setIdentityDrifted(true);
+      // Re-enable ONLY where another attempt is safe. After delivery_unknown
+      // the customer may already have it, so the control stays disabled and
+      // the owner needs a fresh decision rather than a button.
+      if (result.state !== "delivery_unknown") setRetrying(false);
+      return;
+    }
+
+    // The page must re-read: the channel row has moved and the partial state
+    // may be gone entirely.
+    router.refresh();
+  };
 
   // "not_found" never reaches this component — the page renders its own
   // unavailable state for that — so it is excluded from the copy map.
@@ -95,6 +161,7 @@ export function ReminderReviewPanel({ data }: { data: ReminderReviewData }) {
         result.state === "delivery_unknown" ||
         result.state === "undelivered" ||
         result.state === "stale_review" ||
+        result.state === "identity_drift" ||
         result.state === "sending" ||
         result.state === "sent" ||
         // Retrying cannot help: the account is out of free reminders and the
@@ -102,6 +169,10 @@ export function ReminderReviewPanel({ data }: { data: ReminderReviewData }) {
         result.state === ALLOWANCE_EXHAUSTED_STATE;
 
       if (result.state === "stale_review") setStaleReview(true);
+      // Reload cannot fix this one — the stored content is frozen under the
+      // OLD identity regardless of how many times the page is reloaded (see
+      // lib/reminder-content.ts's identityHasDrifted). Only regeneration can.
+      if (result.state === "identity_drift") setIdentityDrifted(true);
       if (result.state === ALLOWANCE_EXHAUSTED_STATE) {
         setAllowanceExhausted(true);
         // The dedicated panel below says it properly; a duplicate red error
@@ -112,8 +183,24 @@ export function ReminderReviewPanel({ data }: { data: ReminderReviewData }) {
       return;
     }
 
+    // ── INVALIDATE THE SHELL'S CACHED STATE BEFORE NAVIGATING ────────────
+    //
+    // THE BUG THIS FIXES. DashboardProvider and BetaAllowanceProvider each
+    // fetch their data once, client-side, on mount — router.refresh() only
+    // re-runs SERVER component data, so neither one ever learns a send just
+    // happened. Left alone: Active Chasing kept offering "Review reminder"
+    // for a reminder that was already `sent`, and the header kept reading
+    // "0 / 10 used" after a slot had genuinely been claimed. Both were
+    // confirmed, from production evidence, to be display-only — the database
+    // was correct the whole time.
+    //
+    // Awaited BEFORE the navigation, so the chasing page's first render
+    // already reflects the send — no flash of stale state, no second reload
+    // required.
+    await Promise.all([refetchAfterReminderAction(), refetchAllowance()]);
+
     router.push(
-      `/dashboard/chasing?sent=${encodeURIComponent(data.customerName)}`
+      `/dashboard/chasing?sent=${encodeURIComponent(data.customerName)}&sentReminderId=${encodeURIComponent(data.reminderId)}`
     );
     router.refresh();
   };
@@ -182,6 +269,86 @@ export function ReminderReviewPanel({ data }: { data: ReminderReviewData }) {
         </div>
       )}
 
+      {/* ── SENDER IDENTITY CHANGED SINCE THIS WAS PREPARED ─────────────────
+          Reloading cannot fix this — the stored subject/body below are frozen
+          under the OLD identity and reload just re-reads the same frozen
+          content (see lib/reminder-content.ts's identityHasDrifted). The only
+          way forward is an explicit rebuild under the CURRENT identity. */}
+      {identityDrifted && (
+        <div
+          role="status"
+          className="rounded-lg px-4 py-3"
+          style={{ background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e" }}
+        >
+          <p className="text-sm" style={{ fontWeight: 650 }}>Sender details changed</p>
+          <p className="text-sm mt-0.5" style={{ lineHeight: 1.5 }}>
+            Your sender details changed after this reminder was prepared. The message
+            below still shows the name it was written under, so it can&apos;t be approved
+            as-is. Nothing has been sent.
+          </p>
+
+          {regenerateMessage && (
+            <p className="text-sm mt-2" style={{ fontWeight: 600 }}>{regenerateMessage}</p>
+          )}
+
+          {/* Server-authoritative gate (lib/regenerate-capability.ts) — the
+              route refuses independently of this render, so hiding the
+              button here is a courtesy, not the enforcement. */}
+          {data.regenerateEnabled && (
+            <button
+              type="button"
+              className="dash-btn mt-3 justify-center"
+              onClick={onRegenerate}
+              disabled={regenerating}
+              aria-disabled={regenerating}
+              aria-label="Regenerate this reminder's SMS and email under your current sender identity. Nothing will be sent."
+              style={{ padding: "0.55rem 1.1rem", fontSize: "0.9rem" }}
+            >
+              {regenerating ? "Regenerating…" : "Regenerate reminder"}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── PARTIAL SEND ───────────────────────────────────────────────────
+          The parent reminder is `sent`, so without this the page said "It was
+          approved and sent to your customer. It can't be sent again" — both
+          halves untrue. Names the channels in plain words and offers recovery
+          for the one that failed, never for the one that worked. */}
+      {data.partiallySent && (
+        <div
+          role="status"
+          className="rounded-lg px-4 py-3"
+          style={{ background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e" }}
+        >
+          <p className="text-sm" style={{ fontWeight: 650 }}>Part of this reminder didn&apos;t send</p>
+          <p className="text-sm mt-0.5" style={{ lineHeight: 1.5 }}>
+            {data.partialSummary}. Your customer received the part that went
+            through. Nothing will be sent again automatically.
+          </p>
+
+          {retryMessage && (
+            <p className="text-sm mt-2" style={{ fontWeight: 600 }}>{retryMessage}</p>
+          )}
+
+          {data.retryableChannel && (
+            <button
+              type="button"
+              className="dash-btn mt-3 justify-center"
+              onClick={onRetryChannel}
+              disabled={retrying}
+              aria-disabled={retrying}
+              aria-label={`Retry sending only the ${CHANNEL_LABEL[data.retryableChannel]} to ${data.customerName}. The channel that already sent will not be sent again.`}
+              style={{ padding: "0.55rem 1.1rem", fontSize: "0.9rem" }}
+            >
+              {retrying
+                ? `Retrying ${CHANNEL_LABEL[data.retryableChannel]}…`
+                : `Retry ${CHANNEL_LABEL[data.retryableChannel]} only`}
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           {/* The message itself leads: it is what the decision is about. */}
@@ -199,7 +366,7 @@ export function ReminderReviewPanel({ data }: { data: ReminderReviewData }) {
                 label="From"
                 value={
                   <>
-                    {data.businessName}
+                    {data.senderName}
                     <span style={{ color: "var(--dash-text-muted)" }}> · delivered by ServiceSignal</span>
                   </>
                 }
@@ -211,6 +378,36 @@ export function ReminderReviewPanel({ data }: { data: ReminderReviewData }) {
             {/* pre-wrap keeps the composer's paragraphs without rendering markup. */}
             <div className="ss-review-body mt-4">{data.body}</div>
           </section>
+
+          {/* SMS AND EMAIL, BOTH SHOWN, BOTH REAL.
+              This section did not exist before: the page composed and stored
+              real SMS content but only ever displayed the email half, so the
+              owner approved a text message they had never seen. data.smsBody
+              is the exact stored/composed SMS text — the same bytes
+              buildReminderSms() produced and the same bytes the send path
+              will submit to Twilio. */}
+          {data.customerPhone && (
+            <section className="dash-card p-6" aria-labelledby="ss-sms-h">
+              <h2 id="ss-sms-h" style={{ fontSize: "1.05rem", fontWeight: 650, color: "var(--dash-text)" }}>
+                SMS reminder
+              </h2>
+              <p className="text-xs mt-1" style={{ color: "var(--dash-text-muted)" }}>
+                This is the text message ServiceSignal has prepared. Nothing has been sent.
+              </p>
+
+              <dl className="ss-review-head mt-4">
+                <Row label="To" value={data.customerPhone} />
+                <Row label="From" value={data.senderName} />
+              </dl>
+
+              <div
+                className="ss-review-body mt-4"
+                style={{ whiteSpace: "pre-wrap", background: "var(--dash-card-muted)", borderRadius: "0.75rem", padding: "0.9rem 1rem" }}
+              >
+                {data.smsBody}
+              </div>
+            </section>
+          )}
         </div>
 
         <div className="space-y-6">
@@ -238,7 +435,24 @@ export function ReminderReviewPanel({ data }: { data: ReminderReviewData }) {
             </h2>
             <dl className="mt-3 space-y-2.5">
               <Row label="Tone" value={<span style={{ textTransform: "capitalize" }}>{data.tone}</span>} />
-              <Row label="Checkpoint" value={data.scheduleLabel} />
+              {/* Both together, always. A checkpoint name only exists at
+                  specific day-offsets (0, 3, 7, 14...), so an invoice sitting
+                  between two of them — e.g. genuinely 1 day overdue, with no
+                  day+1 checkpoint in the model — would otherwise show
+                  "On the due date" with nothing to explain why that reads
+                  older than today. The live due-status label is the
+                  explanation, not a correction. */}
+              <Row
+                label="Checkpoint"
+                value={
+                  <>
+                    {data.scheduleLabel}
+                    <span style={{ color: "var(--dash-text-muted)" }}>
+                      {" "}· invoice currently {data.dueStatusLabel.toLowerCase()}
+                    </span>
+                  </>
+                }
+              />
               <Row label="Status" value={<span style={{ textTransform: "capitalize" }}>{data.status}</span>} />
               {data.customerPhone && (
                 <Row
@@ -246,9 +460,15 @@ export function ReminderReviewPanel({ data }: { data: ReminderReviewData }) {
                   value={
                     <>
                       {data.customerPhone}
-                      {/* Stored for the planned SMS channel. Says plainly that
-                          no SMS is involved, rather than implying one. */}
-                      <span style={{ color: "var(--dash-text-muted)" }}> · no SMS is sent</span>
+                      {/* SMS is a real channel now. The per-channel status is
+                          the truth, so it is shown rather than a claim. */}
+                      <span style={{ color: "var(--dash-text-muted)" }}>
+                        {data.channelStatuses.sms === "sent"
+                          ? " · SMS sent"
+                          : data.channelStatuses.sms === "failed"
+                          ? " · SMS didn't send"
+                          : " · SMS will be sent with the email"}
+                      </span>
                     </>
                   }
                 />
@@ -264,13 +484,13 @@ export function ReminderReviewPanel({ data }: { data: ReminderReviewData }) {
             type="button"
             className="dash-btn justify-center"
             onClick={onApprove}
-            disabled={busy || !data.approvable || staleReview || allowanceExhausted}
-            aria-disabled={busy || !data.approvable || staleReview || allowanceExhausted}
+            disabled={busy || !data.approvable || staleReview || allowanceExhausted || identityDrifted}
+            aria-disabled={busy || !data.approvable || staleReview || allowanceExhausted || identityDrifted}
             // Names the consequence, not just the control. A screen-reader user
             // should know this sends a real email before activating it.
             aria-label={
               data.approvable
-                ? `Approve and send this reminder to ${data.customerName} at ${data.customerEmail}. This sends a real email.`
+                ? `Approve and send this reminder to ${data.customerName}. This sends a real SMS and a real email.`
                 : "This reminder cannot be sent"
             }
             style={{ padding: "0.7rem 1.35rem", fontSize: "0.95rem", opacity: busy || !data.approvable ? 0.6 : 1 }}
@@ -306,8 +526,8 @@ export function ReminderReviewPanel({ data }: { data: ReminderReviewData }) {
         </div>
 
         <p className="text-xs mt-3" style={{ color: "var(--dash-text-muted)", lineHeight: 1.5 }}>
-          Approving sends this email to your customer straight away. Customers pay
-          you directly — ServiceSignal never handles the money.
+          Approving sends the SMS and the email to your customer straight away.
+          Customers pay you directly — ServiceSignal never handles the money.
         </p>
       </div>
     </div>

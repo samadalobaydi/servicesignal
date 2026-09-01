@@ -179,18 +179,25 @@ test("[static] Active Chasing hides Prepare Reminder and says why", () => {
     "a greyed-out primary button invites a click and explains nothing");
 
   // The state column carries the meaning, in the header's restrained language.
-  assert.match(code, /text: "Reminder limit reached"/);
-  assert.match(code, /"Reminder limit reached", color: "var\(--dash-navy\)", pill: true, tone: "slate"/,
+  //
+  // reminderStateLabel() itself now lives in lib/reminder-state-label.ts, not
+  // in this component — pulled out so it can be unit-tested directly (a
+  // .tsx file with JSX cannot be imported into this project's plain
+  // `node --test` runner). The row-level wiring checked above stays here;
+  // the label function's own content is checked against its real source.
+  const label = strip(read("lib/reminder-state-label.ts"));
+  assert.match(label, /text: "Reminder limit reached"/);
+  assert.match(label, /"Reminder limit reached", color: "var\(--dash-navy\)", pill: true, tone: "slate"/,
     "light navy/slate, matching the header — no amber or red");
 
   // Only replaces states that would otherwise invite preparation, and only
   // after hasPending — a reminder prepared before the cap stays reviewable.
-  const label = code.slice(code.indexOf("function reminderStateLabel"));
-  const pendingAt = label.indexOf('"Ready for review"');
-  const spentAt = label.indexOf('"Reminder limit reached"');
+  const fn = label.slice(label.indexOf("export function reminderStateLabel"));
+  const pendingAt = fn.indexOf('"Ready for review"');
+  const spentAt = fn.indexOf('"Reminder limit reached"');
   assert.ok(pendingAt > -1 && spentAt > pendingAt,
     "hasPending must be checked before the exhausted state");
-  assert.match(label.slice(0, spentAt + 200), /allowanceSpent && canPrepare/,
+  assert.match(fn.slice(0, spentAt + 200), /allowanceSpent && canPrepare/,
     "only eligible-to-prepare rows change");
 });
 
@@ -232,10 +239,13 @@ test("[static] 'Reminder limit reached' uses the locked slate tokens, never ambe
   const list = read("components/dashboard/ActiveChasingList.tsx");
   const code = strip(list.replace(/\{\/\*[\s\S]*?\*\/\}/g, ""));
   const css = read("app/globals.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  // The state itself — see the note above about why this now lives in its
+  // own plain .ts module rather than inline in the component.
+  const label = strip(read("lib/reminder-state-label.ts"));
 
   // The state declares a tone; the render site no longer decides the colour.
-  assert.match(code, /tone: "slate"/, "the limit state must be slate-toned");
-  assert.equal(/"Reminder limit reached"[^}]*amber/.test(code), false,
+  assert.match(label, /tone: "slate"/, "the limit state must be slate-toned");
+  assert.equal(/"Reminder limit reached"[^}]*amber/.test(label), false,
     "the limit state must not carry any amber");
 
   // Neither pill site may hardcode colours again.
@@ -261,21 +271,29 @@ test("[static] 'Reminder limit reached' uses the locked slate tokens, never ambe
   }
 });
 
-test("[static] Overdue keeps its semantic red, and no behaviour changed", () => {
+test("[static] Overdue: the redundant badge is gone, the semantic red date line is not", () => {
   const list = read("components/dashboard/ActiveChasingList.tsx");
   const code = strip(list.replace(/\{\/\*[\s\S]*?\*\/\}/g, ""));
 
-  // Overdue is a genuine semantic state and must stay red.
-  // Both overdue treatments: the status badge, and the days-overdue text.
-  assert.match(code, /overdue: \{ label: "Overdue", bg: "var\(--dash-red-soft\)", color: "var\(--dash-red\)" \}/,
-    "the Overdue badge must keep its red treatment");
+  // THE DELIBERATE CHANGE (this pass): the Due column already says both the
+  // date and "2 days overdue", in red — an "Overdue" badge in the Status
+  // column repeated the identical fact a second time for the single most
+  // common state on this page. statusBadgeFor() (lib/status-badge.ts — see
+  // tests/status-badge.test.ts for real, executed coverage of the decision
+  // itself) now returns null for "overdue" rather than a same-meaning badge.
+  assert.match(code, /statusBadgeFor\(status\)/, "StatusBadge must consult the shared decision, not its own map");
+
+  // What the badge redundantly repeated is UNCHANGED and still red: the
+  // days-overdue text in the Due column is the one surviving indicator.
   assert.match(code, /inv\.status === "overdue" \? "var\(--dash-red\)"/,
     "the days-overdue text must stay red");
   assert.equal(/overdue[^;]*--dash-navy/.test(code), false,
     "overdue must not be recoloured slate");
 
-  // "Ready for review" is a real call to action and keeps amber.
-  assert.match(code, /"Ready for review", color: "var\(--dash-amber\)", pill: true, tone: "amber"/);
+  // "Ready for review" is a real call to action and keeps amber. The state
+  // itself now lives in lib/reminder-state-label.ts — see the note above.
+  const label = strip(read("lib/reminder-state-label.ts"));
+  assert.match(label, /"Ready for review", color: "var\(--dash-amber\)", pill: true, tone: "amber"/);
 
   // Behaviour untouched: the same guard, the same source of truth.
   assert.match(code, /!hasPending && canPrepare && !allowanceSpent/);

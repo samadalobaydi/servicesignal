@@ -1,5 +1,4 @@
 import { getVerifiedContext, onboardingView, statusOf } from "@/lib/onboarding";
-import { isBusinessNameBlank } from "@/lib/business-name";
 import { OnboardingFlow } from "@/components/onboarding/OnboardingFlow";
 import { OnboardingAllSet } from "@/components/onboarding/OnboardingAllSet";
 import { OnboardingUnavailable } from "@/components/onboarding/OnboardingUnavailable";
@@ -69,22 +68,31 @@ export default async function OnboardingPage() {
     (context.kind === "ready" ? context.businessName : null) ??
     context.user.businessNameFromMetadata ??
     "";
+  const personalName = context.kind === "ready" ? context.personalName ?? "" : "";
+  const senderIdentity = context.kind === "ready" ? context.senderIdentity : null;
 
-  // Whether the business-name step is needed AT ALL, decided here on the
-  // server from the canonical value rather than in the client.
+  // Whether the identity step is needed AT ALL, decided here on the server
+  // from the canonical value rather than in the client.
   //
-  // ROOT CAUSE of the redundant screen: OnboardingFlow initialised
-  // `useState<1|2|3>(1)` unconditionally, so step 1 always rendered even when
-  // initialBusinessName already held a valid name. The name appeared
-  // pre-filled — which is exactly what the tester saw with "test1" — and the
-  // user was asked to confirm something ServiceSignal already had. The fix is
-  // this condition, not hiding the step.
-  const needsBusinessName = isBusinessNameBlank(businessName);
+  // Gated on senderIdentity being unset — NOT on whether business_name
+  // happens to be populated. An existing account's business_name being
+  // non-blank must never be read as "they already chose Business"; the
+  // choice is a separate, explicit fact this account has not yet recorded
+  // (migration 014 backfills nothing). The step still renders for such an
+  // account, with neither option pre-selected — see OnboardingFlow.
+  //
+  // ROOT CAUSE of the original redundant-screen bug this replaces:
+  // OnboardingFlow initialised `useState<1|2|3>(1)` unconditionally, so
+  // step 1 always rendered even when a value already existed. The fix is
+  // this server-computed condition, not hiding the step.
+  const needsSenderIdentity = senderIdentity === null;
 
   return (
     <OnboardingFlow
       initialBusinessName={businessName}
-      needsBusinessName={needsBusinessName}
+      initialPersonalName={personalName}
+      initialSenderIdentity={senderIdentity}
+      needsSenderIdentity={needsSenderIdentity}
       email={context.user.email ?? ""}
       resuming={statusOf(context) === "skipped"}
     />

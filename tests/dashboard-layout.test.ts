@@ -211,10 +211,18 @@ test("[static] desktop renders the actions as ONE row, not a wrapped pile", () =
 
   // The actions column must hold the majority of the slack, or nowrap simply
   // reintroduces the overflow it replaced.
-  const actions = code.match(/\["", "w-\[(\d+)%\]"\]/);
-  assert.ok(actions, "the actions column must have an explicit width");
-  assert.ok(Number(actions![1]) >= 34,
-    `actions column is ${actions![1]}% — too narrow for four controls at nowrap`);
+  //
+  // TWO empty-label columns now share this shape: the leading disclosure
+  // column (narrow, on purpose — see the chevron test above) and Actions
+  // (wide, on purpose). The LAST one in header order is Actions; the first
+  // is disclosure — matchAll + take the last, not the first match, or this
+  // silently grades the wrong column.
+  const emptyLabelCols = Array.from(code.matchAll(/\["", "w-\[(\d+)%\]"\]/g)).map((m) => Number(m[1]));
+  assert.equal(emptyLabelCols.length, 2, `expected exactly two empty-label columns (disclosure, actions), found ${emptyLabelCols.length}`);
+  const [disclosureWidth, actionsWidth] = emptyLabelCols;
+  assert.ok(disclosureWidth <= 6, `disclosure column is ${disclosureWidth}% — should be narrow, just enough for the chevron`);
+  assert.ok(actionsWidth >= 34,
+    `actions column is ${actionsWidth}% — too narrow for four controls at nowrap`);
 
   // Widths must still add up, or table-fixed distributes the remainder oddly.
   const pcts = Array.from(code.matchAll(/"w-\[(\d+)%\]"/g)).map((m) => Number(m[1]));
@@ -234,14 +242,121 @@ test("[static] the history chevron is out of the action group", () => {
   assert.equal(/<HistoryToggle/.test(actionCell), false,
     "the history chevron must not sit inside the action group");
 
-  // ...but it must still exist on the row: not hidden to make things fit.
+  // ── UPDATED FOR THE LEADING DISCLOSURE COLUMN ────────────────────────────
+  //
+  // The chevron no longer sits stacked under customer name/email — it moved
+  // to its own narrow column AHEAD of Customer, a conventional
+  // expandable-table-row layout. So it must now appear BEFORE
+  // inv.customer_email in the desktop table's source order, not after it.
   // Scoped to the DESKTOP table — `inv.customer_email` also appears in the
   // mobile card above it, and anchoring on the first match checked the wrong
   // half of the component.
   const desktop = code.slice(code.indexOf("hidden md:block dash-card"));
-  const customerCell = desktop.slice(desktop.indexOf("inv.customer_email"));
-  assert.match(customerCell.slice(0, 400), /<HistoryToggle/,
-    "the chevron must move, not disappear");
+  const beforeCustomerEmail = desktop.slice(0, desktop.indexOf("inv.customer_email"));
+  assert.match(beforeCustomerEmail.slice(-600), /<HistoryToggle/,
+    "the chevron must lead the row, immediately before the Customer cell");
+
+  // And it must genuinely be its own column, not merely moved earlier inside
+  // the same Customer cell.
+  const firstTd = desktop.indexOf("<td");
+  const historyToggleIdx = desktop.indexOf("<HistoryToggle");
+  const customerNameIdx = desktop.indexOf("inv.customer_name");
+  assert.ok(firstTd > -1 && historyToggleIdx > firstTd, "HistoryToggle must be inside a <td>");
+  assert.ok(historyToggleIdx < customerNameIdx, "the disclosure column must come before the Customer column");
+});
+
+// ── Mark Paid: neutral colour, gated by a real confirm step ────────────────
+
+test("[static] Mark Paid cannot invoke the lifecycle action before confirmation", () => {
+  const code = strip(read("components/dashboard/ActiveChasingList.tsx"));
+
+  // The initial button only flips local UI state — it must never call
+  // onMarkPaid directly, or the confirm step is decorative.
+  const openBtn = code.slice(
+    code.indexOf('onClick={() => setConfirmingPaid(true)}'),
+    code.indexOf("Mark Paid", code.indexOf('onClick={() => setConfirmingPaid(true)}')) + 20
+  );
+  assert.equal(/onMarkPaid/.test(openBtn), false,
+    "the button that opens the confirm popover must not itself call onMarkPaid");
+
+  // onMarkPaid must only be reachable from inside the confirm popover's own
+  // "Mark Paid" action.
+  const confirmBlock = code.slice(code.indexOf("confirmingPaid && ("), code.indexOf("Cancel"));
+  assert.match(confirmBlock, /onClick=\{\(\) => \{ setConfirmingPaid\(false\); onMarkPaid\(invoice\.id\); \}\}/,
+    "onMarkPaid must be called only from the confirm popover's own button");
+
+  // Neutral, not green: the outcome colour (Paid badge) must not be reused
+  // for the action that produces it.
+  const openBtnFull = code.slice(code.indexOf('onClick={() => setConfirmingPaid(true)}') - 40, code.indexOf('onClick={() => setConfirmingPaid(true)}') + 200);
+  assert.match(openBtnFull, /dash-btn-ghost/, "Mark Paid must use the neutral ghost style, not a green outline");
+});
+
+test("[static] the Mark Paid confirmation names the customer and the amount", () => {
+  const code = strip(read("components/dashboard/ActiveChasingList.tsx"));
+  assert.match(code, /Mark \{invoice\.customer_name\}&rsquo;s \{formatCurrency\(invoice\.amount\)\} invoice as paid\?/,
+    "the confirm prompt must name both the customer and the amount, not a generic \"are you sure\"");
+});
+
+test("[static] the Mark Paid confirmation dismisses on Escape and on a backdrop click", () => {
+  const code = strip(read("components/dashboard/ActiveChasingList.tsx"));
+  assert.match(code, /e\.key === "Escape"\) setConfirmingPaid\(false\)/);
+  // A real browser regression: an earlier version anchored this as an
+  // absolute-positioned popover off the Mark Paid button (`position:
+  // absolute; left: 0`), which rendered off the right edge of the viewport
+  // whenever the button sat mid-row on a real dashboard width — confirmed
+  // in a live Stage B browser session, Cancel partially clipped off-screen.
+  // It is now a centred modal (fixed inset-0 backdrop + flex-center layer,
+  // the same pattern NextStepModal already uses), correct at every viewport
+  // width by construction rather than by a breakpoint override.
+  assert.equal(/position: "relative" \}, ref=\{markPaidRef\}/.test(code), false,
+    "Mark Paid must not go back to a ref-anchored wrapper");
+  const confirmBlock = code.slice(code.indexOf("confirmingPaid && ("), code.indexOf("Cancel"));
+  assert.match(confirmBlock, /className="fixed inset-0 z-50"/, "expected a full-viewport backdrop layer");
+  assert.match(confirmBlock, /className="fixed inset-0 z-50 flex items-center justify-center/,
+    "expected a centred, viewport-safe layer — not an absolute panel anchored to the button");
+  assert.match(confirmBlock, /onClick=\{\(\) => setConfirmingPaid\(false\)\}/,
+    "the backdrop must dismiss on click, replacing the old ref-based outside-click check");
+  assert.match(confirmBlock, /onClick=\{\(e\) => e\.stopPropagation\(\)\}/,
+    "a click inside the dialog itself must not bubble to the backdrop and dismiss it");
+});
+
+// ── Payment link: moved into history as a real URL + Copy, not a bare hint ─
+
+test("[static] \"Payment link added\" no longer lives on the Active Chasing row", () => {
+  const code = strip(read("components/dashboard/ActiveChasingList.tsx"));
+  assert.equal(/Payment link added/.test(code), false,
+    "the bare hint must be gone from ActiveChasingList — it moved into the expanded history panel");
+});
+
+test("[static] the expanded history panel renders the payment link as a real URL with Copy", () => {
+  const code = strip(read("components/dashboard/InvoiceActivityLog.tsx"));
+  assert.match(code, /function PaymentLinkBlock/, "expected a dedicated PaymentLinkBlock component");
+  assert.match(code, /invoice\?\.payment_link && <PaymentLinkBlock/,
+    "the block must only render when the invoice actually has a payment link");
+  assert.match(code, /navigator\.clipboard\.writeText\(url\)/,
+    "Copy must copy the real URL — ServiceSignal never processes or holds the payment itself");
+});
+
+test("[static] a dateOnly entry does not render a fabricated time-of-day sub-line", () => {
+  const code = strip(read("components/dashboard/InvoiceActivityLog.tsx"));
+  assert.match(code, /\{!e\.dateOnly && \(/,
+    "the formatWhen() sub-line must be skipped for entries whose `when` is a bare date, not a real timestamp");
+});
+
+// ── Empty Active Chasing state ──────────────────────────────────────────────
+
+test("[static] the empty Active Chasing state uses the same card shell and gives a clear next step", () => {
+  const code = strip(read("components/dashboard/ActiveChasingList.tsx"));
+  const empty = code.slice(code.indexOf("sorted.length === 0"), code.indexOf("sorted.length === 0") + 800);
+  assert.match(empty, /dash-card/, "the empty state must use the same card shell as the rest of the dashboard");
+  assert.match(empty, /Nothing to chase right now/);
+  assert.match(empty, /New unpaid invoices appear here/,
+    "the message must point at what happens next, not just describe the current emptiness");
+
+  // A persistent "Add Invoice" entry point already exists globally in
+  // DashboardChrome, so the empty state does not need to duplicate it.
+  const chrome = strip(read("components/dashboard/DashboardChrome.tsx"));
+  assert.match(chrome, /Add Invoice/, "the global Add Invoice entry point must still exist to satisfy the empty state's next action");
 });
 
 

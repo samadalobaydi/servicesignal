@@ -5,7 +5,7 @@ import {
 } from "./invoice-lifecycle-service";
 import { CHANNEL_SELECT, type ChannelRow } from "./reminder-channel-store";
 import { generateReminderContent } from "./reminder-content";
-import { resolveBusinessName } from "./reminder-approval";
+import { resolveSenderIdentityForDisplay } from "./sender-identity";
 import type { Invoice } from "@/types";
 
 /**
@@ -85,7 +85,7 @@ export function makeLifecycleDb(supabase: SupabaseClient, admin: SupabaseClient 
 
       const { data: profile } = await supabase
         .from("profiles")
-        .select("business_name")
+        .select("sender_identity, business_name, personal_name")
         .eq("user_id", userId)
         .maybeSingle();
 
@@ -94,7 +94,12 @@ export function makeLifecycleDb(supabase: SupabaseClient, admin: SupabaseClient 
         tone: (inv as { reminder_tone: Invoice["reminder_tone"] }).reminder_tone,
         schedule: (rem as { schedule: string }).schedule as Invoice["reminder_schedules"][number],
         customerName: patch.customer_name,
-        businessName: resolveBusinessName(profile?.business_name ?? null, null),
+        // Display/edit-refresh only — see the note in content/route.ts.
+        senderName: resolveSenderIdentityForDisplay({
+          preference: profile?.sender_identity ?? null,
+          businessName: profile?.business_name,
+          personalName: profile?.personal_name,
+        }),
         amount: patch.amount,
         dueDate: patch.due_date,
         paymentLink: patch.payment_link || null,
@@ -136,8 +141,34 @@ export function makeLifecycleDb(supabase: SupabaseClient, admin: SupabaseClient 
         : "error") as "updated" | "in_flight" | "not_found" | "reminder_changed" | "error";
     },
 
+    /**
+     * THROUGH THE SERVICE-ROLE CLIENT, DELIBERATELY.
+     *
+     * Migration 013 revokes table-level DELETE on invoices from
+     * `authenticated` — this must never depend on that privilege, and must
+     * never silently fall back to a client that might not have it. userId
+     * still comes from the caller's verified session (never the request
+     * body — see deleteInvoiceLifecycle's caller), and the DELETE statement
+     * itself carries an explicit `.eq("user_id", userId)` predicate: with
+     * service_role bypassing RLS, that predicate IS the ownership check,
+     * the same pattern lib/invoice-owner-writes.ts's scopedUpdate already
+     * uses for every other owner-scoped invoice write.
+     *
+     * No admin client configured: refuse outright. `{ ok: false }` with
+     * `refusedByDatabase` left undefined reaches deleteInvoiceLifecycle's
+     * existing generic branch — a 503 "database_unavailable" — never a
+     * silent, weaker delete through the session client.
+     */
     async deleteInvoice(id, userId) {
-      const { error } = await supabase.from("invoices").delete().eq("id", id).eq("user_id", userId);
+      if (!admin) {
+        console.error(
+          "[invoice-delete] service-role client is not configured — refusing to delete. " +
+            "A session-client delete was deliberately NOT attempted; that client will lose " +
+            "table-level DELETE on invoices once migration 013 is applied."
+        );
+        return { ok: false };
+      }
+      const { error } = await admin.from("invoices").delete().eq("id", id).eq("user_id", userId);
       if (!error) return { ok: true };
       // 23514 is the check-violation the migration-012 guard raises.
       const refusedByDatabase = (error as { code?: string }).code === "23514";

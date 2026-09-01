@@ -5,7 +5,11 @@ import type { Invoice } from "@/types";
 import { formatDate } from "@/lib/invoices";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { persistGeneratedContent } from "@/lib/reminder-channel-store";
-import { resolveBusinessName } from "@/lib/reminder-approval";
+import {
+  resolveSenderIdentity,
+  senderIdentityMissingReason,
+  missingSenderIdentityMessage,
+} from "@/lib/sender-identity";
 import {
   allowancePreflight,
   ALLOWANCE_EXHAUSTED_STATE,
@@ -214,6 +218,42 @@ export async function POST(request: NextRequest) {
   // No existing row: this is a genuinely new reminder.
   if (preflight.known && preflight.exhausted) return refuseForAllowance();
 
+  // ── SENDER IDENTITY, CHECKED BEFORE ANYTHING IS CREATED ────────────────
+  //
+  // A reminder's stored content is written once, here, at preparation — see
+  // persistGeneratedContent below. The account must have EXPLICITLY chosen
+  // Business or Personal, and the corresponding name must be non-blank — no
+  // cross-fallback (a Business preference never falls back to
+  // personal_name even if it happens to be set), no inferring a preference
+  // from whichever name field is populated, and never the account's login
+  // email. Refusing here, before the reminder_logs row exists, is cheaper
+  // and clearer than creating a draft that could never be approved.
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("sender_identity, business_name, personal_name")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const senderInputs = {
+    preference: profile?.sender_identity ?? null,
+    businessName: profile?.business_name ?? null,
+    personalName: profile?.personal_name ?? null,
+  };
+  const identity = resolveSenderIdentity(senderInputs);
+  if (!identity) {
+    const reason = senderIdentityMissingReason(senderInputs);
+    return NextResponse.json(
+      {
+        success: false,
+        state: "missing_sender_identity",
+        reason,
+        message: missingSenderIdentityMessage(reason, "preparing a reminder"),
+      },
+      { status: 409 }
+    );
+  }
+  const senderName = identity.senderName;
+
   // Build a subject for display (full email is rebuilt at send time)
   const subject = `Reminder: invoice from your business`;
 
@@ -221,7 +261,7 @@ export async function POST(request: NextRequest) {
   // RLS would block any other value, and the table requires user_id NOT NULL.
   // .select() so the caller receives the reminder id — onboarding needs the
   // exact identity to build its resume URL rather than guessing.
-  const { data: inserted, error: insertError } = await supabase
+  let { data: inserted, error: insertError } = await supabase
     .from("reminder_logs")
     .insert({
       invoice_id: invoice.id,
@@ -230,9 +270,39 @@ export async function POST(request: NextRequest) {
       status: "pending",
       email_to: invoice.customer_email,
       subject,
+      // The identity that is ABOUT to generate this reminder's stored content
+      // below, recorded once so Approve/Retry can prove later that the
+      // identity they resolve fresh still agrees with it. See migration 015.
+      generated_sender_name: senderName,
     })
     .select("id")
     .single();
+
+  // Migration 015 not applied here yet. Degrade the same way this route
+  // already tolerates migration 010 being absent below — never fail
+  // preparation outright over a migration gap. The reminder is created
+  // without a recorded generation identity, which lib/reminder-content.ts's
+  // identityHasDrifted() then treats as unprovable and refuses at
+  // Approve/Retry until migration 015 lands — safe, not silent.
+  if (insertError && (insertError.code === "42703" || insertError.code === "PGRST204")) {
+    console.error(
+      "[prepare] reminder_logs.generated_sender_name is unavailable — apply " +
+        "supabase/sql/015_reminder_generation_identity.sql. Preparing without it; " +
+        "Approve/Retry will refuse this reminder until the migration is applied."
+    );
+    ({ data: inserted, error: insertError } = await supabase
+      .from("reminder_logs")
+      .insert({
+        invoice_id: invoice.id,
+        user_id: user.id,
+        schedule,
+        status: "pending",
+        email_to: invoice.customer_email,
+        subject,
+      })
+      .select("id")
+      .single());
+  }
 
   if (insertError) {
     if (insertError.code === "23505") {
@@ -280,12 +350,6 @@ export async function POST(request: NextRequest) {
   if (inserted?.id) {
     const admin = getSupabaseAdmin();
     if (admin) {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("business_name")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
       await persistGeneratedContent(admin, {
         reminderLogId: inserted.id,
         userId: user.id,
@@ -293,7 +357,7 @@ export async function POST(request: NextRequest) {
           tone: invoice.reminder_tone,
           schedule,
           customerName: invoice.customer_name,
-          businessName: resolveBusinessName(profile?.business_name, user.email ?? null),
+          senderName,
           amount: invoice.amount,
           dueDate: invoice.due_date,
           paymentLink: invoice.payment_link,

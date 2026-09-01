@@ -12,7 +12,8 @@ interface BuildReminderEmailParams {
   tone: ReminderTone;
   schedule: ReminderSchedule;
   customerName: string;
-  businessName: string;   // profile.business_name, falls back to user email upstream
+  /** The resolved customer-facing sender identity — business_name OR personal_name, whichever the account chose. Never the account's login/contact email. See lib/sender-identity.ts. */
+  senderName: string;
   amount: number;
   dueDate: string;        // ISO date
   paymentLink?: string;
@@ -69,55 +70,71 @@ function toneOpening(tone: ReminderTone, customerName: string): string {
   }
 }
 
-function toneClosing(tone: ReminderTone, businessName: string): string {
+function toneClosing(tone: ReminderTone, senderName: string): string {
   switch (tone) {
     case "friendly":
-      return `Thanks so much,\n${businessName}`;
+      return `Thanks so much,\n${senderName}`;
     case "firm":
-      return `Thank you,\n${businessName}`;
+      return `Thank you,\n${senderName}`;
     case "final":
-      return `Regards,\n${businessName}`;
+      return `Regards,\n${senderName}`;
   }
 }
 
 // ── Subject & body computed from live due-status ────────────────────────────
 
+/**
+ * "Payment reminder from <identity>[ — <invoice reference>]" — the identity
+ * that resolveSenderIdentity() produced, never the raw account/login email
+ * (that was the exact defect this rewrite closes: the old subject read
+ * "Overdue invoice reminder from musao...@gmail.com" whenever the resolved
+ * name fell through to the account email upstream).
+ *
+ * The reference is appended only when the invoice has one (migration 007;
+ * absent on older invoices) — omitting it rather than printing a dangling
+ * "— " keeps every subject a clean sentence regardless of data age.
+ */
 function subjectLine(
   tone: ReminderTone,
   status: DueStatus,
-  businessName: string
+  senderName: string,
+  reference: string | null
 ): string {
+  const ref = reference ? ` — ${reference}` : "";
+
   // Final reminders always use the final-notice subject when overdue.
   if (tone === "final" && status.kind === "overdue") {
-    return `Final reminder: overdue invoice from ${businessName}`;
+    return `Final payment reminder from ${senderName}${ref}`;
   }
   switch (status.kind) {
     case "upcoming":
-      return `Upcoming invoice from ${businessName}`;
+      return `Upcoming payment reminder from ${senderName}${ref}`;
     case "due_today":
-      return `Invoice due today — ${businessName}`;
+      return `Payment reminder from ${senderName}${ref} (due today)`;
     case "overdue":
-      return `Overdue invoice reminder from ${businessName}`;
+      return `Payment reminder from ${senderName}${ref}`;
   }
 }
 
 /**
- * The opening line that names WHAT is being chased.
+ * The single "what is owed and when" sentence.
  *
- * Previously the invoice reference sat on its own orphaned line — "Invoice
- * INV-001 (kitchen work)" — floating between a redundant "This is a reminder
- * from X" sentence and the amount. Reading it back, the message was obviously
- * three database fields stacked up rather than something a person wrote.
- *
- * It now opens the sentence instead, so the reference and job description are
- * carried by grammar. Every combination of null reference and null job
- * description still produces a clean sentence with no dangling punctuation —
- * that is what the branching below is for, not decoration.
+ * Previously two separate sentences — "...invoice X." then "The outstanding
+ * balance of Y was due on Z." — which read like two fields from a statement
+ * stitched together rather than one thing a person wrote, and "outstanding
+ * balance of" is the kind of account-servicing phrase this product
+ * deliberately avoids. Merged into one flowing sentence per the reviewed
+ * wording direction: "I'm following up on invoice X for Y, which was due on
+ * Z." Every combination of null reference and null job description still
+ * produces a clean sentence with no dangling punctuation.
  */
-function subjectSentence(
+function openingFactSentence(
   tone: ReminderTone,
+  status: DueStatus,
   reference: string | null,
-  job: string | null
+  job: string | null,
+  amountStr: string,
+  dueStr: string
 ): string {
   const lead =
     tone === "friendly"
@@ -126,36 +143,30 @@ function subjectSentence(
       ? "This is a final notice regarding"
       : "I'm following up on";
 
-  if (reference && job) return `${lead} invoice ${reference} for ${job}.`;
-  if (reference) return `${lead} invoice ${reference}.`;
-  if (job) return `${lead} your invoice for ${job}.`;
-  return `${lead} your unpaid invoice.`;
-}
-
-/**
- * The balance-and-date sentence, derived from the LIVE due status — never from
- * the schedule name, which only records when the reminder was queued.
- */
-function balanceSentence(
-  tone: ReminderTone,
-  status: DueStatus,
-  amountStr: string,
-  dueStr: string
-): string {
-  const days = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
+  const what =
+    reference && job
+      ? `invoice ${reference} for ${job}`
+      : reference
+      ? `invoice ${reference}`
+      : job
+      ? `your invoice for ${job}`
+      : "your unpaid invoice";
 
   switch (status.kind) {
     case "upcoming":
-      return `The balance of ${amountStr} is due on ${dueStr}.`;
+      return `${lead} ${what} for ${amountStr}, due on ${dueStr}.`;
     case "due_today":
-      return `The balance of ${amountStr} is due today, ${dueStr}.`;
-    case "overdue":
-      // Final states the age explicitly; the others keep it lighter. All three
-      // name the amount and the original due date, which is the evidence the
-      // recipient actually needs.
-      return tone === "final"
-        ? `The outstanding balance of ${amountStr} was due on ${dueStr} and is now ${days(status.days)} overdue.`
-        : `The outstanding balance of ${amountStr} was due on ${dueStr}.`;
+      return `${lead} ${what} for ${amountStr}, due today.`;
+    case "overdue": {
+      // Final states the age explicitly; the others keep it lighter. All
+      // three name the amount and the original due date, which is the
+      // evidence the recipient actually needs.
+      const age =
+        tone === "final"
+          ? ` and is now ${status.days} ${status.days === 1 ? "day" : "days"} overdue`
+          : "";
+      return `${lead} ${what} for ${amountStr}, which was due on ${dueStr}${age}.`;
+    }
   }
 }
 
@@ -187,7 +198,7 @@ function requestSentence(tone: ReminderTone, status: DueStatus, hasPayment: bool
   // address on every send.
   const replyOffer = hasPayment
     ? ""
-    : " If you need the payment details resent, just reply to this email.";
+    : " If you need the payment details again, just reply to this email.";
 
   if (status.kind === "upcoming") {
     switch (tone) {
@@ -212,7 +223,7 @@ function requestSentence(tone: ReminderTone, status: DueStatus, hasPayment: bool
 // ── Main builder ──────────────────────────────────────────────────────────
 
 export function buildReminderEmail(params: BuildReminderEmailParams): ReminderEmailContent {
-  const { tone, customerName, businessName, amount, dueDate, paymentLink } = params;
+  const { tone, customerName, senderName, amount, dueDate, paymentLink } = params;
 
   // Both optional by construction: invoices predating migration 007 have
   // neither, and the reminder must read correctly without them rather than
@@ -228,8 +239,8 @@ export function buildReminderEmail(params: BuildReminderEmailParams): ReminderEm
   const status = resolveDueStatus(dueDate);
 
   const opening = toneOpening(tone, customerName);
-  const closing = toneClosing(tone, businessName);
-  const subject = subjectLine(tone, status, businessName);
+  const closing = toneClosing(tone, senderName);
+  const subject = subjectLine(tone, status, senderName, reference);
 
   // ── One flowing paragraph, not stacked fields ──────────────────────────
   //
@@ -238,8 +249,7 @@ export function buildReminderEmail(params: BuildReminderEmailParams): ReminderEm
   // been dropped: repeating the sender three times is what made the message
   // read as machine-assembled.
   const bodyParagraph = [
-    subjectSentence(tone, reference, job),
-    balanceSentence(tone, status, amountStr, dueStr),
+    openingFactSentence(tone, status, reference, job, amountStr, dueStr),
     requestSentence(tone, status, !!paymentLink),
   ].join(" ");
 
@@ -272,7 +282,7 @@ export function buildReminderEmail(params: BuildReminderEmailParams): ReminderEm
               </td>
             </tr>
           </table>
-          <p style="font-size:11px;color:#999999;margin-top:16px;">Sent via ServiceSignal on behalf of ${escapeHtml(businessName)}</p>
+          <p style="font-size:11px;color:#999999;margin-top:16px;">Sent via ServiceSignal on behalf of ${escapeHtml(senderName)}</p>
         </td>
       </tr>
     </table>

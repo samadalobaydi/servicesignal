@@ -30,7 +30,8 @@ export interface BuildReminderSmsParams {
   tone: ReminderTone;
   schedule: ReminderSchedule;
   customerName: string;
-  businessName: string;
+  /** The resolved customer-facing sender identity — business_name OR personal_name, whichever the account chose. Never the account's login/contact email. */
+  senderName: string;
   amount: number;
   /** ISO date. */
   dueDate: string;
@@ -50,14 +51,40 @@ export interface BuildReminderSmsParams {
  */
 export const SMS_MAX_LENGTH = 480;
 
-/** How the message refers to the invoice. Grammar, not stacked fields. */
-function invoicePhrase(reference: string | null, job: string | null): string {
+/**
+ * The single "what is owed and when" sentence — this is the SMS's second
+ * sentence, after the greeting+identity line, not a mid-sentence fragment.
+ *
+ * The reference stands alone ("INV003 for £1,500 is 9 days overdue"), not
+ * prefixed with "Invoice" — one fewer word costs nothing in clarity (the
+ * reference format itself already reads as an invoice number) and every
+ * character matters once a message is one GSM-7 unit from a second segment.
+ * Only when there is NO reference does "Your invoice" appear, so the
+ * sentence is never bare of a subject.
+ */
+function factSentence(reference: string | null, job: string | null, amountStr: string, timing: string): string {
   const ref = reference?.trim();
   const work = job?.trim();
-  if (ref && work) return `invoice ${ref} for ${work}`;
-  if (ref) return `invoice ${ref}`;
-  if (work) return `your invoice for ${work}`;
-  return "your invoice";
+
+  // A comma before the amount, not another "for", whenever job description
+  // already used "for" — "INV003 for the boiler repair for £50" reads as a
+  // stutter; "INV003 for the boiler repair, £50 ..." does not.
+  if (ref && work) return `${ref} for ${work}, ${amountStr} ${timing}.`;
+  if (ref) return `${ref} for ${amountStr} ${timing}.`;
+  if (work) return `Your invoice for ${work}, ${amountStr} ${timing}.`;
+  return `Your invoice for ${amountStr} ${timing}.`;
+}
+
+/**
+ * SMS-only display formatting: drops an unnecessary ".00" for a whole-pound
+ * amount ("£1,500.00" -> "£1,500"), keeps real pence ("£1,500.50" stays as
+ * is). Display only — formatCurrency() (lib/invoices.ts), the email
+ * template, and every stored/accounting value are untouched; the underlying
+ * number's precision is never altered, only how this one channel renders it.
+ */
+function formatCurrencyForSms(amount: number): string {
+  const full = formatCurrency(amount);
+  return full.endsWith(".00") ? full.slice(0, -3) : full;
 }
 
 /** The timing clause, computed live from the due date — never from the label. */
@@ -71,7 +98,7 @@ function timingPhrase(dueDate: string, now: Date): string {
     case "overdue":
       return status.days === 1
         ? "was due yesterday"
-        : `is now ${status.days} days overdue`;
+        : `is ${status.days} days overdue`;
   }
 }
 
@@ -89,28 +116,26 @@ function paymentPhrase(tone: ReminderTone, paymentLink: string | null): string {
   if (link) {
     switch (tone) {
       case "friendly": return `You can pay here: ${link}`;
-      case "firm": return `Please arrange payment here: ${link}`;
+      case "firm": return `Please pay here: ${link}`;
       case "final": return `Please pay here to avoid further action: ${link}`;
     }
   }
 
   switch (tone) {
     case "friendly":
-      return "Please arrange payment when you can. Reply if you need the payment details again.";
+      return "Please pay when you can. Reply if you need payment details.";
     case "firm":
-      return "Please arrange payment at your earliest convenience. Reply if you need the payment details resent.";
+      return "Please pay at your earliest convenience. Reply if you need payment details.";
     case "final":
-      return "Please arrange payment now. Reply if you need the payment details resent.";
+      return "Please pay now. Reply if you need payment details.";
   }
 }
 
-function openingPhrase(tone: ReminderTone, customerName: string): string {
+/** Greeting AND identity in one sentence — SMS has no From header, so this is the only place the sender is named. */
+function openingPhrase(tone: ReminderTone, customerName: string, senderName: string): string {
   const name = greetingName(customerName);
-  switch (tone) {
-    case "friendly": return `Hi ${name},`;
-    case "firm": return `Hi ${name},`;
-    case "final": return `${name},`;
-  }
+  const greet = tone === "final" ? `${name},` : `Hi ${name},`;
+  return `${greet} this is ${senderName}.`;
 }
 
 /**
@@ -125,28 +150,20 @@ export function buildReminderSms(
   now: Date = new Date()
 ): string {
   const {
-    tone, customerName, businessName, amount, dueDate,
+    tone, customerName, senderName, amount, dueDate,
     paymentLink = null, invoiceReference = null, jobDescription = null,
   } = params;
 
-  const opening = openingPhrase(tone, customerName);
-  const subject = invoicePhrase(invoiceReference, jobDescription);
+  const opening = openingPhrase(tone, customerName, senderName);
   const timing = timingPhrase(dueDate, now);
-  const money = formatCurrency(amount);
+  const money = formatCurrencyForSms(amount);
+  const fact = factSentence(invoiceReference, jobDescription, money, timing);
   const ask = paymentPhrase(tone, paymentLink);
 
-  // The business name leads the factual sentence: on SMS it is the only thing
-  // identifying the sender.
-  // Kept deliberately tight. "The balance of X is now N days overdue" became
-  // "X ... is now N days overdue" — the words removed carried no information a
-  // customer needs, and on SMS every clause costs the reader attention on a
-  // lock screen.
-  return [
-    opening,
-    `${businessName} here about ${subject}.`,
-    `${money} ${timing}.`,
-    ask,
-  ].join(" ");
+  // Three sentences: greeting+identity, the fact (what/how much/when), then
+  // the ask. Kept deliberately tight — every clause costs the reader
+  // attention on a lock screen.
+  return [opening, fact, ask].join(" ");
 }
 
 export type SmsValidationProblem = "empty" | "too_long";

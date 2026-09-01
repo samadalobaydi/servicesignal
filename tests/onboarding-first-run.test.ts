@@ -57,13 +57,16 @@ function bodyOf(src: string, marker: string): string {
 // ── Do not ask twice ───────────────────────────────────────────────────────
 
 test("onboarding never asks for information the account already holds", () => {
-  // Business name: the server decides whether the prerequisite is needed at
-  // all, from the canonical profile value. The bug this replaced was a client
-  // that always rendered step 1 with the name pre-filled — which is a
-  // confirmation screen for something nobody asked to confirm.
-  assert.match(PAGE, /const needsBusinessName = isBusinessNameBlank\(businessName\)/);
-  assert.match(FLOW, /useState<1 \| 2 \| 3 \| 4>\(needsBusinessName \? 1 : 2\)/,
-    "the flow must open on the invoice step when the name is known");
+  // Sender identity: the server decides whether the prerequisite is needed
+  // at all, from sender_identity being genuinely unset — NOT from whether
+  // business_name happens to be populated (an existing business name on
+  // file is not the same fact as having explicitly chosen Business). The
+  // bug this replaced was a client that always rendered step 1 with the
+  // name pre-filled — which is a confirmation screen for something nobody
+  // asked to confirm.
+  assert.match(PAGE, /const needsSenderIdentity = senderIdentity === null/);
+  assert.match(FLOW, /useState<1 \| 2 \| 3 \| 4>\(needsSenderIdentity \? 1 : 2\)/,
+    "the flow must open on the invoice step when the identity choice is already known");
 
   // Email: displayed as a fact, never collected. No input may bind to it.
   assert.equal(/<input[^>]*value=\{email\}/.test(FLOW), false,

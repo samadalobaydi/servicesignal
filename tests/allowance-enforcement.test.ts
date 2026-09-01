@@ -453,7 +453,7 @@ test("[static] the migration is not self-applying and says where it points", () 
 
 test("[static] every send path claims allowance first", () => {
   // The two places in the product that can cause a customer to be contacted.
-  const approveRoute = readFileSync(join(ROOT, "app/api/reminders/[id]/approve/route.ts"), "utf8");
+  const approveRoute = readFileSync(join(ROOT, "lib/approval-wiring.ts"), "utf8");
   const cron = readFileSync(join(ROOT, "app/api/cron/send-reminders/route.ts"), "utf8");
 
   assert.match(approveRoute, /claim_reminder_allowance/);
@@ -470,9 +470,22 @@ test("[static] the enforcement point is server-side and not reachable from the c
   const service = readFileSync(join(ROOT, "lib/reminder-approval.ts"), "utf8");
 
   // The claim happens inside the service, before the mailer is touched.
+  // Submission now happens inside dispatchChannels, which is called AFTER the
+  // allowance claim. Anchored on the dispatcher rather than on a mailer call
+  // that no longer appears in the service body.
   assert.ok(
-    service.indexOf("deps.allowance.claim(") < service.indexOf("deps.mailer.send("),
+    service.indexOf("deps.allowance.claim(") < service.indexOf("await dispatchChannels("),
     "allowance is decided before submission"
+  );
+  // And nothing submits before the dispatcher: the only provider calls in the
+  // service are inside it.
+  assert.ok(
+    service.indexOf("function dispatchChannels(") < service.indexOf("deps.mailer!.send("),
+    "the mailer is only reachable through the dispatcher"
+  );
+  assert.ok(
+    service.indexOf("function dispatchChannels(") < service.indexOf("deps.texter!.send("),
+    "the texter is only reachable through the dispatcher"
   );
 
   // AllowanceStore is required, not optional — an optional enforcement point

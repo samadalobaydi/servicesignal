@@ -6,6 +6,10 @@ import { sendAndUpdateLog } from "@/lib/reminder-sender";
 import { BETA_APPROVAL_ONLY } from "@/lib/beta-capabilities";
 import { canEmailCustomer } from "@/lib/daily-reminder-run";
 import { getTodayLondonDate } from "@/lib/date-status";
+import {
+  resolveSenderIdentity,
+  resolveSenderIdentityForDisplay,
+} from "@/lib/sender-identity";
 import type { Invoice, Profile } from "@/types";
 
 interface RunSummary {
@@ -185,16 +189,24 @@ export async function GET(request: NextRequest) {
     }
 
     // ── All checks passed — build the email content ──────────────────────────
-    const businessName =
-      profile.business_name?.trim() ||
-      userEmailMap.get(invoice.user_id) ||
-      "ServiceSignal";
+    //
+    // Display-only value stored on a row this cron always leaves 'pending'
+    // for approval (see the BETA_APPROVAL_ONLY gate below) — harmless even
+    // if unresolved, since nothing reads this stored subject back for
+    // display or send (the review/approve path always recomposes fresh from
+    // current profile state). The STRICT gate — required before the actual
+    // auto-send branch below can call a provider — is separate; see there.
+    const senderName = resolveSenderIdentityForDisplay({
+      preference: profile.sender_identity,
+      businessName: profile.business_name,
+      personalName: profile.personal_name,
+    });
 
     const { subject, html, text } = buildReminderEmail({
       tone: invoice.reminder_tone,
       schedule,
       customerName: invoice.customer_name,
-      businessName,
+      senderName,
       amount: invoice.amount,
       dueDate: invoice.due_date,
       paymentLink: invoice.payment_link || undefined,
@@ -247,11 +259,37 @@ export async function GET(request: NextRequest) {
       //
       // Unreachable today — BETA_APPROVAL_ONLY holds isAutoMode false — but
       // this is exactly the sort of gate that gets forgotten on the day the
-      // flag flips, and a cap with a bypass is not a cap. The same atomic
-      // function the approval route uses, so the two cannot drift.
+      // flag flips, and a cap with a bypass is not a cap.
       //
-      // service_role has no auth.uid(), so the user is named explicitly; the
-      // function accepts that only from a trusted server process.
+      // STRICT sender-identity gate, independent of the display-only value
+      // computed above. resolveSenderIdentityForDisplay() (used for the
+      // always-created stored row's placeholder subject) never refuses —
+      // it would silently show "ServiceSignal" for an account with no
+      // configured identity. That is fine for a value nothing dispatches
+      // from directly, but this branch is about to call a provider, so it
+      // re-resolves strictly and refuses instead of reusing that fallback.
+      // AUTO MODE RELEASE BLOCKER (separate, unrelated to identity): this
+      // path only ever calls Resend — it has no Twilio/SMS call at all, so
+      // it cannot dispatch the equal SMS+email pair the product requires.
+      // Auto Mode must not be enabled until that is also fixed; not in
+      // scope here.
+      const identity = resolveSenderIdentity({
+        preference: profile.sender_identity,
+        businessName: profile.business_name,
+        personalName: profile.personal_name,
+      });
+      if (!identity) {
+        console.warn(
+          `[cron] Reminder ${insertedLog.id} not auto-sent: no sender identity configured. Left pending.`
+        );
+        summary.remindersSkipped++;
+        continue;
+      }
+
+      // The same atomic function the approval route uses, so the two cannot
+      // drift. service_role has no auth.uid(), so the user is named
+      // explicitly; the function accepts that only from a trusted server
+      // process.
       const { data: claimData, error: claimError } = await supabase.rpc(
         "claim_reminder_allowance",
         // The cap is server-side; see the security note in migration 011.

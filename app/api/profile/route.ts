@@ -3,11 +3,12 @@ import { getSupabaseServer } from "@/lib/supabase-server";
 import { cleanBusinessNameOrNull, isBusinessNameBlank } from "@/lib/business-name";
 import { sendWelcomeEmailIfNeeded } from "@/lib/welcome-email";
 import { LEGAL_CONFIG } from "@/lib/legal";
-import type { ProfileUpdate, ReminderTone, ReminderMode } from "@/types";
+import type { ProfileUpdate, ReminderTone, ReminderMode, SenderIdentityPreference } from "@/types";
 import { BETA_APPROVAL_ONLY } from "@/lib/beta-capabilities";
 
 const VALID_TONES: ReminderTone[] = ["friendly", "firm", "final"];
 const VALID_MODES: ReminderMode[] = ["approval", "auto"];
+const VALID_SENDER_IDENTITIES: Exclude<SenderIdentityPreference, null>[] = ["business", "personal"];
 
 /**
  * GET /api/profile
@@ -267,6 +268,81 @@ export async function PUT(request: NextRequest) {
   if (typeof body.business_name === "string") {
     update.business_name = body.business_name.trim().slice(0, 100);
   }
+  if (typeof body.personal_name === "string") {
+    update.personal_name = body.personal_name.trim().slice(0, 100);
+  }
+
+  // ── Sender identity (migration 014) ─────────────────────────────────────
+  //
+  // NO CROSS-FALLBACK, enforced here too, not only at send time: saving
+  // sender_identity: 'business' while the RESULTING business_name is blank
+  // — whether it was already blank in storage, or this same request sets it
+  // to '' / whitespace — would create a row that LOOKS configured (a
+  // non-null preference) but cannot actually resolve. That is worse than
+  // staying unconfigured, because Prepare's "choose how customers should
+  // see you" refusal would no longer make sense against a preference that
+  // already looks chosen. A selected preference must always be paired with
+  // a valid name in the resulting row, so the CURRENT stored name is
+  // fetched whenever this request doesn't also supply one.
+  if (body.sender_identity !== undefined) {
+    if (body.sender_identity === null) {
+      // An explicit un-choose. Not currently exposed by any UI, but a
+      // legitimate write — matches business_name/personal_name, which can
+      // also be blanked out.
+      update.sender_identity = null;
+    } else if (VALID_SENDER_IDENTITIES.includes(body.sender_identity)) {
+      let existingBusinessName: string | null | undefined;
+      let existingPersonalName: string | null | undefined;
+
+      const needsExistingBusinessName =
+        body.sender_identity === "business" && update.business_name === undefined;
+      const needsExistingPersonalName =
+        body.sender_identity === "personal" && update.personal_name === undefined;
+
+      if (needsExistingBusinessName || needsExistingPersonalName) {
+        const { data: existing } = await supabase
+          .from("profiles")
+          .select("business_name, personal_name")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        existingBusinessName = existing?.business_name ?? null;
+        existingPersonalName = existing?.personal_name ?? null;
+      }
+
+      const resultingBusinessName =
+        update.business_name !== undefined ? update.business_name : existingBusinessName ?? null;
+      const resultingPersonalName =
+        update.personal_name !== undefined ? update.personal_name : existingPersonalName ?? null;
+
+      if (body.sender_identity === "business" && !resultingBusinessName?.trim()) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Add your business name before choosing Business as your sender identity.",
+            fieldErrors: { business_name: "Business name is required." },
+          },
+          { status: 400 }
+        );
+      }
+      if (body.sender_identity === "personal" && !resultingPersonalName?.trim()) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Add your name before choosing My name as your sender identity.",
+            fieldErrors: { personal_name: "Your name is required." },
+          },
+          { status: 400 }
+        );
+      }
+      update.sender_identity = body.sender_identity;
+    } else {
+      return NextResponse.json(
+        { success: false, message: "Invalid sender identity." },
+        { status: 400 }
+      );
+    }
+  }
+
   if (typeof body.contact_email === "string") {
     update.contact_email = body.contact_email.trim().slice(0, 200);
   }

@@ -4,6 +4,7 @@ import { useDashboard } from "@/components/dashboard/DashboardProvider";
 import SettingsCard from "@/components/dashboard/SettingsCard";
 import { PaymentMethodCard } from "@/components/dashboard/PaymentMethodCard";
 import { BETA_APPROVAL_ONLY } from "@/lib/beta-capabilities";
+import { resolveSenderIdentity } from "@/lib/sender-identity";
 
 export default function SettingsPage() {
   const { profile, userEmail, setProfile, stats, buckets } = useDashboard();
@@ -13,7 +14,20 @@ export default function SettingsPage() {
   const autoActive = !BETA_APPROVAL_ONLY && profile?.reminder_mode === "auto";
   const modeLabel = autoActive ? "Auto Mode" : "Approval Mode";
   const modeColor = autoActive ? "var(--dash-green)" : "var(--dash-accent-strong)";
-  const businessName = profile?.business_name?.trim();
+
+  // The genuinely resolved identity — never just business_name, which would
+  // be wrong (or misleadingly "set") for an account that chose Personal, or
+  // for one that hasn't chosen anything at all. resolveSenderIdentity()
+  // returns null for a genuinely unconfigured account; that null is exactly
+  // what makes the honest "you haven't chosen yet" copy below correct
+  // instead of inventing a claim about how reminders currently appear.
+  const senderIdentity = profile
+    ? resolveSenderIdentity({
+        preference: profile.sender_identity,
+        businessName: profile.business_name,
+        personalName: profile.personal_name,
+      })
+    : null;
 
   return (
     <div className="space-y-6">
@@ -31,7 +45,7 @@ export default function SettingsPage() {
         <div className="lg:col-span-2">
           {profile ? (
             <div className="space-y-6">
-              <SettingsCard profile={profile} userEmail={userEmail} onUpdated={setProfile} />
+              <SettingsCard profile={profile} onUpdated={setProfile} />
               {/* Phase 1: payment link only. Bank transfer is staged — see
                   supabase/sql/008_default_payment_link.sql. */}
               <PaymentMethodCard profile={profile} onUpdated={setProfile} />
@@ -55,9 +69,9 @@ export default function SettingsPage() {
                 <p className="text-sm truncate" style={{ color: "var(--dash-text)", fontWeight: 500 }} title={userEmail}>{userEmail || "—"}</p>
               </div>
               <div>
-                <p className="text-xs" style={{ color: "var(--dash-text-soft)" }}>Business name</p>
-                <p className="text-sm" style={{ color: businessName ? "var(--dash-text)" : "var(--dash-text-soft)", fontWeight: 500 }}>
-                  {businessName || "Not set — emails use your address"}
+                <p className="text-xs" style={{ color: "var(--dash-text-soft)" }}>How customers see you</p>
+                <p className="text-sm" style={{ color: senderIdentity ? "var(--dash-text)" : "var(--dash-text-soft)", fontWeight: 500 }}>
+                  {senderIdentity ? senderIdentity.senderName : "Not chosen yet"}
                 </p>
               </div>
               <div>

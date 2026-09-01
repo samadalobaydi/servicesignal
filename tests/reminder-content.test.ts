@@ -23,7 +23,7 @@ const FACTS: ReminderFacts = {
   tone: "firm",
   schedule: "overdue_7_days",
   customerName: "Dave Morrison",
-  businessName: "Oakfield Plumbing",
+  senderName: "Oakfield Plumbing",
   amount: 1240,
   dueDate: "2026-07-26", // 12 days before NOW
   paymentLink: null,
@@ -59,9 +59,113 @@ test("the SMS carries the invoice facts and identifies the business", () => {
   assert.match(body, /Oakfield Plumbing/, "names the sender — SMS has no From header");
   assert.match(body, /INV-1042/);
   assert.match(body, /bathroom leak repair/);
-  assert.match(body, /£1,240\.00/);
+  assert.match(body, /£1,240(?!\.)/, "FACTS' £1,240 is a whole-pound amount — SMS drops the .00");
   assert.match(body, /12 days overdue/);
   assert.ok(body.length <= SMS_MAX_LENGTH, `length ${body.length} within bound`);
+});
+
+test("the no-payment-link SMS matches the reviewed structure exactly", () => {
+  const body = buildReminderSms(FACTS, NOW);
+  assert.equal(
+    body,
+    "Hi Dave, this is Oakfield Plumbing. INV-1042 for bathroom leak repair, " +
+      "£1,240 is 12 days overdue. Please pay at your earliest convenience. " +
+      "Reply if you need payment details."
+  );
+});
+
+test("the payment-link SMS is concise and does not duplicate the email's extra sentences", () => {
+  const body = buildReminderSms({ ...FACTS, paymentLink: "https://pay.example.com/inv-1042" }, NOW);
+  assert.equal(
+    body,
+    "Hi Dave, this is Oakfield Plumbing. INV-1042 for bathroom leak repair, " +
+      "£1,240 is 12 days overdue. Please pay here: https://pay.example.com/inv-1042"
+  );
+  // No reply-for-details offer once a link exists — that sentence exists
+  // only for the no-link case, and repeating it here would be exactly the
+  // "duplicate sentence just because the email has one" the direction warns against.
+  assert.equal(/reply if you need/i.test(body), false);
+});
+
+// ── SMS-only amount formatting: no unnecessary ".00" pence ──────────────
+
+test("a whole-pound amount drops the .00 pence in SMS, but not in the email", () => {
+  const wholePound = { ...FACTS, amount: 1500 };
+  const sms = buildReminderSms(wholePound, NOW);
+  assert.match(sms, /£1,500(?!\.)/, "SMS must show £1,500, not £1,500.00");
+  assert.equal(/£1,500\.00/.test(sms), false);
+
+  const email = generateReminderContent(wholePound, NOW);
+  assert.match(email.email.body, /£1,500\.00/, "the email keeps full formatCurrency() precision, unchanged");
+});
+
+test("real pence are never dropped in SMS", () => {
+  const withPence = { ...FACTS, amount: 1500.5 };
+  const sms = buildReminderSms(withPence, NOW);
+  assert.match(sms, /£1,500\.50/);
+});
+
+// ── GSM/SMS length audit (representative Stage B example) ───────────────
+//
+// Segment thresholds: GSM-7 single segment ≤160 chars, concatenated
+// (multi-part) segments are 153 chars each once over that. Every character
+// used in generated reminder copy (letters, digits, £, standard punctuation)
+// is in the GSM 03.38 basic character set, so no message here forces UCS-2
+// (which would drop the caps to 70/67).
+
+test("[audit] representative Stage B example: character/segment count, no-payment-link", () => {
+  const stageB = {
+    tone: "firm" as const,
+    schedule: "overdue_7_days" as const,
+    customerName: "Sam Alobaydi",
+    senderName: "Buildscape Ltd", // representative — see the identity report for why the real value could not be read
+    amount: 1500,
+    dueDate: "2026-08-18",
+    paymentLink: null,
+    invoiceReference: "INV003",
+    jobDescription: null,
+  };
+  const body = buildReminderSms(stageB, new Date("2026-08-27T12:00:00Z"));
+  assert.equal(body.length, 144, `expected 144 chars, got ${body.length}: ${body}`);
+  // ≤160 GSM-7 chars → exactly 1 segment (the single-segment cap, not the
+  // 153/segment concatenated rate — that only applies once this is exceeded).
+  assert.ok(body.length <= 160, "target: this representative example fits a single GSM-7 segment");
+});
+
+test("[audit] representative Stage B example: character/segment count, with payment link", () => {
+  const stageB = {
+    tone: "firm" as const,
+    schedule: "overdue_7_days" as const,
+    customerName: "Sam Alobaydi",
+    senderName: "Buildscape Ltd",
+    amount: 1500,
+    dueDate: "2026-08-18",
+    paymentLink: "https://pay.example.com/inv003",
+    invoiceReference: "INV003",
+    jobDescription: null,
+  };
+  const body = buildReminderSms(stageB, new Date("2026-08-27T12:00:00Z"));
+  assert.equal(body.length, 116, `expected 116 chars, got ${body.length}: ${body}`);
+  assert.ok(body.length <= 160, "this example fits a single GSM-7 segment");
+});
+
+test("SMS identity always matches the email identity — one generation call, one senderName, both channels", () => {
+  // Deliberately NOT "Oakfield Plumbing" (the module-level default) — a
+  // second, distinct identity proves the agreement is structural (both
+  // channels reading facts.senderName) rather than two hardcoded strings
+  // that happen to be equal.
+  const identityFacts = { ...FACTS, senderName: "Riverside Electrical" };
+  const generated = generateReminderContent(identityFacts, NOW);
+
+  assert.match(generated.email.subject, /Riverside Electrical/);
+  assert.match(generated.email.body, /Riverside Electrical/);
+  assert.match(generated.sms.body, /Riverside Electrical/);
+
+  // And never disagree: whatever the email says, the SMS says the same name.
+  const emailHasOld = generated.email.subject.includes("Oakfield Plumbing");
+  const smsHasOld = generated.sms.body.includes("Oakfield Plumbing");
+  assert.equal(emailHasOld, false);
+  assert.equal(smsHasOld, false);
 });
 
 test("the SMS is written for SMS, not derived from the email", () => {

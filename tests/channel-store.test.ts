@@ -24,7 +24,7 @@ const FACTS: ReminderFacts = {
   tone: "firm",
   schedule: "overdue_7_days",
   customerName: "Dave Morrison",
-  businessName: "Oakfield Plumbing",
+  senderName: "Oakfield Plumbing",
   amount: 1240,
   dueDate: "2026-07-26",
   paymentLink: null,

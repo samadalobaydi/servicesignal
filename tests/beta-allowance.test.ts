@@ -313,7 +313,22 @@ test("[static] the panel hides rather than guess when usage is unverified", () =
   assert.equal(/betaAllowance\(0\)|\?\? 0/.test(chip), false, "no reassuring default");
 
   // The provider is null until a real count arrives, and stays null on error.
-  assert.match(ctx, /if \(!cancelled && n !== null\) setUsed\(n\)/);
+  //
+  // The guard is now a re-armable MountGuard (lib/mount-guard.ts) rather than
+  // a per-effect `cancelled` local or a plain ref that is only ever set to
+  // true, because the same fetch-and-set function is reused for both the
+  // mount-time load and every later refetch (e.g. right after approving a
+  // send) — see the note in BetaAllowanceContext.tsx. A plain "set once on
+  // cleanup" ref broke under React Strict Mode's mount→cleanup→mount-again
+  // dance: the first (discarded) cleanup permanently marked the guard as
+  // unmounted, and every later load() silently failed to apply its result —
+  // see lib/mount-guard.ts for the incident this fixes. The property this
+  // test asserts is unchanged: a result never lands after the provider is
+  // genuinely gone, and now it also survives being re-armed on every mount.
+  assert.match(ctx, /createMountGuard\(\)/);
+  assert.match(ctx, /guard\.current\.onMount\(\)/);
+  assert.match(ctx, /guard\.current\.onCleanup\(\)/);
+  assert.match(ctx, /if \(guard\.current\.isMounted\(\) && n !== null\) setUsed\(n\)/);
   assert.match(ctx, /used === null \? null : betaAllowance\(used\)/);
 });
 

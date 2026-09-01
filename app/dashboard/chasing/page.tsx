@@ -7,6 +7,7 @@ import ActiveChasingList from "@/components/dashboard/ActiveChasingList";
 import SummaryStrip, { type SummaryStat } from "@/components/dashboard/SummaryStrip";
 import InvoiceSearchInput, { matchesInvoiceSearch, SearchEmptyState } from "@/components/dashboard/InvoiceSearchInput";
 import { formatCurrency } from "@/lib/invoices";
+import { partialSendSummary } from "@/lib/reminder-aggregate";
 import { OnboardingHandoff } from "@/components/dashboard/OnboardingHandoff";
 import { SentConfirmation } from "@/components/dashboard/SentConfirmation";
 import AddInvoiceForm from "@/components/dashboard/AddInvoiceForm";
@@ -18,7 +19,7 @@ export default function ChasingPage() {
   const {
     buckets, pendingReminderInvoiceIds, reminders, reminderHistory,
     handlePrepareReminder, handleMarkPaid, handleDeleteInvoice, handleArchiveInvoice,
-    refreshAll, setError, setNotice,
+    refreshAll, setError, setNotice, channelStatuses,
   } = useDashboard();
 
   /**
@@ -33,6 +34,24 @@ export default function ChasingPage() {
     }
     return map;
   }, [reminders, reminderHistory]);
+
+  /**
+   * invoice_id → "Email sent · SMS failed".
+   *
+   * Derived from the CHILD rows, because the parent status cannot express a
+   * partial send: a reminder whose email landed and whose SMS did not is
+   * `sent`, and reading the parent alone is what made this row lie.
+   */
+  const partialByInvoice = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const r of [...reminders, ...reminderHistory]) {
+      const summary = partialSendSummary(
+        (channelStatuses[r.id] ?? {}) as Parameters<typeof partialSendSummary>[0]
+      );
+      if (summary && !map[r.invoice_id]) map[r.invoice_id] = summary;
+    }
+    return map;
+  }, [reminders, reminderHistory, channelStatuses]);
 
   const [editing, setEditing] = useState<Invoice | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
@@ -144,8 +163,16 @@ export default function ChasingPage() {
         <h1 style={{ fontSize: "1.85rem", fontWeight: 700, color: "var(--dash-text)", letterSpacing: "-0.02em" }}>
           Active Chasing
         </h1>
+        {/* NOT "Prepare reminders to chase payment" — that read as an
+            always-available instruction, but Prepare Reminder only appears
+            once an invoice's next checkpoint is actually reached (see
+            lib/reminder-schedule.ts::prepareEligibility). An invoice
+            between checkpoints correctly shows neither Prepare nor Review,
+            and the old wording implied something was missing rather than
+            working as designed. This describes the loop truthfully at
+            every state instead. */}
         <p className="text-sm mt-1.5" style={{ color: "var(--dash-text-muted)" }}>
-          Unpaid invoices in the normal reminder loop. Prepare reminders to chase payment.
+          Unpaid invoices in the normal reminder loop. Each reminder becomes available to prepare as its checkpoint is reached.
         </p>
       </div>
 
@@ -162,6 +189,7 @@ export default function ChasingPage() {
           onPrepareReminder={handlePrepareReminder}
           onMarkPaid={handleMarkPaid}
           reminderStatusesByInvoice={reminderStatusesByInvoice}
+          partialByInvoice={partialByInvoice}
           onEditInvoice={(inv) => { setWarning(null); setEditing(inv); }}
           onDeleteInvoice={async (inv) => handleDeleteInvoice(inv.id)}
           onArchiveInvoice={async (inv) => handleArchiveInvoice(inv.id)}

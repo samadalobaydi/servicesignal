@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServer } from "@/lib/supabase-server";
-import { resolveBusinessName } from "@/lib/reminder-approval";
+import { resolveSenderIdentityForDisplay, reminderFromHeader } from "@/lib/sender-identity";
+import { REMINDER_FROM_ADDRESS } from "@/lib/resend";
 import {
   currentContent,
   originalContent,
@@ -77,11 +78,18 @@ async function load(
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("business_name")
+    .select("sender_identity, business_name, personal_name")
     .eq("user_id", userId)
     .maybeSingle();
 
-  const businessName = resolveBusinessName(profile?.business_name, userEmail);
+  // Display/edit only — never a send gate, so a neutral placeholder (never
+  // the account email) is acceptable here even though the real send path
+  // refuses outright when identity isn't resolvable.
+  const senderName = resolveSenderIdentityForDisplay({
+    preference: profile?.sender_identity ?? null,
+    businessName: profile?.business_name,
+    personalName: profile?.personal_name,
+  });
 
   return {
     reminderId: row.id,
@@ -93,7 +101,7 @@ async function load(
       tone: row.invoices.reminder_tone,
       schedule: row.schedule,
       customerName: row.invoices.customer_name,
-      businessName,
+      senderName,
       amount: row.invoices.amount,
       dueDate: row.invoices.due_date,
       paymentLink: row.invoices.payment_link,
@@ -121,8 +129,8 @@ async function respond(
       legacy: current.legacy,
       email: {
         to: loaded.emailTo,
-        from: loaded.facts.businessName,
-        deliveredBy: "ServiceSignal",
+        from: loaded.facts.senderName,
+        deliveredBy: reminderFromHeader(loaded.facts.senderName, REMINDER_FROM_ADDRESS),
         repliesTo: loaded.replyTo,
         subject: current.email.subject,
         body: current.email.body,

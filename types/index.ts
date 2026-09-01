@@ -226,9 +226,25 @@ export interface ReminderLog {
 
 export type ReminderMode = "approval" | "auto";
 
+/**
+ * Migration 014. Which of business_name/personal_name is the account's
+ * explicit choice of customer-facing sender identity. NULL means the choice
+ * has genuinely never been made — never inferred from whichever name field
+ * happens to be populated. See lib/sender-identity.ts for the resolver that
+ * reads this.
+ */
+export type SenderIdentityPreference = "business" | "personal" | null;
+
 export interface Profile {
   user_id: string;
   business_name: string | null;
+  /**
+   * Migration 014. The personal/full name an account holder may choose to
+   * sign reminders with, as an alternative to business_name.
+   */
+  personal_name: string | null;
+  /** Migration 014. See SenderIdentityPreference. */
+  sender_identity: SenderIdentityPreference;
   contact_email: string | null;
   contact_phone: string | null;
   default_tone: ReminderTone;
@@ -248,6 +264,10 @@ export interface Profile {
 
 export interface ProfileUpdate {
   business_name?: string;
+  /** Migration 014. */
+  personal_name?: string;
+  /** Migration 014. Explicit null clears a previously-saved choice (not currently exposed in any UI, but a legitimate write). */
+  sender_identity?: SenderIdentityPreference;
   /** Migration 008. Explicit null clears the saved default. */
   default_payment_link?: string | null;
   contact_email?: string;

@@ -3,13 +3,19 @@ process.env.REVIEW_TOKEN_SECRET ??= "test-review-token-secret";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { approveAndSendReminder, composeReminderContent, resolveBusinessName } from "@/lib/reminder-approval";
+import {
+  approveAndSendReminder,
+  retryReminderChannel,
+  composeReminderContent,
+} from "@/lib/reminder-approval";
+import { resolveSenderIdentity } from "@/lib/sender-identity";
 import { issueReviewToken } from "@/lib/review-token";
 import {
   generateReminderContent,
   withEmailEdit,
   withSmsEdit,
   withEmailRestored,
+  identityHasDrifted,
   type StoredReminderContent,
   type ReminderFacts,
 } from "@/lib/reminder-content";
@@ -17,6 +23,8 @@ import { storedContentFromRows, type ChannelRow } from "@/lib/reminder-channel-s
 import {
   FakeApprovalDb,
   FakeMailer,
+  FakeTexter,
+  FakeChannelDb,
   OWNER,
   REMINDER_ID,
   makeDeps,
@@ -34,13 +42,23 @@ import {
  * the bug being fixed.
  */
 
+function resolvedSenderName(db: FakeApprovalDb): string {
+  return (
+    resolveSenderIdentity({
+      preference: db.senderIdentity,
+      businessName: db.businessName,
+      personalName: db.personalName,
+    })?.senderName ?? "ServiceSignal"
+  );
+}
+
 function factsFor(db: FakeApprovalDb): ReminderFacts {
   const row = db.get();
   return {
     tone: row.invoice.reminderTone,
     schedule: row.schedule,
     customerName: row.invoice.customerName,
-    businessName: resolveBusinessName(db.businessName, "owner@example.com"),
+    senderName: resolvedSenderName(db),
     amount: row.invoice.amount,
     dueDate: row.invoice.dueDate,
     paymentLink: row.invoice.paymentLink,
@@ -62,6 +80,9 @@ function withStoredOriginals(db: FakeApprovalDb): StoredReminderContent {
     sms: { generatedBody: g.sms.body, editedBody: null },
   };
   db.get().storedContent = stored;
+  // The identity that just generated this content — recorded the same way
+  // app/api/reminders/prepare/route.ts records it at the real insert.
+  db.get().generatedSenderName = resolvedSenderName(db);
   return stored;
 }
 
@@ -70,7 +91,7 @@ async function tokenForCurrent(db: FakeApprovalDb): Promise<string> {
   assert.ok(reminder);
   const composed = composeReminderContent(
     reminder,
-    resolveBusinessName(db.businessName, "owner@example.com"),
+    resolvedSenderName(db),
     "owner@example.com"
   );
   return issueReviewToken({ userId: OWNER, reminderId: REMINDER_ID, contentHash: composed.hash });
@@ -305,4 +326,216 @@ test("the channel-row folder maps Supabase rows into the content model", () => {
   // No rows at all is the legacy shape, not an empty message.
   assert.deepEqual(storedContentFromRows([]), { email: null, sms: null });
   assert.deepEqual(storedContentFromRows(null), { email: null, sms: null });
+});
+
+// ── Identity drift AFTER stored content was generated ───────────────────────
+//
+// THE DEFECT THIS SECTION CLOSES (see migration 015 and lib/reminder-content.ts's
+// identityHasDrifted).
+//
+// generated_subject/generated_body are written ONCE, at preparation, and never
+// rewritten. senderName, by contrast, is resolved FRESH on every Approve/Retry.
+// If the account's identity changes between preparation and approval, the fresh
+// From header and the frozen stored body would disagree about who the message
+// is from — and reloading Review does not fix it, because reload just mints a
+// new token from the CURRENT identity against the SAME frozen body, which
+// makes the token valid while the mismatch still ships. Every test below drives
+// the REAL stored-content path (a populated storedContent + generatedSenderName),
+// unlike tests 34/34b/34c above, which use the default legacy fixture and so
+// never reach this code at all.
+
+test("A. Business A prepared, changed to Personal B before Approve — refused, zero provider calls", async () => {
+  const db = new FakeApprovalDb();
+  db.senderIdentity = "business";
+  db.businessName = "Wilson Plumbing";
+  withStoredOriginals(db); // stored content generated under Business/Wilson Plumbing
+  const mailer = new FakeMailer();
+  const texter = new FakeTexter();
+
+  const token = await tokenForCurrent(db); // Review "renders" under the (still current) generation identity
+
+  db.senderIdentity = "personal";
+  db.personalName = "Sam Alobaydi";
+
+  const result = await approveAndSendReminder(makeDeps(db, mailer, { texter }), {
+    reminderId: REMINDER_ID,
+    reviewToken: token,
+  });
+
+  assert.equal(result.status, 409);
+  assert.equal(result.body.state, "identity_drift");
+  assert.equal(mailer.calls.length, 0, "zero email sends");
+  assert.equal(texter.calls.length, 0, "zero SMS sends");
+});
+
+test("B. Personal A prepared, changed to Business B before Approve — refused, zero provider calls", async () => {
+  const db = new FakeApprovalDb();
+  db.senderIdentity = "personal";
+  db.businessName = null;
+  db.personalName = "Sam Alobaydi";
+  withStoredOriginals(db);
+  const mailer = new FakeMailer();
+  const texter = new FakeTexter();
+
+  const token = await tokenForCurrent(db);
+
+  db.senderIdentity = "business";
+  db.businessName = "Wilson Plumbing";
+
+  const result = await approveAndSendReminder(makeDeps(db, mailer, { texter }), {
+    reminderId: REMINDER_ID,
+    reviewToken: token,
+  });
+
+  assert.equal(result.status, 409);
+  assert.equal(result.body.state, "identity_drift");
+  assert.equal(mailer.calls.length, 0);
+  assert.equal(texter.calls.length, 0, "zero SMS sends");
+});
+
+test("C. same two directions through Retry — refused, zero provider calls, on the very first attempt (no token needed)", async () => {
+  for (const [label, setup] of [
+    [
+      "Business -> Personal",
+      (db: FakeApprovalDb) => {
+        db.senderIdentity = "business";
+        db.businessName = "Wilson Plumbing";
+        withStoredOriginals(db);
+        db.senderIdentity = "personal";
+        db.personalName = "Sam Alobaydi";
+      },
+    ],
+    [
+      "Personal -> Business",
+      (db: FakeApprovalDb) => {
+        db.senderIdentity = "personal";
+        db.businessName = null;
+        db.personalName = "Sam Alobaydi";
+        withStoredOriginals(db);
+        db.senderIdentity = "business";
+        db.businessName = "Wilson Plumbing";
+      },
+    ],
+  ] as const) {
+    const db = new FakeApprovalDb([makeStoredReminder({ status: "sent" })]);
+    setup(db);
+    const mailer = new FakeMailer();
+    const channelDb = new FakeChannelDb([
+      { channel: "email", status: "failed", sendAttemptCount: 1 },
+      { channel: "sms", status: "sent", sendAttemptCount: 1 },
+    ]);
+
+    const result = await retryReminderChannel(
+      makeDeps(db, mailer, { channelDb }),
+      { reminderId: REMINDER_ID, channel: "email" }
+    );
+
+    assert.equal(result.status, 409, label);
+    assert.equal(result.body.state, "identity_drift", label);
+    assert.equal(mailer.calls.length, 0, `${label}: zero email sends`);
+  }
+});
+
+test("D. unchanged identity + existing stored content — Approve still succeeds normally", async () => {
+  const db = new FakeApprovalDb();
+  db.senderIdentity = "business";
+  db.businessName = "Wilson Plumbing";
+  const stored = withStoredOriginals(db);
+  const mailer = new FakeMailer();
+
+  const result = await approveAndSendReminder(makeDeps(db, mailer), {
+    reminderId: REMINDER_ID,
+    reviewToken: await tokenForCurrent(db),
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(mailer.calls.length, 1);
+  assert.equal(mailer.calls[0].message.text, stored.email!.generatedBody);
+});
+
+test("E. same identity TYPE but a different resolved name still refuses — equality is the resolved name, not business-vs-personal", async () => {
+  // Business "ABC Plumbing" -> Business "ABC Heating"
+  {
+    const db = new FakeApprovalDb();
+    db.senderIdentity = "business";
+    db.businessName = "ABC Plumbing";
+    withStoredOriginals(db);
+    const mailer = new FakeMailer();
+    const token = await tokenForCurrent(db);
+
+    db.businessName = "ABC Heating";
+
+    const result = await approveAndSendReminder(makeDeps(db, mailer), {
+      reminderId: REMINDER_ID,
+      reviewToken: token,
+    });
+    assert.equal(result.body.state, "identity_drift", "Business name change alone");
+    assert.equal(mailer.calls.length, 0);
+  }
+
+  // Personal "Sam" -> Personal "Samuel"
+  {
+    const db = new FakeApprovalDb();
+    db.senderIdentity = "personal";
+    db.businessName = null;
+    db.personalName = "Sam";
+    withStoredOriginals(db);
+    const mailer = new FakeMailer();
+    const token = await tokenForCurrent(db);
+
+    db.personalName = "Samuel";
+
+    const result = await approveAndSendReminder(makeDeps(db, mailer), {
+      reminderId: REMINDER_ID,
+      reviewToken: token,
+    });
+    assert.equal(result.body.state, "identity_drift", "Personal name change alone");
+    assert.equal(mailer.calls.length, 0);
+  }
+});
+
+test("[coherence contract] reviewed identity == stored identity == dispatched identity, over real stored channel rows", async () => {
+  const db = new FakeApprovalDb();
+  db.senderIdentity = "business";
+  db.businessName = "Wilson Plumbing";
+  const stored = withStoredOriginals(db);
+  const mailer = new FakeMailer();
+
+  const result = await approveAndSendReminder(makeDeps(db, mailer), {
+    reminderId: REMINDER_ID,
+    reviewToken: await tokenForCurrent(db),
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(mailer.calls.length, 1);
+  const sent = mailer.calls[0].message;
+
+  // From, subject, body and sign-off all name the SAME identity — the one the
+  // content was generated under and the one just resolved fresh.
+  assert.match(sent.from, /Wilson Plumbing/);
+  assert.equal(sent.subject, stored.email!.generatedSubject);
+  assert.equal(sent.text, stored.email!.generatedBody);
+  assert.match(sent.subject, /Wilson Plumbing/);
+  assert.match(sent.text, /Wilson Plumbing/);
+  assert.equal(db.get().generatedSenderName, "Wilson Plumbing");
+});
+
+test("[legacy exemption] a legacy reminder (no stored content) is never reported as drifted, however identity changes", () => {
+  const legacy: StoredReminderContent = { email: null, sms: null };
+  assert.equal(identityHasDrifted(legacy, null, "Wilson Plumbing"), false);
+  assert.equal(identityHasDrifted(legacy, "Anything", "Something Else"), false);
+});
+
+test("[unit] identityHasDrifted — the exact truth table", () => {
+  const withContent: StoredReminderContent = {
+    email: { generatedSubject: "s", generatedBody: "b", editedSubject: null, editedBody: null },
+    sms: { generatedBody: "b", editedBody: null },
+  };
+  // Matching identity: not drifted.
+  assert.equal(identityHasDrifted(withContent, "Wilson Plumbing", "Wilson Plumbing"), false);
+  // Different identity: drifted.
+  assert.equal(identityHasDrifted(withContent, "Wilson Plumbing", "New Trading Name Ltd"), true);
+  // Unknown generation identity (predates the column) on non-legacy content:
+  // drifted — there is nothing to prove agreement with.
+  assert.equal(identityHasDrifted(withContent, null, "Wilson Plumbing"), true);
 });

@@ -3,25 +3,50 @@
 import { useState } from "react";
 import type { Profile } from "@/types";
 import { updateProfile } from "@/lib/profile";
+import { resolveSenderIdentity } from "@/lib/sender-identity";
 
 interface SettingsCardProps {
   profile: Profile;
-  userEmail: string;
   onUpdated: (profile: Profile) => void;
 }
 
-export default function SettingsCard({ profile, userEmail, onUpdated }: SettingsCardProps) {
+export default function SettingsCard({ profile, onUpdated }: SettingsCardProps) {
   const [businessName, setBusinessName] = useState(profile.business_name ?? "");
+  const [personalName, setPersonalName] = useState(profile.personal_name ?? "");
+  /**
+   * The choice control. Seeded from the account's ALREADY-SAVED preference —
+   * this is display of an existing fact, not a pre-selection of an unmade
+   * choice: an unconfigured account (profile.sender_identity === null) seeds
+   * this to null too, so nothing appears selected until the owner clicks one.
+   */
+  const [choice, setChoice] = useState<"business" | "personal" | null>(profile.sender_identity);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const saveBusinessName = async () => {
+  // The genuinely resolved identity for the "how customers currently see
+  // you" preview — reflects unsaved edits in the fields above, computed the
+  // exact same way the send path resolves it, so what this line promises is
+  // never different from what the reminder pipeline will actually use once
+  // saved.
+  const preview = resolveSenderIdentity({
+    preference: choice,
+    businessName,
+    personalName,
+  });
+
+  const save = async () => {
+    if (!choice) return; // Continue/Save is disabled without a choice — belt and braces.
     setSaving(true);
     setError(null);
     setSaved(false);
 
-    const result = await updateProfile({ business_name: businessName.trim() });
+    const body =
+      choice === "business"
+        ? { sender_identity: "business" as const, business_name: businessName.trim() }
+        : { sender_identity: "personal" as const, personal_name: personalName.trim() };
+
+    const result = await updateProfile(body);
 
     if (result.success && result.profile) {
       onUpdated(result.profile);
@@ -40,38 +65,103 @@ export default function SettingsCard({ profile, userEmail, onUpdated }: Settings
           Reminder Settings
         </h2>
         <p className="text-sm mt-1" style={{ color: "var(--dash-text-muted)" }}>
-          Controls how your business is identified in reminders.
+          Controls how you are identified to customers on SMS and email reminders.
         </p>
       </div>
 
       <div className="p-6 space-y-6">
-        {/* Business name */}
+        {/* How customers see you */}
         <div>
           <label className="block text-sm mb-1.5" style={{ color: "var(--dash-text)", fontWeight: 600 }}>
-            Business name
+            How customers see you
           </label>
-          <p className="text-sm mb-2.5" style={{ color: "var(--dash-text-muted)" }}>
-            Shown to customers as the sender name on your reminders. Falls back to{" "}
-            <span style={{ color: "var(--dash-text)", fontWeight: 500 }}>{userEmail}</span> if left blank.
-          </p>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              className="dash-input flex-1"
-              placeholder="e.g. Morrison Plumbing & Heating"
-              value={businessName}
-              onChange={(e) => setBusinessName(e.target.value)}
-              maxLength={100}
-            />
+
+          {preview ? (
+            <p className="text-sm mb-2.5" style={{ color: "var(--dash-text-muted)" }}>
+              Reminders will appear from{" "}
+              <span style={{ color: "var(--dash-text)", fontWeight: 500 }}>{preview.senderName}</span>.
+            </p>
+          ) : (
+            <p className="text-sm mb-2.5" style={{ color: "var(--dash-text-muted)" }}>
+              You haven&rsquo;t chosen how customers see you in reminders yet.
+            </p>
+          )}
+
+          <div className="grid grid-cols-2 gap-2 mb-3" role="group" aria-label="How customers see you">
             <button
-              onClick={saveBusinessName}
-              disabled={saving}
-              className="dash-btn flex-shrink-0"
-              style={{ opacity: saving ? 0.7 : 1 }}
+              type="button"
+              onClick={() => setChoice("business")}
+              aria-pressed={choice === "business"}
+              className="p-2.5 rounded-lg border text-left transition-all"
+              style={{
+                background: choice === "business" ? "var(--dash-accent-soft)" : "#ffffff",
+                borderColor: choice === "business" ? "var(--dash-accent)" : "var(--dash-border)",
+              }}
             >
-              {saving ? "Saving..." : saved ? "Saved ✓" : "Save"}
+              <p className="text-sm" style={{ fontWeight: 650, color: choice === "business" ? "var(--dash-accent-strong)" : "var(--dash-text)" }}>
+                My business
+              </p>
+              <p className="text-xs mt-0.5" style={{ color: "var(--dash-text-muted)", lineHeight: 1.3 }}>
+                Use your business name on SMS and email reminders.
+              </p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setChoice("personal")}
+              aria-pressed={choice === "personal"}
+              className="p-2.5 rounded-lg border text-left transition-all"
+              style={{
+                background: choice === "personal" ? "var(--dash-accent-soft)" : "#ffffff",
+                borderColor: choice === "personal" ? "var(--dash-accent)" : "var(--dash-border)",
+              }}
+            >
+              <p className="text-sm" style={{ fontWeight: 650, color: choice === "personal" ? "var(--dash-accent-strong)" : "var(--dash-text)" }}>
+                My name
+              </p>
+              <p className="text-xs mt-0.5" style={{ color: "var(--dash-text-muted)", lineHeight: 1.3 }}>
+                Use your name on SMS and email reminders.
+              </p>
             </button>
           </div>
+
+          {/* Only the field matching the current choice — never both, never
+              the account's login email as an option. */}
+          {choice === "business" && (
+            <div className="flex gap-2">
+              <input
+                type="text"
+                className="dash-input flex-1"
+                placeholder="e.g. Morrison Plumbing & Heating"
+                value={businessName}
+                onChange={(e) => setBusinessName(e.target.value)}
+                maxLength={100}
+              />
+              <button onClick={save} disabled={saving} className="dash-btn flex-shrink-0" style={{ opacity: saving ? 0.7 : 1 }}>
+                {saving ? "Saving..." : saved ? "Saved ✓" : "Save"}
+              </button>
+            </div>
+          )}
+          {choice === "personal" && (
+            <div className="flex gap-2">
+              <input
+                type="text"
+                className="dash-input flex-1"
+                placeholder="e.g. Sam Alobaydi"
+                value={personalName}
+                onChange={(e) => setPersonalName(e.target.value)}
+                maxLength={100}
+              />
+              <button onClick={save} disabled={saving} className="dash-btn flex-shrink-0" style={{ opacity: saving ? 0.7 : 1 }}>
+                {saving ? "Saving..." : saved ? "Saved ✓" : "Save"}
+              </button>
+            </div>
+          )}
+
+          {/* Changes only affect reminders prepared from now on — never
+              rewrites what a customer has already been sent. */}
+          <p className="text-xs mt-2" style={{ color: "var(--dash-text-soft)" }}>
+            Changes apply to reminders you prepare from now on. Reminders already sent or waiting for your review keep the wording they were prepared with.
+          </p>
         </div>
 
         {/* Sending behaviour.

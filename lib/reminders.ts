@@ -45,7 +45,17 @@ export async function fetchReminderHistory(
   return (data ?? []) as ReminderLog[];
 }
 
-/** Calls /api/reminders/[id]/approve — sends the email, server enforces ownership via RLS */
+/**
+ * Calls /api/reminders/[id]/approve. Server enforces ownership via RLS.
+ *
+ * ── THE JSON GOVERNS, NOT THE HTTP STATUS ────────────────────────────────
+ *
+ * `res.ok` is deliberately NOT consulted. A partial send answers 207, which is
+ * a 2xx — so any caller branching on res.ok would render "email sent, SMS
+ * failed" as a clean success. Returning the parsed body unconditionally means
+ * the only thing a consumer can branch on is `success`, which is false for a
+ * partial. A test pins this.
+ */
 export async function approveReminder(
   id: string,
   /**
@@ -182,4 +192,72 @@ export async function fetchAllowanceUsed(
     return null;
   }
   return count ?? null;
+}
+
+/**
+ * Per-channel statuses for every reminder the caller owns, keyed by reminder id.
+ *
+ * ── WHY THE DASHBOARD NEEDS THIS ──────────────────────────────────────────
+ *
+ * reminder_logs.status answers "did anything reach the customer". After the SMS
+ * work that is no longer the same question as "did the whole reminder land": a
+ * reminder whose email was accepted and whose SMS was rejected is `sent`, and
+ * every surface reading the parent alone renders it as a clean success.
+ *
+ * RLS scopes this to the caller. Returns {} on any failure — including while a
+ * migration is unapplied — so a read problem degrades to the pre-SMS behaviour
+ * rather than mislabelling a working reminder as broken.
+ */
+export async function fetchChannelStatuses(
+  supabase: SupabaseClient
+): Promise<Record<string, Partial<Record<"email" | "sms", string>>>> {
+  const { data, error } = await supabase
+    .from("reminder_channel_messages")
+    .select("reminder_log_id, channel, status");
+
+  if (error) {
+    console.error("fetchChannelStatuses error:", error.message);
+    return {};
+  }
+
+  const map: Record<string, Partial<Record<"email" | "sms", string>>> = {};
+  for (const row of (data ?? []) as { reminder_log_id: string; channel: string; status: string }[]) {
+    (map[row.reminder_log_id] ??= {})[row.channel as "email" | "sms"] = row.status;
+  }
+  return map;
+}
+
+/**
+ * Calls /api/reminders/[id]/regenerate — rebuilds a pending/failed reminder's
+ * stored SMS+email from the current invoice and sender identity, for a
+ * reminder whose stored content can no longer be proven to match the
+ * account's current identity. Sends nothing.
+ */
+export async function regenerateReminder(
+  id: string
+): Promise<{ success: boolean; message: string; state?: string }> {
+  try {
+    const res = await fetch(`/api/reminders/${id}/regenerate`, { method: "POST" });
+    return await res.json();
+  } catch {
+    return { success: false, message: "Network error. Please try again." };
+  }
+}
+
+/** Retries ONE channel of a partially-sent reminder. Never touches the other. */
+export async function retryReminderChannel(
+  reminderId: string,
+  channel: "email" | "sms"
+): Promise<{ success: boolean; message: string; state?: string; channels?: Record<string, string> }> {
+  try {
+    const res = await fetch(
+      `/api/reminders/${reminderId}/channels/${channel}/retry`,
+      { method: "POST" }
+    );
+    // Deliberately NOT res.ok — see approveReminder. The JSON `success` field
+    // is the contract; a 2xx status is not.
+    return await res.json();
+  } catch {
+    return { success: false, message: "Network error. Please try again." };
+  }
 }

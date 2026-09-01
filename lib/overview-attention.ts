@@ -1,5 +1,10 @@
 import type { Invoice, ReminderLog } from "@/types";
 import { scheduleToPrepare } from "./reminder-schedule";
+import {
+  partiallySentFromStatuses,
+  partialSendSummary,
+  type ChannelStatuses,
+} from "./reminder-aggregate";
 import { getDaysOverdue, getInvoiceDueStatus } from "./date-status";
 
 /**
@@ -56,6 +61,14 @@ export interface AttentionItem {
   href: string;
   /** The verb on the button. Never "View", "Manage" or "Open". */
   actionLabel: string;
+  /**
+   * "Email sent · SMS failed" when one channel got through and one did not.
+   * Null for every other item, including a wholly failed send — there the
+   * parent status already says it, and naming channels would add noise.
+   *
+   * Plain words only. No provider name, no error code.
+   */
+  partialSummary?: string | null;
 }
 
 /**
@@ -81,13 +94,42 @@ const PRECEDENCE: AttentionKind[] = [
   "overdue_no_reminder",
 ];
 
-/** Reminder states that mean a send attempt did not cleanly succeed. */
+/**
+ * Reminder states that mean a send attempt did not cleanly succeed.
+ *
+ * ── WHY `sent` IS NOT ENOUGH TO EXCLUDE A REMINDER ────────────────────────
+ *
+ * A reminder whose EMAIL was accepted and whose SMS was rejected carries a
+ * parent status of `sent` — correctly: something reached the customer and the
+ * allowance unit is spent. But it is not a clean success, and this list is the
+ * surface that exists to catch exactly that.
+ *
+ * Before SMS, parent `sent` and "both channels delivered" were the same fact.
+ * They are not any more, so a partially-sent reminder is admitted here by the
+ * SEPARATE check below, driven by the per-channel rows rather than by the
+ * parent status alone. Adding "sent" to this set instead would flag every
+ * successful reminder in the product.
+ */
 const UNRESOLVED_SEND = new Set(["failed", "delivery_unknown", "undelivered"]);
+
+/**
+ * Per-channel statuses for a reminder, keyed by reminder id.
+ *
+ * Optional so every existing caller keeps working: a caller that supplies
+ * nothing gets exactly the pre-SMS behaviour, and no legacy reminder is
+ * retro-flagged as partial.
+ */
+export type ChannelStatusesByReminder = Record<string, ChannelStatuses>;
 
 export interface AttentionInput {
   invoices: Invoice[];
   /** status = 'pending' — prepared and awaiting approval. */
   pendingReminders: ReminderLog[];
+  /**
+   * Per-channel statuses, when the caller has them. Absent for every existing
+   * caller, which keeps their behaviour byte-identical.
+   */
+  channelStatuses?: ChannelStatusesByReminder;
   /** Everything else: sent, dismissed, failed, delivery_unknown, undelivered. */
   reminderHistory: ReminderLog[];
   /** Invoice ids the dashboard has already classified as needing a decision. */
@@ -105,9 +147,18 @@ export function buildAttentionItems(input: AttentionInput): AttentionItem[] {
   }
 
   const unresolvedByInvoice = new Map<string, ReminderLog>();
+  const partialSummaryByInvoice = new Map<string, string>();
   for (const r of input.reminderHistory) {
-    if (UNRESOLVED_SEND.has(r.status) && !unresolvedByInvoice.has(r.invoice_id)) {
+    // A PARTIALLY sent reminder counts as unresolved even though its parent
+    // status is `sent`. Without this the one surface built to catch broken
+    // sends is blind to the commonest new failure — email through, SMS not.
+    const channels = input.channelStatuses?.[r.id];
+    const partial = channels ? partiallySentFromStatuses(channels) : false;
+
+    if ((UNRESOLVED_SEND.has(r.status) || partial) && !unresolvedByInvoice.has(r.invoice_id)) {
       unresolvedByInvoice.set(r.invoice_id, r);
+      const summary = channels ? partialSendSummary(channels) : null;
+      if (summary) partialSummaryByInvoice.set(r.invoice_id, summary);
     }
   }
 
@@ -137,6 +188,7 @@ export function buildAttentionItems(input: AttentionInput): AttentionItem[] {
         reminderId: failed.id,
         href: `/dashboard/reminders/${failed.id}/review`,
         actionLabel: "Resolve issue",
+        partialSummary: partialSummaryByInvoice.get(invoice.id) ?? null,
       });
       continue;
     }

@@ -96,7 +96,8 @@ export interface ReminderFacts {
   tone: ReminderTone;
   schedule: ReminderSchedule;
   customerName: string;
-  businessName: string;
+  /** The resolved customer-facing sender identity — business_name OR personal_name, whichever the account chose. Never the account's login/contact email. */
+  senderName: string;
   amount: number;
   dueDate: string;
   paymentLink?: string | null;
@@ -119,7 +120,7 @@ export function generateReminderContent(facts: ReminderFacts, now: Date = new Da
     tone: facts.tone,
     schedule: facts.schedule,
     customerName: facts.customerName,
-    businessName: facts.businessName,
+    senderName: facts.senderName,
     amount: facts.amount,
     dueDate: facts.dueDate,
     paymentLink: facts.paymentLink || undefined,
@@ -176,6 +177,29 @@ export function currentContent(
     : { body: generated!.sms.body, edited: false };
 
   return { email, sms, legacy: false };
+}
+
+/**
+ * True when dispatching now would combine content generated under one
+ * sender identity with a different, freshly-resolved current identity.
+ *
+ * A LEGACY reminder (no stored content at all) is never drifted: it composes
+ * live from the current identity on every read, so there is nothing frozen
+ * to disagree with it.
+ *
+ * A non-legacy reminder whose generation identity is unknown — NULL, because
+ * it predates the column that records it — is treated as drifted. There is
+ * nothing to compare against, and assuming agreement is exactly the silent
+ * merge of old content with a new identity this check exists to prevent.
+ */
+export function identityHasDrifted(
+  stored: StoredReminderContent,
+  generatedSenderName: string | null,
+  currentSenderName: string
+): boolean {
+  const legacy = !stored.email && !stored.sms;
+  if (legacy) return false;
+  return generatedSenderName !== currentSenderName;
 }
 
 /** The original, verbatim. Never regenerated. */

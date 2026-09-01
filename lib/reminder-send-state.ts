@@ -287,6 +287,7 @@ export function contentMatches(a: ReviewedContent, b: ReviewedContent): boolean 
 
 export type SendUiState =
   | "approvable"
+  | "partially_sent"
   | "sending"
   | "sent"
   | "dismissed"
@@ -317,18 +318,37 @@ export type ReviewBlockedReason =
   | "delivery_unknown"
   | "undelivered"
   | "not_eligible"
+  | "partially_sent"
   | "retryable";
 
 export function reviewAvailability(input: {
   status: ReminderSendStatus;
   /** prepareEligibility(...).schedule !== null */
   eligible: boolean;
+  /**
+   * One channel reached the provider and one did not.
+   *
+   * Derived from reminder_channel_messages, never from the parent status —
+   * which is `sent` in this case and cannot express it.
+   */
+  partiallySent?: boolean;
 }): { blockedReason: ReviewBlockedReason | null; approvable: boolean } {
-  const { status, eligible } = input;
+  const { status, eligible, partiallySent = false } = input;
 
   let blockedReason: ReviewBlockedReason | null = null;
 
-  if (status === "sent") blockedReason = "sent";
+  // ── PARTIAL OUTRANKS `sent` ─────────────────────────────────────────────
+  //
+  // THE FALSE STATEMENT THIS REMOVES. A partially-sent reminder is `sent` at
+  // the parent, so this function returned "sent" and the panel said:
+  //
+  //   "It was approved and sent to your customer. It can't be sent again."
+  //
+  // Both halves were untrue — one channel never arrived, and that channel CAN
+  // be sent again. `approvable` stays false because the whole reminder must
+  // not be re-approved; recovery is the per-channel route.
+  if (partiallySent) blockedReason = "partially_sent";
+  else if (status === "sent") blockedReason = "sent";
   else if (status === "dismissed") blockedReason = "dismissed";
   else if (status === "sending") blockedReason = "sending";
   else if (status === "delivery_unknown") blockedReason = "delivery_unknown";
@@ -359,6 +379,13 @@ export const SEND_STATE_COPY: Record<
   sent: {
     title: "This reminder has already been sent",
     body: "It was approved and sent to your customer. It can't be sent again.",
+  },
+  partially_sent: {
+    title: "Part of this reminder didn't send",
+    body:
+      "One channel reached your customer and one didn't. Nothing will be sent " +
+      "again automatically — you can retry just the channel that failed. The " +
+      "channel that worked will not be resent.",
   },
   dismissed: {
     title: "This reminder was dismissed",

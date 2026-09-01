@@ -12,6 +12,11 @@ import {
   BUSINESS_NAME_MESSAGES,
   BUSINESS_NAME_MAX,
 } from "@/lib/business-name";
+import {
+  cleanPersonalName,
+  PERSONAL_NAME_MESSAGES,
+  PERSONAL_NAME_MAX,
+} from "@/lib/personal-name";
 import styles from "./onboarding.module.css";
 
 /**
@@ -99,29 +104,43 @@ interface AddedInvoice {
 
 export function OnboardingFlow({
   initialBusinessName,
+  initialPersonalName,
+  initialSenderIdentity,
   email,
   resuming = false,
-  needsBusinessName,
+  needsSenderIdentity,
 }: {
   initialBusinessName: string;
+  initialPersonalName: string;
+  /**
+   * The account's ALREADY-SAVED choice, or null when genuinely unset.
+   * Whenever needsSenderIdentity is true this is guaranteed null (that is
+   * exactly what makes it true) — so seeding the choice state from this
+   * prop can never pre-select anything on a genuinely unconfigured account;
+   * it only lets a returning, already-configured account's later steps
+   * (the "Reminders will come from X" header) show the real value when
+   * step 1 itself was skipped this session.
+   */
+  initialSenderIdentity: "business" | "personal" | null;
   email: string;
   /** True when the user previously skipped and has come back. */
   resuming?: boolean;
   /**
-   * Whether the business-name prerequisite is genuinely needed.
+   * Whether the sender-identity prerequisite is genuinely needed.
    *
-   * Decided on the server from the canonical profile value. When false the
-   * flow opens directly on the invoice step — the name was collected at beta
-   * signup and again at account creation, and asking a third time is the
-   * friction this removes.
+   * Decided on the server (app/onboarding/page.tsx) from sender_identity
+   * being genuinely unset — NEVER from whether business_name happens to be
+   * populated. An existing account's business name being on file is not the
+   * same fact as this account having explicitly chosen Business, so it must
+   * not silently skip this step.
    */
-  needsBusinessName: boolean;
+  needsSenderIdentity: boolean;
 }) {
   const router = useRouter();
   /**
    * Internal phase, NOT the number shown to the user.
    *
-   *   1 — business-name prerequisite (only when the name is missing)
+   *   1 — sender-identity prerequisite (only when unset)
    *   2 — invoice form
    *   3 — reminder review          (a checkpoint has been reached)
    *   4 — invoice added, nothing to review yet (no checkpoint reached)
@@ -130,7 +149,7 @@ export function OnboardingFlow({
    * rather than by anything onboarding wants to happen. The visible progress
    * is two steps in both cases; see visibleStep below.
    */
-  const [step, setStep] = useState<1 | 2 | 3 | 4>(needsBusinessName ? 1 : 2);
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(needsSenderIdentity ? 1 : 2);
   /**
    * The saved invoice, when it produced nothing to review yet.
    *
@@ -153,6 +172,17 @@ export function OnboardingFlow({
   /** The prepared reminder, once review has it. Completion depends on this. */
   const [preview, setPreview] = useState<ReminderPreview | null>(null);
   const [businessName, setBusinessName] = useState(initialBusinessName);
+  const [personalName, setPersonalName] = useState(initialPersonalName);
+  /**
+   * The Business/Personal choice for step 1, seeded from initialSenderIdentity
+   * — which is guaranteed null whenever step 1 is actually shown (that is
+   * exactly what needsSenderIdentity means), so this can never silently
+   * pre-select anything on a genuinely unconfigured account. It only lets
+   * an ALREADY-configured account (step 1 skipped this session) carry its
+   * real, previously-saved choice into later steps' "Reminders will come
+   * from X" display.
+   */
+  const [senderIdentityChoice, setSenderIdentityChoice] = useState<"business" | "personal" | null>(initialSenderIdentity);
   const [nameError, setNameError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -576,13 +606,34 @@ export function OnboardingFlow({
     router.refresh();
   }, [added, router]);
 
-  const submitName = async (e: React.FormEvent) => {
+  const submitSenderIdentity = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleaned = cleanBusinessName(businessName);
-    if (cleaned.error) {
-      setNameError(BUSINESS_NAME_MESSAGES[cleaned.error]);
+
+    // No choice made yet — nothing to validate against, and there is
+    // deliberately no default choice to fall back to.
+    if (!senderIdentityChoice) {
+      setNameError("Choose how customers should see you.");
       return;
     }
+
+    const body: Record<string, string> = { sender_identity: senderIdentityChoice };
+
+    if (senderIdentityChoice === "business") {
+      const cleaned = cleanBusinessName(businessName);
+      if (cleaned.error) {
+        setNameError(BUSINESS_NAME_MESSAGES[cleaned.error]);
+        return;
+      }
+      body.business_name = cleaned.value!;
+    } else {
+      const cleaned = cleanPersonalName(personalName);
+      if (cleaned.error) {
+        setNameError(PERSONAL_NAME_MESSAGES[cleaned.error]);
+        return;
+      }
+      body.personal_name = cleaned.value!;
+    }
+
     setNameError(null);
     setBusy(true);
     setFailure(null);
@@ -591,12 +642,12 @@ export function OnboardingFlow({
       const res = await fetch("/api/profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ business_name: cleaned.value }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error("profile");
       setStep(2);
     } catch {
-      setFailure("We couldn't save your business name. Please try again.");
+      setFailure("We couldn't save that. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -780,32 +831,114 @@ export function OnboardingFlow({
         )}
 
         {step === 1 ? (
-          <form onSubmit={submitName} noValidate>
+          <form onSubmit={submitSenderIdentity} noValidate>
             <h1 className={styles.title}>
-              {resuming ? "Let's pick up where you left off" : "Confirm your business name"}
+              {resuming ? "Let's pick up where you left off" : "How should customers know you?"}
             </h1>
             <p className={styles.sub}>
-              This is the business name customers will see on your reminders.
+              This is the name your customers will see on SMS and email reminders.
             </p>
 
-            <label className={styles.label} htmlFor="ob-business-name">
-              Business name
-            </label>
-            <input
-              id="ob-business-name"
-              className={styles.input}
-              value={businessName}
-              maxLength={BUSINESS_NAME_MAX}
-              onChange={(e) => {
-                setBusinessName(e.target.value);
-                if (nameError) setNameError(null);
-              }}
-              aria-invalid={!!nameError}
-              aria-describedby={nameError ? "ob-business-name-err" : undefined}
-              autoFocus
-            />
+            {/* NEITHER pre-selected, even when initialBusinessName already
+                holds a value — an existing name on file is not the same
+                fact as this account having explicitly chosen Business. */}
+            <div className={styles.chTabs} role="radiogroup" aria-label="How should customers know you?">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={senderIdentityChoice === "business"}
+                className={`${styles.chTab} ${senderIdentityChoice === "business" ? styles.chTabOn : ""}`}
+                onClick={() => {
+                  setSenderIdentityChoice("business");
+                  if (nameError) setNameError(null);
+                }}
+              >
+                My business
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={senderIdentityChoice === "personal"}
+                className={`${styles.chTab} ${senderIdentityChoice === "personal" ? styles.chTabOn : ""}`}
+                onClick={() => {
+                  setSenderIdentityChoice("personal");
+                  if (nameError) setNameError(null);
+                }}
+              >
+                My name
+              </button>
+            </div>
+
+            {senderIdentityChoice === "business" && (
+              <p className={styles.sub} style={{ marginTop: "-0.5rem" }}>
+                Use your business name on SMS and email reminders.
+              </p>
+            )}
+            {senderIdentityChoice === "personal" && (
+              <p className={styles.sub} style={{ marginTop: "-0.5rem" }}>
+                Use your name on SMS and email reminders.
+              </p>
+            )}
+
+            {/* Only the field matching the current choice is shown — never
+                both, never the account's login email as an option. */}
+            {senderIdentityChoice === "business" && (
+              <>
+                <label className={styles.label} htmlFor="ob-business-name">
+                  Business name
+                </label>
+                <input
+                  id="ob-business-name"
+                  className={styles.input}
+                  value={businessName}
+                  maxLength={BUSINESS_NAME_MAX}
+                  onChange={(e) => {
+                    setBusinessName(e.target.value);
+                    if (nameError) setNameError(null);
+                  }}
+                  aria-invalid={!!nameError}
+                  aria-describedby={nameError ? "ob-business-name-err" : undefined}
+                  autoFocus
+                />
+              </>
+            )}
+            {senderIdentityChoice === "personal" && (
+              <>
+                <label className={styles.label} htmlFor="ob-personal-name">
+                  Your name
+                </label>
+                <input
+                  id="ob-personal-name"
+                  className={styles.input}
+                  value={personalName}
+                  maxLength={PERSONAL_NAME_MAX}
+                  onChange={(e) => {
+                    setPersonalName(e.target.value);
+                    if (nameError) setNameError(null);
+                  }}
+                  aria-invalid={!!nameError}
+                  aria-describedby={nameError ? "ob-personal-name-err" : undefined}
+                  autoFocus
+                />
+              </>
+            )}
+
+            {/* A live preview of the exact effect of the current choice —
+                same "Reminders will come from X" wording already used lower
+                in this flow's persistent header. */}
+            {senderIdentityChoice === "business" && businessName.trim() && (
+              <p className={styles.sub}>
+                Your reminders will appear from <strong>{businessName.trim()}</strong>.
+              </p>
+            )}
+            {senderIdentityChoice === "personal" && personalName.trim() && (
+              <p className={styles.sub}>
+                Your reminders will appear from <strong>{personalName.trim()}</strong>.
+              </p>
+            )}
+
             {nameError && (
-              <p id="ob-business-name-err" className={styles.err}>
+              <p id={senderIdentityChoice === "personal" ? "ob-personal-name-err" : "ob-business-name-err"} className={styles.err}>
                 {nameError}
               </p>
             )}
@@ -988,18 +1121,31 @@ export function OnboardingFlow({
 
             {/* WHAT WE ALREADY KNOW — see the module CSS for why this replaces
                 a dimmed dashboard. Rendered only from values that exist, so a
-                missing one leaves no dangling separator or empty emphasis. */}
-            {(businessName.trim() || email) && (
-              <p className={styles.facts}>
-                {businessName.trim() && (
-                  <span>
-                    Reminders will come from{" "}
-                    <span className={styles.factStrong}>{businessName.trim()}</span>
-                  </span>
-                )}
-                {email && <span>Signed in as {email}</span>}
-              </p>
-            )}
+                missing one leaves no dangling separator or empty emphasis.
+                The resolved name reflects whichever identity was actually
+                chosen (this session in step 1, or already saved before it) —
+                never just businessName, which would be wrong for a Personal
+                choice. */}
+            {(() => {
+              const resolvedSenderName =
+                senderIdentityChoice === "business"
+                  ? businessName.trim()
+                  : senderIdentityChoice === "personal"
+                  ? personalName.trim()
+                  : "";
+              if (!resolvedSenderName && !email) return null;
+              return (
+                <p className={styles.facts}>
+                  {resolvedSenderName && (
+                    <span>
+                      Reminders will come from{" "}
+                      <span className={styles.factStrong}>{resolvedSenderName}</span>
+                    </span>
+                  )}
+                  {email && <span>Signed in as {email}</span>}
+                </p>
+              );
+            })()}
 
             <div className={styles.fields}>
               <InvoiceFields

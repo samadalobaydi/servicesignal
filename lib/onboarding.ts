@@ -12,6 +12,7 @@
  */
 
 import { getSupabaseServer } from "@/lib/supabase-server";
+import type { SenderIdentityPreference } from "@/lib/sender-identity";
 
 /** See supabase/sql/005_onboarding_status.sql for what each value means. */
 export const ONBOARDING_STATUSES = ["required", "skipped", "completed", "exempt"] as const;
@@ -65,6 +66,10 @@ export type OnboardingContext =
       user: VerifiedUser;
       status: OnboardingStatus;
       businessName: string | null;
+      /** Migration 014. */
+      personalName: string | null;
+      /** Migration 014. NULL for every account that has never made the choice — never inferred. */
+      senderIdentity: SenderIdentityPreference;
       /** True when no profile row exists yet — a genuinely new account. */
       isNewProfile: boolean;
     }
@@ -212,7 +217,7 @@ export async function getVerifiedContext(): Promise<OnboardingContext | null> {
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("business_name, onboarding_status")
+    .select("business_name, personal_name, sender_identity, onboarding_status")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -253,12 +258,20 @@ export async function getVerifiedContext(): Promise<OnboardingContext | null> {
       user: verified,
       status: "required",
       businessName: null,
+      personalName: null,
+      senderIdentity: null,
       isNewProfile: true,
     };
   }
 
   const businessName =
     typeof profile.business_name === "string" ? profile.business_name : null;
+  const personalName =
+    typeof profile.personal_name === "string" ? profile.personal_name : null;
+  const senderIdentity: SenderIdentityPreference =
+    profile.sender_identity === "business" || profile.sender_identity === "personal"
+      ? profile.sender_identity
+      : null;
 
   // 4. A row whose status is outside the approved vocabulary. Surfaced, not
   //    normalised — see the `invalid_status` member above.
@@ -283,6 +296,8 @@ export async function getVerifiedContext(): Promise<OnboardingContext | null> {
     user: verified,
     status: profile.onboarding_status,
     businessName,
+    personalName,
+    senderIdentity,
     isNewProfile: false,
   };
 }

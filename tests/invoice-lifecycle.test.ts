@@ -1492,7 +1492,7 @@ test("[static] the actions route and approve route scope by the session user", (
   // invoice_id may come from the body; the USER never may.
   assert.equal(/user\.id\s*=|userId:\s*body/.test(actions), false);
 
-  const approve = readFileSync(join(ROOT, "app/api/reminders/[id]/approve/route.ts"), "utf8");
+  const approve = readFileSync(join(ROOT, "lib/approval-wiring.ts"), "utf8");
   assert.match(approve, /setRemindersSentForOwner\(admin, invoiceId, userId,/);
   assert.match(approve, /\.eq\("user_id", userId\)/, "the read is owner-scoped too");
 });

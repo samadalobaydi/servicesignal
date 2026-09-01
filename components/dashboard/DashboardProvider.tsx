@@ -15,7 +15,7 @@ import {
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { buildInvoiceInsert } from "@/lib/invoice-create-payload";
 import { fetchProfile } from "@/lib/profile";
-import { fetchPendingReminders, prepareReminder, fetchLatestSentMap, fetchReminderHistory } from "@/lib/reminders";
+import { fetchPendingReminders, prepareReminder, fetchLatestSentMap, fetchReminderHistory, fetchChannelStatuses } from "@/lib/reminders";
 import { fetchLatestActionMap } from "@/lib/invoice-actions";
 import { computeLifecycleState, type InvoiceLifecycleState } from "@/lib/escalation";
 import { scheduleToPrepare } from "@/lib/reminder-schedule";
@@ -55,6 +55,15 @@ interface DashboardContextValue {
   reminders: ReminderLog[];
   reminderHistory: ReminderLog[];
   latestSentMap: Record<string, string>;
+  /**
+   * Per-channel statuses keyed by reminder id.
+   *
+   * The parent status cannot express "email sent, SMS failed", so every surface
+   * that reports on a reminder needs these to tell the truth. Empty until the
+   * first load, and empty on any read failure — which degrades to the pre-SMS
+   * behaviour rather than mislabelling a working reminder.
+   */
+  channelStatuses: Record<string, Partial<Record<"email" | "sms", string>>>;
   latestActionMap: Record<string, InvoiceAction>;
   pendingReminderInvoiceIds: Set<string>;
   userEmail: string;
@@ -97,6 +106,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const [reminders, setReminders] = useState<ReminderLog[]>([]);
   const [reminderHistory, setReminderHistory] = useState<ReminderLog[]>([]);
   const [latestSentMap, setLatestSentMap] = useState<Record<string, string>>({});
+  const [channelStatuses, setChannelStatuses] = useState<
+    Record<string, Partial<Record<"email" | "sms", string>>>
+  >({});
   const [latestActionMap, setLatestActionMap] = useState<Record<string, InvoiceAction>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -112,14 +124,16 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       }
       setUserEmail(user.email ?? "");
 
-      const [invoiceData, profileData, reminderData, historyData, sentMap, actionMap] = await Promise.all([
-        fetchInvoices(supabase),
-        fetchProfile(),
-        fetchPendingReminders(supabase),
-        fetchReminderHistory(supabase),
-        fetchLatestSentMap(supabase),
-        fetchLatestActionMap(supabase),
-      ]);
+      const [invoiceData, profileData, reminderData, historyData, sentMap, actionMap, channels] =
+        await Promise.all([
+          fetchInvoices(supabase),
+          fetchProfile(),
+          fetchPendingReminders(supabase),
+          fetchReminderHistory(supabase),
+          fetchLatestSentMap(supabase),
+          fetchLatestActionMap(supabase),
+          fetchChannelStatuses(supabase),
+        ]);
 
       setInvoices(refreshStatuses(invoiceData));
       setProfileState(profileData);
@@ -127,6 +141,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       setReminderHistory(historyData);
       setLatestSentMap(sentMap);
       setLatestActionMap(actionMap);
+      setChannelStatuses(channels);
       setLoading(false);
     };
     init();
@@ -134,28 +149,38 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   const refreshAll = useCallback(async () => {
     const supabase = getSupabaseBrowser();
-    const [invoiceData, reminderData, historyData, sentMap, actionMap] = await Promise.all([
-      fetchInvoices(supabase),
-      fetchPendingReminders(supabase),
-      fetchReminderHistory(supabase),
-      fetchLatestSentMap(supabase),
-      fetchLatestActionMap(supabase),
-    ]);
+    const [invoiceData, reminderData, historyData, sentMap, actionMap, channels] =
+      await Promise.all([
+        fetchInvoices(supabase),
+        fetchPendingReminders(supabase),
+        fetchReminderHistory(supabase),
+        fetchLatestSentMap(supabase),
+        fetchLatestActionMap(supabase),
+        fetchChannelStatuses(supabase),
+      ]);
     setInvoices(refreshStatuses(invoiceData));
     setReminders(reminderData);
     setReminderHistory(historyData);
     setLatestSentMap(sentMap);
     setLatestActionMap(actionMap);
+    setChannelStatuses(channels);
   }, []);
 
   const refetchAfterReminderAction = useCallback(async () => {
     const supabase = getSupabaseBrowser();
-    const [reminderData, invoiceData] = await Promise.all([
+    // channelStatuses is included so a caller right after an approve/retry
+    // (ReminderReviewPanel) has correct per-channel data on the very next
+    // render — SentConfirmation and Active Chasing's partial-send indicator
+    // both read this map, and neither should show stale channel state for
+    // the reminder that was just acted on.
+    const [reminderData, invoiceData, channels] = await Promise.all([
       fetchPendingReminders(supabase),
       fetchInvoices(supabase),
+      fetchChannelStatuses(supabase),
     ]);
     setReminders(reminderData);
     setInvoices(refreshStatuses(invoiceData));
+    setChannelStatuses(channels);
   }, []);
 
   const handleAddInvoice = useCallback(async (data: InvoiceFormData) => {
@@ -269,6 +294,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   const value: DashboardContextValue = {
     invoices, liveInvoices, profile, reminders, reminderHistory, latestSentMap, latestActionMap,
+    channelStatuses,
     pendingReminderInvoiceIds, userEmail, loading, error, setError, notice, setNotice,
     stats, needsActionCount, buckets,
     refreshAll, refetchAfterReminderAction, handleAddInvoice, handleMarkPaid,

@@ -3,11 +3,12 @@ process.env.REVIEW_TOKEN_SECRET ??= "test-review-token-secret";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { approveAndSendReminder } from "@/lib/reminder-approval";
+import { approveAndSendReminder, retryReminderChannel } from "@/lib/reminder-approval";
 import { idempotencyKeyFor } from "@/lib/reminder-send-state";
 import type { ReminderSendStatus } from "@/lib/reminder-send-state";
 import {
   FakeApprovalDb,
+  FakeChannelDb,
   FakeMailer,
   OTHER_USER,
   OWNER,
@@ -17,6 +18,8 @@ import {
   makeDeps,
   makeStoredReminder,
 } from "./support/fakes";
+import { reminderFromHeader } from "@/lib/sender-identity";
+import { REMINDER_FROM_ADDRESS } from "@/lib/resend";
 
 /**
  * SCENARIOS 9–29 — ownership, atomic send behaviour, provider outcome handling.
@@ -472,4 +475,168 @@ test("29c. a claim database error is reported as an error, never as success", as
   assert.equal(result.body.success, false);
   assert.equal(mailer.calls.length, 0);
   assert.equal(idempotencyKeyFor(REMINDER_ID, "h", 1).startsWith("ss-reminder-"), true);
+});
+
+// ── Sender identity on the actual dispatched message ────────────────────────
+//
+// The audit that motivated these: a real customer received a reminder
+// signed with the account's own login email. These prove what the ACTUAL
+// message handed to the mailer contains — not a display-layer approximation
+// of it — for both the From header and Reply-To.
+
+test("30. the dispatched email's From header carries the resolved business identity, not a generic default", async () => {
+  const db = new FakeApprovalDb(); // fixture default businessName: "Wilson Plumbing"
+  const mailer = new FakeMailer();
+
+  const result = await approveAndSendReminder(makeDeps(db, mailer), {
+    reminderId: REMINDER_ID,
+    reviewToken: await freshToken(db),
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(mailer.calls.length, 1);
+  assert.equal(
+    mailer.calls[0].message.from,
+    reminderFromHeader("Wilson Plumbing", REMINDER_FROM_ADDRESS)
+  );
+  assert.equal(/@gmail|@yahoo|owner@example\.com/.test(mailer.calls[0].message.from), false,
+    "the From header must never contain the account's own login email");
+});
+
+test("31. Reply-To is the account's own login email, distinct from the visible From identity", async () => {
+  const db = new FakeApprovalDb();
+  const mailer = new FakeMailer();
+
+  await approveAndSendReminder(makeDeps(db, mailer), {
+    reminderId: REMINDER_ID,
+    reviewToken: await freshToken(db),
+  });
+
+  assert.equal(mailer.calls[0].message.replyTo, "owner@example.com");
+  assert.notEqual(mailer.calls[0].message.replyTo, mailer.calls[0].message.from);
+});
+
+test("32. a retried email channel's From header matches the same resolved identity, not a different fallback", async () => {
+  const db = new FakeApprovalDb([makeStoredReminder({ status: "sent" })]);
+  const mailer = new FakeMailer();
+  const channelDb = new FakeChannelDb([
+    { channel: "email", status: "failed", sendAttemptCount: 1 },
+    { channel: "sms", status: "sent", sendAttemptCount: 1 },
+  ]);
+
+  const result = await retryReminderChannel(
+    makeDeps(db, mailer, { channelDb }),
+    { reminderId: REMINDER_ID, channel: "email" }
+  );
+
+  assert.equal(result.status, 200);
+  assert.equal(mailer.calls.length, 1);
+  assert.equal(
+    mailer.calls[0].message.from,
+    reminderFromHeader("Wilson Plumbing", REMINDER_FROM_ADDRESS)
+  );
+});
+
+test("33. a Personal identity dispatches with the same header contract as Business — no special-casing", async () => {
+  const db = new FakeApprovalDb();
+  db.senderIdentity = "personal";
+  db.businessName = null; // must be ignored entirely for a Personal preference
+  db.personalName = "Sam Alobaydi";
+  const mailer = new FakeMailer();
+
+  const result = await approveAndSendReminder(makeDeps(db, mailer), {
+    reminderId: REMINDER_ID,
+    reviewToken: await freshToken(db),
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(mailer.calls.length, 1);
+  assert.equal(
+    mailer.calls[0].message.from,
+    reminderFromHeader("Sam Alobaydi", REMINDER_FROM_ADDRESS)
+  );
+});
+
+// ── Identity changed after Review, before Approve ───────────────────────────
+//
+// THE REQUIRED SEQUENCE:
+//   Review renders under identity X (token minted, hash includes X)
+//   → owner changes Settings to Y
+//   → the (now stale) Review tab's Approve is clicked
+//   → Approve re-reads current profile — resolves Y, NOT the X the token was
+//     minted for
+//   → composeReminderContent recomputes the hash using Y
+//   → that hash does not match the token's embedded hash for X
+//   → verifyReviewToken refuses: state "stale_review"
+//   → NOTHING is sent — zero provider calls
+//   → only after the owner reloads Review (which re-resolves fresh, now
+//     showing Y) can Y actually be approved
+
+test("34. identity changed after Review renders a stale token — refused, zero provider calls", async () => {
+  const db = new FakeApprovalDb();
+  db.businessName = "Wilson Plumbing"; // identity X at the moment Review renders
+  const mailer = new FakeMailer();
+
+  // Review "renders": mint the token for the CURRENT state (X).
+  const token = await freshToken(db);
+
+  // The owner visits Settings in another tab and changes the identity to Y —
+  // AFTER the token was minted, exactly like a stale browser tab.
+  db.businessName = "New Trading Name Ltd";
+
+  const result = await approveAndSendReminder(makeDeps(db, mailer), {
+    reminderId: REMINDER_ID,
+    reviewToken: token,
+  });
+
+  assert.equal(result.body.success, false);
+  assert.equal(result.body.state, "stale_review");
+  assert.equal(mailer.calls.length, 0, "nothing may send under either the old or the new identity");
+  assert.equal(result.status, 409);
+});
+
+test("34b. switching from Business to Personal after Review also produces a stale refusal, not a silent switch", async () => {
+  const db = new FakeApprovalDb();
+  db.senderIdentity = "business";
+  db.businessName = "Wilson Plumbing";
+  const mailer = new FakeMailer();
+
+  const token = await freshToken(db); // minted under Business/Wilson Plumbing
+
+  // The owner switches their preference entirely, not just the name.
+  db.senderIdentity = "personal";
+  db.personalName = "Sam Alobaydi";
+
+  const result = await approveAndSendReminder(makeDeps(db, mailer), {
+    reminderId: REMINDER_ID,
+    reviewToken: token,
+  });
+
+  assert.equal(result.body.state, "stale_review");
+  assert.equal(mailer.calls.length, 0, "must never dispatch under the NEW identity using a token minted for the OLD one");
+});
+
+test("34c. reloading after the change re-resolves fresh and DOES allow approval under the new identity", async () => {
+  const db = new FakeApprovalDb();
+  db.businessName = "Wilson Plumbing";
+  const mailer = new FakeMailer();
+
+  await freshToken(db); // the original (now-abandoned) render
+
+  db.businessName = "New Trading Name Ltd";
+  // "Reload the latest version" = mint a FRESH token against current state,
+  // exactly what a real page reload does.
+  const freshTokenAfterReload = await freshToken(db);
+
+  const result = await approveAndSendReminder(makeDeps(db, mailer), {
+    reminderId: REMINDER_ID,
+    reviewToken: freshTokenAfterReload,
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(mailer.calls.length, 1);
+  assert.equal(
+    mailer.calls[0].message.from,
+    reminderFromHeader("New Trading Name Ltd", REMINDER_FROM_ADDRESS)
+  );
 });

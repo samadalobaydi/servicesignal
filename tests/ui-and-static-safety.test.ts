@@ -13,12 +13,17 @@ import type { ReminderSendStatus } from "@/lib/reminder-send-state";
 import {
   FakeApprovalDb,
   FakeMailer,
+  FakeTexter,
+  FakeChannelDb,
+  FakeAllowanceStore,
   REMINDER_ID,
   freshToken,
   ineligibleDueDate,
   makeDeps,
   makeStoredReminder,
 } from "./support/fakes";
+import { retryReminderChannel } from "@/lib/reminder-approval";
+import { resolveSenderIdentity } from "@/lib/sender-identity";
 
 /**
  * SCENARIOS 46–50.
@@ -90,7 +95,7 @@ test("47b. [static] every provider send call site is accounted for", () => {
   //   welcome-email        transactional, to the account owner
   //   beta-access-email    transactional, to the account owner
   assert.deepEqual(sites, [
-    "app/api/reminders/[id]/approve/route.ts",
+    "lib/approval-wiring.ts",
     "lib/beta-access-email.ts",
     "lib/reminder-sender.ts",
     "lib/welcome-email.ts",
@@ -304,4 +309,326 @@ test("50. [service] no failure path can produce success feedback", async () => {
     assert.equal(result.body.success, false, `${label} must not report success`);
     assert.notEqual(result.status, 200, `${label} must not return 200`);
   }
+});
+
+/**
+ * SCENARIOS 51–60. Added after the real Stage B run against production found
+ * nine defects — see the audit for full root-cause detail. Each test below
+ * exists to catch exactly the failure that was observed, not a hypothetical
+ * one.
+ */
+
+test("51. [static] no stale 'SMS is coming/preview only' copy remains in the reminder journey", () => {
+  const STALE = [
+    /coming in the next version/i,
+    /sms sending will be enabled/i,
+    /preview only.{0,20}sms/i,
+    /sms.{0,20}preview.{0,10}ready/i,
+  ];
+  const offenders: string[] = [];
+  for (const file of [...sourceFiles("components"), ...sourceFiles("app"), ...sourceFiles("lib")]) {
+    const code = stripComments(readFileSync(file, "utf8"));
+    if (STALE.some((re) => re.test(code))) offenders.push(file.replace(ROOT, ""));
+  }
+  assert.deepEqual(offenders, [], "SMS is live — no copy may claim otherwise");
+});
+
+test("52. [static] the duplicate channel-picker step no longer exists", () => {
+  for (const file of [...sourceFiles("components"), ...sourceFiles("app")]) {
+    const code = stripComments(readFileSync(file, "utf8"));
+    assert.equal(/ChannelPickerModal/.test(code), false, `${file.replace(ROOT, "")} must not reference the removed picker`);
+    assert.equal(/Choose reminder channels/.test(code), false, `${file.replace(ROOT, "")} must not offer a channel choice`);
+  }
+});
+
+test("53. [static] the final review page loads and renders both the email and the SMS content", () => {
+  const loader = stripComments(readFileSync(join(ROOT, "lib/reminder-review.ts"), "utf8"));
+  assert.match(loader, /smsBody\s*:\s*string/, "ReminderReviewData must carry the SMS body");
+  assert.match(loader, /current\.sms\.body/, "must read the real composed SMS content");
+
+  const panel = stripComments(readFileSync(join(ROOT, "components/dashboard/ReminderReviewPanel.tsx"), "utf8"));
+  assert.match(panel, /SMS reminder/, "the panel must render a distinct SMS section");
+  assert.match(panel, /data\.smsBody/, "the SMS section must render the real stored/composed text");
+});
+
+test("54. [service] resolveSenderIdentity never falls back to an email address", () => {
+  assert.equal(resolveSenderIdentity({ preference: "business", businessName: "Wilson Plumbing" })?.senderName, "Wilson Plumbing");
+  assert.equal(resolveSenderIdentity({ preference: "business", businessName: "  Wilson Plumbing  " })?.senderName, "Wilson Plumbing");
+  assert.equal(resolveSenderIdentity({ preference: "business", businessName: null }), null);
+  assert.equal(resolveSenderIdentity({ preference: "business", businessName: undefined }), null);
+  assert.equal(resolveSenderIdentity({ preference: "business", businessName: "" }), null);
+  assert.equal(resolveSenderIdentity({ preference: "business", businessName: "   " }), null);
+  // NULL preference refuses outright — never inferred from whichever name
+  // field is populated.
+  assert.equal(resolveSenderIdentity({ preference: null, businessName: "Wilson Plumbing" }), null);
+  // There is no email field anywhere in the input shape — the resolver
+  // structurally cannot read an account email even if a caller tried.
+  assert.deepEqual(
+    Object.keys(resolveSenderIdentity({ preference: "business", businessName: "Wilson Plumbing" }) ?? {}).sort(),
+    ["kind", "senderName"]
+  );
+});
+
+test("55. [service] approveAndSendReminder refuses to send when sender identity is unresolved", async () => {
+  const db = new FakeApprovalDb();
+  db.businessName = null; // senderIdentity defaults to "business" — blank business_name refuses
+  const mailer = new FakeMailer();
+  const allowance = new FakeAllowanceStore();
+  const deps = makeDeps(db, mailer, { allowance });
+
+  const result = await approveAndSendReminder(deps, {
+    reminderId: REMINDER_ID,
+    reviewToken: await freshToken(db),
+  });
+
+  assert.equal(result.body.success, false);
+  assert.equal(result.body.state, "missing_sender_identity");
+  assert.equal(result.body.reason, "business_name_missing");
+  assert.equal(result.status, 409);
+  assert.equal(mailer.calls.length, 0, "no email may be composed or sent without a resolved identity");
+  assert.equal(
+    (deps.texter as FakeTexter).calls.length,
+    0,
+    "no SMS may be composed or sent without a resolved identity"
+  );
+  // Cheap refusal, same position as the phone check: no allowance unit may
+  // be spent deciding not to send.
+  assert.deepEqual(allowance.calls, []);
+});
+
+test("55b. [service] approveAndSendReminder refuses with preference_missing when sender_identity is NULL", async () => {
+  const db = new FakeApprovalDb();
+  db.senderIdentity = null; // genuinely unconfigured — business_name being set does not matter
+  const mailer = new FakeMailer();
+  const deps = makeDeps(db, mailer);
+
+  const result = await approveAndSendReminder(deps, {
+    reminderId: REMINDER_ID,
+    reviewToken: await freshToken(db),
+  });
+
+  assert.equal(result.body.state, "missing_sender_identity");
+  assert.equal(result.body.reason, "preference_missing");
+  assert.equal(mailer.calls.length, 0);
+});
+
+test("55c. [service] approveAndSendReminder never falls back to personal_name for a Business preference", async () => {
+  const db = new FakeApprovalDb();
+  db.businessName = null;
+  db.personalName = "Sam Alobaydi"; // populated, but must be ignored
+  const mailer = new FakeMailer();
+  const deps = makeDeps(db, mailer);
+
+  const result = await approveAndSendReminder(deps, {
+    reminderId: REMINDER_ID,
+    reviewToken: await freshToken(db),
+  });
+
+  assert.equal(result.body.state, "missing_sender_identity");
+  assert.equal(result.body.reason, "business_name_missing");
+  assert.equal(mailer.calls.length, 0, "must refuse rather than silently send as Sam Alobaydi");
+});
+
+test("56. [service] retryReminderChannel refuses when sender identity is unresolved", async () => {
+  const db = new FakeApprovalDb([makeStoredReminder({ status: "sent", sendAttemptCount: 1 })]);
+  db.businessName = null;
+  const mailer = new FakeMailer();
+  const texter = new FakeTexter();
+  const channelDb = new FakeChannelDb([
+    { channel: "email", status: "sent", sendAttemptCount: 1 },
+    { channel: "sms", status: "failed", sendAttemptCount: 1 },
+  ]);
+  const allowance = new FakeAllowanceStore();
+  const deps = makeDeps(db, mailer, { texter, channelDb, allowance });
+
+  const result = await retryReminderChannel(deps, { reminderId: REMINDER_ID, channel: "sms" });
+
+  assert.equal(result.body.success, false);
+  assert.equal(result.body.state, "missing_sender_identity");
+  assert.equal(result.body.reason, "business_name_missing");
+  assert.equal(texter.calls.length, 0, "the retried channel must not be dispatched without a resolved identity");
+  assert.deepEqual(allowance.calls, [], "recovery must not touch the allowance regardless of this refusal");
+});
+
+test("57. [static] Prepare Reminder calls the prepare route directly, with no channel-selection step", () => {
+  const list = stripComments(readFileSync(join(ROOT, "components/dashboard/ActiveChasingList.tsx"), "utf8"));
+  assert.match(list, /onClick=\{prepare\}/, "the button must call prepare() directly");
+  assert.equal(/setPickerInvoice|pickerInvoice/.test(list), false, "no picker state may remain");
+});
+
+test("58. [static] approving a reminder refreshes the dashboard's cached state before navigating away", () => {
+  const panel = stripComments(readFileSync(join(ROOT, "components/dashboard/ReminderReviewPanel.tsx"), "utf8"));
+  const refetchIdx = panel.indexOf("refetchAfterReminderAction()");
+  const allowanceIdx = panel.indexOf("refetchAllowance()");
+  const pushIdx = panel.indexOf("router.push(");
+  assert.ok(refetchIdx > -1, "must refetch reminders/invoices/channel statuses after a send");
+  assert.ok(allowanceIdx > -1, "must refetch the allowance count after a send");
+  assert.ok(pushIdx > -1);
+  assert.ok(refetchIdx < pushIdx, "the reminders/invoices refetch must happen BEFORE navigating");
+  assert.ok(allowanceIdx < pushIdx, "the allowance refetch must happen BEFORE navigating");
+});
+
+test("59. [static] the post-send confirmation is channel-aware for a genuine two-channel success", () => {
+  const confirmation = stripComments(
+    readFileSync(join(ROOT, "components/dashboard/SentConfirmation.tsx"), "utf8")
+  );
+  assert.match(confirmation, /channelStatuses/, "must read real per-channel state, not fixed copy");
+  assert.match(
+    confirmation,
+    /statuses\?\.email === "sent" && statuses\?\.sms === "sent"/,
+    "must distinguish a genuine SMS+email pair from the generic fallback"
+  );
+});
+
+test("59b. [static] partial/ambiguous/failed outcomes never reach the post-send confirmation", () => {
+  // ── THE ARCHITECTURAL GUARANTEE SentConfirmation.tsx RELIES ON ──────────
+  //
+  // An earlier version of the confirmation ALSO tried to render a partial
+  // outcome — dead code, because onApprove() only ever navigates here on a
+  // clean success. This test pins the guarantee directly against
+  // approveAndSendReminder()'s actual return shapes, rather than trusting a
+  // comment. If any of these three outcomes ever gained `success: true`,
+  // this test would fail — which is exactly the signal needed before
+  // relying on SentConfirmation to represent that outcome truthfully.
+  const approval = stripComments(readFileSync(join(ROOT, "lib/reminder-approval.ts"), "utf8"));
+
+  // The rejected/all-failed branch. lastIndexOf, not indexOf: the FIRST
+  // occurrence of this literal text is the TexterResult type declaration
+  // ({ ok: false; outcome: "rejected" | "unknown"; ... }), not a return
+  // statement — the actual `outcome: "rejected"` return is later.
+  const rejectedIdx = approval.lastIndexOf('outcome: "rejected"');
+  const rejectedBlock = approval.slice(rejectedIdx - 400, rejectedIdx + 50);
+  assert.match(rejectedBlock, /success:\s*false/, "a fully-rejected send must report success:false");
+
+  // The delivery_unknown branches (there are two: mid-approve, and after
+  // persistence fails post-acceptance) — both must be success:false.
+  let idx = approval.indexOf('outcome: "delivery_unknown"');
+  let found = 0;
+  while (idx !== -1) {
+    const block = approval.slice(Math.max(0, idx - 400), idx + 50);
+    assert.match(block, /success:\s*false/, "a delivery_unknown outcome must report success:false");
+    found++;
+    idx = approval.indexOf('outcome: "delivery_unknown"', idx + 1);
+  }
+  assert.ok(found >= 2, "expected at least two delivery_unknown return sites");
+
+  // The partial-send branch.
+  const partialIdx = approval.lastIndexOf('outcome: "partially_sent"');
+  const partialBlock = approval.slice(partialIdx - 400, partialIdx + 50);
+  assert.match(partialBlock, /success:\s*false/, "a partial send must report success:false");
+
+  // And the panel's own navigation guard: it only pushes to the
+  // confirmation route inside the success branch, never the failure one.
+  const panel = stripComments(readFileSync(join(ROOT, "components/dashboard/ReminderReviewPanel.tsx"), "utf8"));
+  const firstIfNotSuccess = panel.indexOf("if (!result.success)");
+  const routerPush = panel.indexOf("router.push(");
+  assert.ok(firstIfNotSuccess > -1 && routerPush > -1);
+  assert.ok(firstIfNotSuccess < routerPush, "the non-success branch must return before navigation is reachable");
+});
+
+test("60. [static] the review page shows the invoice's live due status beside the checkpoint name", () => {
+  const loader = stripComments(readFileSync(join(ROOT, "lib/reminder-review.ts"), "utf8"));
+  assert.match(loader, /dueStatusLabel/);
+  assert.match(loader, /getDueStatusLabel\(/);
+
+  const panel = stripComments(readFileSync(join(ROOT, "components/dashboard/ReminderReviewPanel.tsx"), "utf8"));
+  assert.match(panel, /data\.dueStatusLabel/);
+});
+
+/**
+ * SCENARIOS 61+. Added for the second Stage B cleanup pass: the allowance
+ * header regression, truthful paired history, the removed "Reminder state"
+ * column, and the SentConfirmation architecture decision above.
+ */
+
+test("61. [static] the Reminder state column no longer exists in Active Chasing", () => {
+  const list = stripComments(readFileSync(join(ROOT, "components/dashboard/ActiveChasingList.tsx"), "utf8"));
+  assert.equal(/Reminder state/.test(list), false, "the permanent column header must be gone");
+  // Six columns now: the leading disclosure column (added back in the next
+  // pass, see test 64) + Customer + Amount + Due + Status + Actions. The
+  // desktop history row must span exactly that many, or the collapsed
+  // detail panel misaligns under the table.
+  assert.match(list, /colSpan=\{6\}/);
+});
+
+test("62. [static] actionable/abnormal reminder states still render on the row, not only in history", () => {
+  const list = stripComments(readFileSync(join(ROOT, "components/dashboard/ActiveChasingList.tsx"), "utf8"));
+  // Both render sites (mobile card, desktop row) must gate the pill on
+  // rs.pill — never render it unconditionally (that would be the old
+  // permanent-column behaviour) and never drop it entirely (that would hide
+  // Partially sent / Ready for review / Reminder limit reached).
+  const pillGates = list.match(/\{rs\.pill (?:&&|\?)/g) ?? [];
+  assert.ok(pillGates.length >= 2, `expected pill rendering gated on rs.pill at both render sites, found ${pillGates.length}`);
+});
+
+test("63. [static] the allowance context is genuinely re-armed across Strict Mode's double mount", () => {
+  const guard = stripComments(readFileSync(join(ROOT, "lib/mount-guard.ts"), "utf8"));
+  assert.match(guard, /onMount\(\)\s*\{\s*mounted = true;/);
+  assert.match(guard, /onCleanup\(\)\s*\{\s*mounted = false;/);
+
+  const ctx = stripComments(readFileSync(join(ROOT, "components/dashboard/BetaAllowanceContext.tsx"), "utf8"));
+  // onMount() must run INSIDE the effect body (so it re-arms on every
+  // invocation, including Strict Mode's second one) — not once outside it.
+  const effectIdx = ctx.indexOf("useEffect(() => {\n    guard.current.onMount();");
+  assert.ok(effectIdx > -1, "guard.current.onMount() must be the first statement inside the mount effect");
+});
+
+// ── Sender-identity audit (customer-facing identity leak) ──────────────────
+//
+// A real customer received a reminder signed with the account's own login
+// email. Two files independently rebuilt the same unsafe fallback chain
+// (business name, else the account email, else "ServiceSignal") by hand,
+// separately from the already-safe resolveBusinessName() used by the actual
+// send path. These pin both fixes so the pattern cannot silently return.
+
+test("64. [static] the send-reminders cron never falls back to the account email for its stored subject", () => {
+  const code = stripComments(readFileSync(join(ROOT, "app/api/cron/send-reminders/route.ts"), "utf8"));
+  assert.equal(/senderName\s*=[\s\S]{0,80}userEmailMap\.get/.test(code), false,
+    "the cron's senderName must not fall back to the account email map");
+  assert.match(code, /resolveSenderIdentityForDisplay\(\{\s*preference: profile\.sender_identity,/);
+  // The dormant Auto branch must independently strict-resolve before it
+  // could ever reach a provider call — see test 66c below for the fuller
+  // proof; this pins the display-vs-strict distinction at the call level.
+  assert.match(code, /resolveSenderIdentity\(\{\s*preference: profile\.sender_identity,/);
+});
+
+test("65. [static] the onboarding reminder preview never falls back to the account email", () => {
+  const code = stripComments(readFileSync(join(ROOT, "app/api/onboarding/reminder-preview/route.ts"), "utf8"));
+  assert.equal(/senderName\s*=[\s\S]{0,80}context\.user\.email/.test(code), false,
+    "the onboarding preview's senderName must not fall back to the account email");
+  assert.match(code, /resolveSenderIdentityForDisplay\(\{\s*preference: context\.kind === "ready" \? context\.senderIdentity : null,/);
+});
+
+test("66. [static] every display resolution reads through the canonical resolver with an explicit preference", () => {
+  // Every remaining display-only caller must pass `preference` — never the
+  // old business-first-fallback shape, which no longer exists on the
+  // resolver at all (a call site missing `preference` is now a type error,
+  // not a silent behaviour change).
+  for (const file of [
+    "lib/reminder-review.ts",
+    "lib/invoice-lifecycle-db.ts",
+    "app/api/reminders/[id]/content/route.ts",
+  ]) {
+    const code = stripComments(readFileSync(join(ROOT, file), "utf8"));
+    assert.equal(/resolveBusinessName\(/.test(code), false,
+      `${file} must not call the retired resolveBusinessName`);
+    assert.match(code, /resolveSenderIdentityForDisplay\(\{\s*preference:/, `${file} must read through the canonical resolver with an explicit preference`);
+  }
+});
+
+test("66b. [static] resolveBusinessName no longer exists anywhere in the codebase", () => {
+  const approval = stripComments(readFileSync(join(ROOT, "lib/reminder-approval.ts"), "utf8"));
+  assert.equal(/function resolveBusinessName/.test(approval), false,
+    "resolveBusinessName must be retired, not kept as an alias that could misrepresent a personal identity as a business one");
+});
+
+test("66c. [static] the dormant Auto cron branch strict-resolves identity before any provider call", () => {
+  const code = stripComments(readFileSync(join(ROOT, "app/api/cron/send-reminders/route.ts"), "utf8"));
+  const autoBranch = code.slice(code.indexOf("if (isAutoMode) {"));
+  const gateIdx = autoBranch.indexOf("resolveSenderIdentity(");
+  const sendIdx = autoBranch.indexOf("sendAndUpdateLog(");
+  assert.ok(gateIdx > -1, "the Auto branch must strict-resolve identity");
+  assert.ok(sendIdx > -1, "the Auto branch must still call sendAndUpdateLog when it does run");
+  assert.ok(gateIdx < sendIdx, "the strict identity gate must sit BEFORE the provider call");
+  assert.match(autoBranch.slice(gateIdx, sendIdx), /if \(!identity\)/, "must refuse (not merely check) before proceeding");
 });

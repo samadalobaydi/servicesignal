@@ -13,7 +13,12 @@ import type {
 import { FOUNDING_BETA_ALLOWANCE } from "@/lib/beta-allowance";
 import type { AllowanceStore, AllowanceResult } from "@/lib/allowance-claim";
 import { setRemindersSentForOwner } from "@/lib/invoice-owner-writes";
-import { storedContentFromRows, CHANNEL_SELECT, type ChannelRow } from "@/lib/reminder-channel-store";
+import {
+  storedContentFromRows,
+  CHANNEL_SELECT,
+  isTableAbsent,
+  type ChannelRow,
+} from "@/lib/reminder-channel-store";
 import {
   CHANNEL_CLAIMABLE_STATUSES,
   type ChannelDb,
@@ -145,6 +150,7 @@ interface ReminderRow {
   status: string;
   email_to: string;
   send_attempt_count: number | null;
+  generated_sender_name: string | null;
   invoices: {
     customer_name: string;
     customer_email: string;
@@ -161,62 +167,118 @@ interface ReminderRow {
   };
 }
 
+const INVOICE_SELECT =
+  "invoices!inner(customer_name, customer_email, customer_phone, amount, due_date, payment_link, " +
+  "reminder_tone, status, reminder_schedules, reminders_sent, " +
+  "invoice_reference, job_description)";
+
+/**
+ * Shared by makeDb().loadReminder (Approve/Retry) and
+ * lib/regenerate-wiring.ts's regenerate path, so the two can never read this
+ * row into two different shapes. Exported rather than duplicated — a second
+ * hand-written copy of this select+mapping is exactly the kind of drift that
+ * has caused real bugs elsewhere in this codebase (see reminder-review.ts's
+ * comment on reading the SAME stored content the send path reads).
+ */
+export async function loadApprovalReminder(
+  supabase: SupabaseClient,
+  userId: string,
+  id: string
+): Promise<ApprovalReminder | null> {
+  let { data, error } = await supabase
+    .from("reminder_logs")
+    .select(
+      "id, invoice_id, schedule, status, email_to, send_attempt_count, generated_sender_name, " +
+        // Both channels, so the send path uses the stored version the owner
+        // actually reviewed rather than recomposing over the top of it.
+        `reminder_channel_messages(${CHANNEL_SELECT}), ` +
+        INVOICE_SELECT
+    )
+    .eq("id", id)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  // Migration 015 not yet applied here: generated_sender_name does not
+  // exist. Degrade the same way the channel-content read already does for
+  // migration 010 — never crash the send path over an unapplied migration.
+  // The identity-coherence gate below treats a null generatedSenderName on
+  // a non-legacy reminder as drifted, so this degrades SAFELY (Approve and
+  // Retry refuse until the migration lands) rather than by skipping the
+  // check.
+  if (error && isTableAbsent(error.code)) {
+    const fallback = await supabase
+      .from("reminder_logs")
+      .select(
+        "id, invoice_id, schedule, status, email_to, send_attempt_count, " +
+          `reminder_channel_messages(${CHANNEL_SELECT}), ` +
+          INVOICE_SELECT
+      )
+      .eq("id", id)
+      .eq("user_id", userId)
+      .maybeSingle();
+    data = fallback.data
+      ? ({ ...(fallback.data as unknown as Record<string, unknown>), generated_sender_name: null } as unknown as typeof data)
+      : (fallback.data as unknown as typeof data);
+    error = fallback.error;
+  }
+
+  if (error || !data) return null;
+
+  const row = data as unknown as ReminderRow;
+  const reminder: ApprovalReminder = {
+    id: row.id,
+    invoiceId: row.invoice_id,
+    schedule: row.schedule,
+    status: row.status as ReminderSendStatus,
+    emailTo: row.email_to,
+    sendAttemptCount: row.send_attempt_count ?? 0,
+    generatedSenderName: row.generated_sender_name ?? null,
+    storedContent: storedContentFromRows(
+      (data as unknown as { reminder_channel_messages?: ChannelRow[] }).reminder_channel_messages ?? []
+    ),
+    invoice: {
+      customerName: row.invoices.customer_name,
+      customerEmail: row.invoices.customer_email,
+      customerPhone: row.invoices.customer_phone,
+      amount: row.invoices.amount,
+      dueDate: row.invoices.due_date,
+      paymentLink: row.invoices.payment_link,
+      reminderTone: row.invoices.reminder_tone,
+      status: row.invoices.status,
+      reminderSchedules: row.invoices.reminder_schedules,
+      remindersSent: row.invoices.reminders_sent,
+      invoiceReference: row.invoices.invoice_reference,
+      jobDescription: row.invoices.job_description,
+    },
+  };
+  return reminder;
+}
+
+/** Shared by makeDb().loadSenderIdentityInputs and the regenerate wiring. */
+export async function loadSenderIdentityInputsFor(
+  supabase: SupabaseClient,
+  uid: string
+) {
+  const { data } = await supabase
+    .from("profiles")
+    .select("sender_identity, business_name, personal_name")
+    .eq("user_id", uid)
+    .maybeSingle();
+  return {
+    preference: data?.sender_identity ?? null,
+    businessName: data?.business_name ?? null,
+    personalName: data?.personal_name ?? null,
+  };
+}
+
 function makeDb(supabase: SupabaseClient, userId: string): ApprovalDb {
   return {
     async loadReminder(id) {
-      const { data, error } = await supabase
-        .from("reminder_logs")
-        .select(
-          "id, invoice_id, schedule, status, email_to, send_attempt_count, " +
-            // Both channels, so the send path uses the stored version the owner
-            // actually reviewed rather than recomposing over the top of it.
-            `reminder_channel_messages(${CHANNEL_SELECT}), ` +
-            "invoices!inner(customer_name, customer_email, customer_phone, amount, due_date, payment_link, " +
-            "reminder_tone, status, reminder_schedules, reminders_sent, " +
-            "invoice_reference, job_description)"
-        )
-        .eq("id", id)
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      if (error || !data) return null;
-
-      const row = data as unknown as ReminderRow;
-      const reminder: ApprovalReminder = {
-        id: row.id,
-        invoiceId: row.invoice_id,
-        schedule: row.schedule,
-        status: row.status as ReminderSendStatus,
-        emailTo: row.email_to,
-        sendAttemptCount: row.send_attempt_count ?? 0,
-        storedContent: storedContentFromRows(
-          (data as unknown as { reminder_channel_messages?: ChannelRow[] }).reminder_channel_messages ?? []
-        ),
-        invoice: {
-          customerName: row.invoices.customer_name,
-          customerEmail: row.invoices.customer_email,
-          customerPhone: row.invoices.customer_phone,
-          amount: row.invoices.amount,
-          dueDate: row.invoices.due_date,
-          paymentLink: row.invoices.payment_link,
-          reminderTone: row.invoices.reminder_tone,
-          status: row.invoices.status,
-          reminderSchedules: row.invoices.reminder_schedules,
-          remindersSent: row.invoices.reminders_sent,
-          invoiceReference: row.invoices.invoice_reference,
-          jobDescription: row.invoices.job_description,
-        },
-      };
-      return reminder;
+      return loadApprovalReminder(supabase, userId, id);
     },
 
-    async loadBusinessName(uid) {
-      const { data } = await supabase
-        .from("profiles")
-        .select("business_name")
-        .eq("user_id", uid)
-        .maybeSingle();
-      return data?.business_name ?? null;
+    async loadSenderIdentityInputs(uid) {
+      return loadSenderIdentityInputsFor(supabase, uid);
     },
 
     async dismiss(id) {

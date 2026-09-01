@@ -3,6 +3,8 @@ import { getSupabaseServer } from "@/lib/supabase-server";
 import { getVerifiedContext } from "@/lib/onboarding";
 import { isUuid } from "@/lib/onboarding-handoff";
 import { buildReminderEmail } from "@/lib/email-templates";
+import { resolveSenderIdentityForDisplay, reminderFromHeader } from "@/lib/sender-identity";
+import { REMINDER_FROM_ADDRESS } from "@/lib/resend";
 import type { ReminderSchedule, ReminderTone } from "@/types";
 
 /**
@@ -86,16 +88,21 @@ export async function GET(request: Request) {
     job_description: string | null;
   };
 
-  // Same fallback chain as the approve route, so the preview cannot show a
-  // different sender name from the one that would actually be used.
-  const businessName =
-    context.businessName?.trim() || context.user.email || "ServiceSignal";
+  // The SAME canonical resolver the approve route uses (lib/sender-identity.ts),
+  // reading the account's explicit preference, so the preview cannot show a
+  // different sender identity from the one that would actually be used —
+  // and, critically, can never show the account's own login email.
+  const senderName = resolveSenderIdentityForDisplay({
+    preference: context.kind === "ready" ? context.senderIdentity : null,
+    businessName: context.businessName,
+    personalName: context.kind === "ready" ? context.personalName : null,
+  });
 
   const { subject, text } = buildReminderEmail({
     tone: invoice.reminder_tone,
     schedule: reminder.schedule,
     customerName: invoice.customer_name,
-    businessName,
+    senderName,
     amount: invoice.amount,
     dueDate: invoice.due_date,
     paymentLink: invoice.payment_link || undefined,
@@ -107,16 +114,18 @@ export async function GET(request: Request) {
     success: true,
     reminderId: reminder.id,
     // The REAL delivery model, not a flattering approximation. The message is
-    // sent from ServiceSignal's reminders address on the business's behalf —
-    // showing only "From: <business>" would imply it leaves their own domain,
-    // which it does not. Reply-To is set per-send to the owner's account
-    // email (see approve/route.ts), so a customer replying reaches the trade.
-    deliveredBy: "ServiceSignal",
+    // sent from ServiceSignal's reminders address, with the resolved identity
+    // as the visible From display name — see reminderFromHeader() and the
+    // matching dispatchChannels() call in lib/reminder-approval.ts, which
+    // this must stay identical to. Reply-To is set per-send to the owner's
+    // account email (see approve/route.ts), so a customer replying reaches
+    // the trade.
+    deliveredBy: reminderFromHeader(senderName, REMINDER_FROM_ADDRESS),
     repliesTo: context.user.email,
     invoiceId: reminder.invoice_id,
     status: reminder.status,
     to: reminder.email_to ?? invoice.customer_email,
-    from: businessName,
+    from: senderName,
     subject,
     invoiceReference: invoice.invoice_reference,
     // The plain-text rendering, not the HTML. It carries the identical wording

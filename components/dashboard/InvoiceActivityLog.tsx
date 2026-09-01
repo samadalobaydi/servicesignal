@@ -1,15 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { useDashboard } from "./DashboardProvider";
-import { formatCurrency, formatDate } from "@/lib/invoices";
-
-interface Entry {
-  key: string;
-  when: string;
-  label: string;
-  color: string;
-  detail?: string;
-}
+import { buildInvoiceActivityEntries } from "@/lib/invoice-activity";
 
 /** e.g. "5 Jul 2026 at 22:41" */
 function formatWhen(iso: string): string {
@@ -17,6 +10,64 @@ function formatWhen(iso: string): string {
   const date = d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
   const time = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
   return `${date} at ${time}`;
+}
+
+/**
+ * The stored payment link, shown once with an explicit copy action.
+ *
+ * ── WHY THIS LIVES HERE, NOT AS A TIMELINE ENTRY ─────────────────────────
+ *
+ * A payment link is a static fact about the invoice, not something that
+ * happened at a point in time — it has no natural place among "Invoice
+ * added" / "SMS and email reminder sent". Previously it surfaced as a bare
+ * "Payment link added" hint under the customer name on the collapsed row,
+ * with no way to actually see or use the link. Moving it here keeps the
+ * collapsed row uncluttered and gives it an obvious home: expand history,
+ * see the actual URL, copy it.
+ *
+ * Routing semantics are unchanged — ServiceSignal still never processes or
+ * holds payment; this only makes an already-stored value visible and
+ * copyable.
+ */
+function PaymentLinkBlock({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard access can be denied or unavailable (permissions, older
+      // browsers, non-secure context). The link is still selectable text —
+      // nothing here needs a fallback message beyond leaving the button as
+      // it was.
+    }
+  };
+
+  return (
+    <div
+      className="rounded-lg p-3 mb-3"
+      style={{ background: "#ffffff", border: "1px solid var(--dash-border)" }}
+    >
+      <p className="text-xs uppercase" style={{ color: "var(--dash-text-muted)", fontWeight: 600, letterSpacing: "0.05em" }}>
+        Payment link
+      </p>
+      <div className="flex items-center gap-2 mt-1.5">
+        <p className="text-sm truncate flex-1" style={{ color: "var(--dash-text)" }} title={url}>
+          {url}
+        </p>
+        <button
+          type="button"
+          onClick={copy}
+          className="dash-btn-ghost flex-shrink-0"
+          style={{ padding: "0.3rem 0.7rem", fontSize: "0.8rem" }}
+        >
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -61,43 +112,21 @@ export function HistoryToggle({ open, onClick }: { open: boolean; onClick: () =>
 }
 
 export default function InvoiceActivityLog({ invoiceId }: { invoiceId: string }) {
-  const { liveInvoices, reminders, reminderHistory } = useDashboard();
+  const { liveInvoices, reminders, reminderHistory, channelStatuses } = useDashboard();
 
   const invoice = liveInvoices.find((i) => i.id === invoiceId);
-  const entries: Entry[] = [];
 
-  if (invoice) {
-    entries.push({
-      key: "added", when: invoice.created_at,
-      label: "Invoice added", color: "var(--dash-accent-strong)",
-      detail: `${formatCurrency(invoice.amount)} invoice due ${formatDate(invoice.due_date)}`,
-    });
-    if (invoice.status === "paid" && invoice.paid_at) {
-      entries.push({
-        key: "paid", when: invoice.paid_at,
-        label: "Invoice marked paid — future reminders stopped", color: "var(--dash-green)",
-      });
-    }
-  }
-
-  for (const r of reminders) {
-    if (r.invoice_id !== invoiceId) continue;
-    entries.push({ key: `prep-${r.id}`, when: r.created_at, label: "Email reminder prepared", color: "var(--dash-accent-strong)" });
-  }
-
-  for (const r of reminderHistory) {
-    if (r.invoice_id !== invoiceId) continue;
-    if (r.status === "sent") {
-      entries.push({ key: `sent-${r.id}`, when: r.sent_at ?? r.created_at, label: "Email reminder sent", color: "var(--dash-green)" });
-    } else if (r.status === "dismissed") {
-      entries.push({ key: `dis-${r.id}`, when: r.created_at, label: "Reminder dismissed", color: "var(--dash-text-soft)" });
-    } else if (r.status === "failed") {
-      entries.push({ key: `fail-${r.id}`, when: r.created_at, label: "Reminder failed to send", color: "var(--dash-red)" });
-    }
-  }
-
-  // Newest first — the most recent activity sits at the top of the panel.
-  const sorted = entries.sort((a, b) => new Date(b.when).getTime() - new Date(a.when).getTime());
+  // Newest activity first, plus (when nothing is pending) the next scheduled
+  // checkpoint — see lib/invoice-activity.ts for why this is a pure function
+  // rather than built inline: it is the one place that decides whether a
+  // reminder is described as reaching one channel or the pair, and that
+  // decision needs to be testable without a browser.
+  const sorted = buildInvoiceActivityEntries({
+    invoice,
+    pendingForInvoice: reminders.filter((r) => r.invoice_id === invoiceId),
+    historyForInvoice: reminderHistory.filter((r) => r.invoice_id === invoiceId),
+    channelStatuses,
+  });
 
   return (
     <div
@@ -107,6 +136,7 @@ export default function InvoiceActivityLog({ invoiceId }: { invoiceId: string })
       <p className="text-xs uppercase mb-2.5" style={{ color: "var(--dash-text-muted)", fontWeight: 600, letterSpacing: "0.05em" }}>
         Invoice History
       </p>
+      {invoice?.payment_link && <PaymentLinkBlock url={invoice.payment_link} />}
       {sorted.length === 0 ? (
         <p className="text-sm" style={{ color: "var(--dash-text-soft)" }}>No activity recorded yet.</p>
       ) : (
@@ -119,7 +149,15 @@ export default function InvoiceActivityLog({ invoiceId }: { invoiceId: string })
                 {e.detail && (
                   <p className="text-sm" style={{ color: "var(--dash-text-muted)" }}>{e.detail}</p>
                 )}
-                <p className="text-xs mt-0.5" style={{ color: "var(--dash-text-soft)" }}>{formatWhen(e.when)}</p>
+                {/* dateOnly entries (currently: "Next reminder scheduled")
+                    already spell the date out in the label itself, and
+                    `when` for them is a bare YYYY-MM-DD with no real
+                    time-of-day — formatWhen() would print a spurious
+                    "at 01:00" (UTC midnight shifted by the browser's local
+                    offset) for a value that was never a real timestamp. */}
+                {!e.dateOnly && (
+                  <p className="text-xs mt-0.5" style={{ color: "var(--dash-text-soft)" }}>{formatWhen(e.when)}</p>
+                )}
               </div>
             </div>
           ))}

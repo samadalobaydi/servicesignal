@@ -6,8 +6,13 @@ import type {
   Mailer,
   MailerMessage,
   MailerResult,
+  Texter,
+  TexterMessage,
+  TexterResult,
 } from "@/lib/reminder-approval";
-import { composeReminderContent, resolveBusinessName } from "@/lib/reminder-approval";
+import { composeReminderContent } from "@/lib/reminder-approval";
+import type { RegenerateDb } from "@/lib/reminder-regenerate";
+import { resolveSenderIdentity, type SenderIdentityPreference } from "@/lib/sender-identity";
 import { issueReviewToken } from "@/lib/review-token";
 import type {
   ProviderLookup,
@@ -15,8 +20,18 @@ import type {
   ReconcileDb,
   ReconcileRow,
 } from "@/lib/reminder-reconcile";
-import { isStaleSendingLease, type ReminderSendStatus } from "@/lib/reminder-send-state";
-import type { StoredReminderContent } from "@/lib/reminder-content";
+import {
+  classifyProviderError,
+  isStaleSendingLease,
+  type ReminderSendStatus,
+} from "@/lib/reminder-send-state";
+import {
+  isChannelClaimable,
+  type ChannelClaimInput,
+  type ChannelDb,
+  type ChannelRowState,
+} from "@/lib/reminder-channel-state";
+import type { ReminderChannel, StoredReminderContent } from "@/lib/reminder-content";
 import type { ReminderSchedule } from "@/types";
 import type { AllowanceStore, AllowanceResult } from "@/lib/allowance-claim";
 import { FOUNDING_BETA_ALLOWANCE } from "@/lib/beta-allowance";
@@ -58,6 +73,8 @@ export interface StoredReminder {
   lastReconciledAt: string | null;
   /** null = legacy reminder with no stored channel rows. */
   storedContent: StoredReminderContent | null;
+  /** The identity that produced `storedContent`, or null. See migration 015. */
+  generatedSenderName: string | null;
   invoice: ApprovalReminder["invoice"];
 }
 
@@ -95,6 +112,7 @@ export function makeStoredReminder(
     sentAt: null,
     lastReconciledAt: null,
     storedContent: null,
+    generatedSenderName: null,
     ...overrides,
     invoice: {
       customerName: "Dave Wilson",
@@ -114,11 +132,14 @@ export function makeStoredReminder(
   };
 }
 
-export class FakeApprovalDb implements ApprovalDb {
+export class FakeApprovalDb implements ApprovalDb, RegenerateDb {
   rows: Map<string, StoredReminder> = new Map();
   /** Whose session this client is bound to — the RLS scope, in miniature. */
   scopeUserId: string = OWNER;
   businessName: string | null = "Wilson Plumbing";
+  personalName: string | null = null;
+  /** Default matches the pre-existing fixture behaviour: businessName resolves. */
+  senderIdentity: SenderIdentityPreference = "business";
 
   /** Fault injection. */
   claimError: string | null = null;
@@ -156,12 +177,17 @@ export class FakeApprovalDb implements ApprovalDb {
       emailTo: row.emailTo,
       sendAttemptCount: row.sendAttemptCount,
       storedContent: row.storedContent,
+      generatedSenderName: row.generatedSenderName,
       invoice: row.invoice,
     };
   }
 
-  async loadBusinessName(): Promise<string | null> {
-    return this.businessName;
+  async loadSenderIdentityInputs() {
+    return {
+      preference: this.senderIdentity,
+      businessName: this.businessName,
+      personalName: this.personalName,
+    };
   }
 
   async dismiss(id: string): Promise<void> {
@@ -225,6 +251,89 @@ export class FakeApprovalDb implements ApprovalDb {
   async appendScheduleSent(invoiceId: string, schedule: ReminderSchedule): Promise<void> {
     this.scheduleAppends.push({ invoiceId, schedule });
   }
+
+  /**
+   * Models supabase/sql/016_reminder_regeneration.sql's
+   * regenerate_reminder_identity() RPC — a single, atomically-locked
+   * operation in production. This fake is synchronous, so it cannot exercise
+   * genuine cross-request race timing; what it DOES faithfully reproduce is
+   * the RPC's OUTCOME contract: refuse without writing anything unless the
+   * row is still (id, user_id)-owned and status ∈ {pending, failed}, and
+   * refuse if there is no stored content to regenerate.
+   */
+  async regenerate(input: {
+    reminderId: string;
+    userId: string;
+    expectedSendAttemptCount: number;
+    emailSubject: string;
+    emailBody: string;
+    smsBody: string;
+    generatedSenderName: string;
+  }): Promise<{
+    outcome:
+      | "ok"
+      | "not_found"
+      | "not_editable"
+      | "stale_regeneration"
+      | "no_stored_content"
+      | "invalid_channel_pair"
+      | "missing_generated_sender_name"
+      | "error";
+    error?: string;
+  }> {
+    const row = this.rows.get(input.reminderId);
+    if (!row || row.userId !== input.userId) return { outcome: "not_found" };
+    if (row.status !== "pending" && row.status !== "failed") return { outcome: "not_editable" };
+
+    // Mirrors regenerate_reminder_identity()'s version guard EXACTLY: the
+    // send_attempt_count read together with the invoice/profile facts used
+    // to compose emailSubject/emailBody/smsBody must still match the row's
+    // CURRENT count. A concurrent update_invoice_with_refresh commit — or a
+    // concurrent successful regenerate — bumps this counter, which is what
+    // makes a stale caller's composed content detectably stale here, under
+    // the same lock, before anything is written.
+    if (row.sendAttemptCount !== input.expectedSendAttemptCount) {
+      return { outcome: "stale_regeneration" };
+    }
+
+    // Mirrors regenerate_reminder_identity()'s revised pair check EXACTLY:
+    // count email rows and sms rows independently, in this order —
+    //   both zero            -> no_stored_content (genuine legacy)
+    //   anything else <> 1+1 -> invalid_channel_pair (missing/malformed)
+    // A real row can have at most one of each (UNIQUE(reminder_log_id,
+    // channel), migration 010) — the fake's single-value email/sms fields
+    // already make a genuine duplicate unrepresentable, matching that
+    // schema guarantee.
+    const hasEmail = !!row.storedContent?.email;
+    const hasSms = !!row.storedContent?.sms;
+    if (!hasEmail && !hasSms) return { outcome: "no_stored_content" };
+    if (!hasEmail || !hasSms) return { outcome: "invalid_channel_pair" };
+
+    // Fail closed BEFORE any mutation on a blank/whitespace fingerprint —
+    // structurally unreachable via lib/reminder-regenerate.ts today (see
+    // that module's comment), proven here as the RPC's own independent,
+    // no-trust-in-the-caller guard.
+    if (!input.generatedSenderName || !input.generatedSenderName.trim()) {
+      return { outcome: "missing_generated_sender_name" };
+    }
+
+    // Both channels rewritten together, atomically; any customer edit is
+    // DROPPED, not merged — mirroring the RPC's edited_subject/edited_body
+    // = null. Nothing above this line has mutated `row` at all.
+    row.storedContent = {
+      email: {
+        generatedSubject: input.emailSubject,
+        generatedBody: input.emailBody,
+        editedSubject: null,
+        editedBody: null,
+      },
+      sms: { generatedBody: input.smsBody, editedBody: null },
+    };
+    row.generatedSenderName = input.generatedSenderName;
+    row.reviewedContentHash = null;
+    row.sendAttemptCount += 1;
+    return { outcome: "ok" };
+  }
 }
 
 export class FakeMailer implements Mailer {
@@ -277,7 +386,11 @@ export async function freshToken(
 
   const composed = composeReminderContent(
     reminder,
-    resolveBusinessName(db.businessName, userEmail),
+    resolveSenderIdentity({
+      preference: db.senderIdentity,
+      businessName: db.businessName,
+      personalName: db.personalName,
+    })?.senderName ?? "ServiceSignal",
     userEmail
   );
 
@@ -374,6 +487,127 @@ export class FakeAllowanceStore implements AllowanceStore {
   }
 }
 
+/**
+ * SMS transport double.
+ *
+ * Mirrors FakeMailer, but its failure shape carries `outcome` rather than a
+ * provider code — because Twilio classification happens in the ADAPTER, not in
+ * the service. A test that wants an ambiguous SMS says so directly instead of
+ * knowing a Twilio error number.
+ */
+export class FakeTexter implements Texter {
+  calls: { message: TexterMessage; attemptKey: string }[] = [];
+  behaviour: (call: number) => TexterResult = () => ({
+    ok: true,
+    id: "SM_fake",
+    providerStatus: "queued",
+  });
+
+  async send(message: TexterMessage, options: { attemptKey: string }): Promise<TexterResult> {
+    this.calls.push({ message, attemptKey: options.attemptKey });
+    return this.behaviour(this.calls.length);
+  }
+}
+
+/**
+ * Per-channel lifecycle double, backed by a Map.
+ *
+ * claimChannel reproduces the real compare-and-set: it succeeds only when the
+ * row is still claimable AND still at the attempt count the caller read, so a
+ * test can drive the concurrency case the production UPDATE handles.
+ */
+export class FakeChannelDb implements ChannelDb {
+  rows = new Map<string, ChannelRowState>();
+  writes: string[] = [];
+
+  /**
+   * Fault injection for the per-channel state writes.
+   *
+   * Named per channel because the interesting cases are asymmetric: one write
+   * failing and the other succeeding is a different aggregate from both
+   * failing, and both must be drivable.
+   *
+   * When a write "fails" the row is left EXACTLY as the claim left it —
+   * `sending` — which is what the real table would show after a failed UPDATE.
+   * A fake that silently applied the change anyway would make the very
+   * inconsistency under test invisible.
+   */
+  outcomeWriteError: Partial<Record<ReminderChannel, string>> = {};
+  acceptedWriteError: Partial<Record<ReminderChannel, string>> = {};
+
+  constructor(initial: ChannelRowState[] = [
+    { channel: "email", status: "pending", sendAttemptCount: 0 },
+    { channel: "sms", status: "pending", sendAttemptCount: 0 },
+  ]) {
+    for (const r of initial) this.rows.set(r.channel, { ...r });
+  }
+
+  async loadChannelStates(): Promise<ChannelRowState[]> {
+    return Array.from(this.rows.values()).map((r) => ({ ...r }));
+  }
+
+  async claimChannel(input: ChannelClaimInput): Promise<{ claimed: boolean; error?: string }> {
+    const row = this.rows.get(input.channel);
+    if (!row) return { claimed: false, error: "no row" };
+    if (!isChannelClaimable(row.status)) return { claimed: false, error: "not claimable" };
+    if (row.sendAttemptCount !== input.expectAttemptCount) return { claimed: false, error: "stale" };
+    this.rows.set(input.channel, {
+      channel: input.channel,
+      status: "sending",
+      sendAttemptCount: input.nextAttemptCount,
+    });
+    this.writes.push(`claim:${input.channel}`);
+    return { claimed: true };
+  }
+
+  async recordChannelAccepted(input: {
+    channel: ReminderChannel;
+    providerMessageId: string | null;
+  }): Promise<{ ok: boolean; error?: string }> {
+    const row = this.rows.get(input.channel);
+    if (!row) return { ok: false, error: "no row" };
+    const injected = this.acceptedWriteError[input.channel];
+    if (injected) {
+      this.writes.push(`accepted-write-failed:${input.channel}`);
+      return { ok: false, error: injected };
+    }
+    this.rows.set(input.channel, { ...row, status: "sent" });
+    this.writes.push(`accepted:${input.channel}:${input.providerMessageId ?? "none"}`);
+    return { ok: true };
+  }
+
+  async recordChannelOutcome(input: {
+    channel: ReminderChannel;
+    status: ReminderSendStatus;
+  }): Promise<{ ok: boolean; error?: string }> {
+    const row = this.rows.get(input.channel);
+    if (!row) return { ok: false, error: "no row" };
+    const injected = this.outcomeWriteError[input.channel];
+    if (injected) {
+      // The row stays where the claim left it — `sending`. That is what the
+      // real table shows after an UPDATE that did not land.
+      this.writes.push(`outcome-write-failed:${input.channel}`);
+      return { ok: false, error: injected };
+    }
+    this.rows.set(input.channel, { ...row, status: input.status });
+    this.writes.push(`outcome:${input.channel}:${input.status}`);
+    return { ok: true };
+  }
+}
+
+/** RegenerateDeps for a FakeApprovalDb (which also implements RegenerateDb). */
+export function makeRegenerateDeps(
+  db: FakeApprovalDb,
+  overrides: Partial<import("@/lib/reminder-regenerate").RegenerateDeps> = {}
+): import("@/lib/reminder-regenerate").RegenerateDeps {
+  return {
+    db,
+    userId: db.scopeUserId,
+    log: () => {},
+    ...overrides,
+  };
+}
+
 export function makeDeps(
   db: FakeApprovalDb,
   mailer: Mailer | null,
@@ -382,6 +616,15 @@ export function makeDeps(
   return {
     db,
     mailer,
+    // SMS and email are equal channels, so the default fixture has BOTH
+    // configured. A test that wants a missing transport passes null explicitly,
+    // which is the same thing a deployment without Twilio does.
+    //
+    // The default MIRRORS the mailer — see mirroringTexter. Divergent channels
+    // are the interesting case and are always stated explicitly by the test
+    // that wants them.
+    texter: mailer instanceof FakeMailer ? mirroringTexter(mailer) : new FakeTexter(),
+    channelDb: new FakeChannelDb(),
     allowance: new FakeAllowanceStore(),
     from: "ServiceSignal <reminders@servicesignal.app>",
     userId: OWNER,
@@ -498,4 +741,47 @@ export class FakeProviderLookup implements ProviderLookup {
       this.events.get(providerMessageId) ?? { ok: false, reason: "no record" }
     );
   }
+}
+
+/**
+ * A Texter whose outcome MIRRORS a FakeMailer's.
+ *
+ * ── WHY THIS IS THE RIGHT DEFAULT ─────────────────────────────────────────
+ *
+ * Before SMS, "the provider rejected it" and "nothing reached the customer"
+ * were the same sentence, and the existing suite is written in that language.
+ * With two equal channels they diverge: a rejected email beside an accepted SMS
+ * is a PARTIAL send — the customer was contacted and the allowance unit is
+ * correctly spent.
+ *
+ * Mirroring keeps every pre-SMS test meaning exactly what it meant: both
+ * channels behave alike, so a reminder-level assertion about `failed` or
+ * `delivery_unknown` still describes "nothing reached anyone".
+ *
+ * A test that wants the channels to DIVERGE — which is the whole point of the
+ * partial-send work — passes its own texter explicitly. Divergence is never
+ * implicit.
+ */
+export function mirroringTexter(mailer: FakeMailer): FakeTexter {
+  const texter = new FakeTexter();
+  texter.behaviour = () => {
+    // The EMAIL's call index, not the texter's own. Both channels are
+    // dispatched within one attempt (email first), so this makes the SMS
+    // mirror the decision the mailer just made for the SAME attempt. Using the
+    // texter's independent counter would make a retry's SMS replay the FIRST
+    // attempt's email behaviour.
+    const call = Math.max(1, mailer.calls.length);
+    // FakeMailer.behaviour may be async, matching the real port. Awaited via
+    // the texter's own async send below rather than here.
+    const mirrored = mailer.behaviour(call) as MailerResult;
+    if (!("ok" in mirrored)) return { ok: true, id: "SM_fake", providerStatus: "queued" };
+    if (mirrored.ok) return { ok: true, id: "SM_fake", providerStatus: "queued" };
+    return {
+      ok: false,
+      // The email classifier's verdict, expressed in the texter's own terms.
+      outcome: classifyProviderError(mirrored.code) === "rejected" ? "rejected" : "unknown",
+      message: mirrored.message,
+    };
+  };
+  return texter;
 }

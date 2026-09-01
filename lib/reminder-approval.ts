@@ -3,9 +3,18 @@ import { prepareEligibility } from "./reminder-schedule";
 import { formatDate } from "./invoices";
 import { verifyReviewToken } from "./review-token";
 import {
+  resolveSenderIdentity,
+  reminderFromHeader,
+  senderIdentityMissingReason,
+  missingSenderIdentityMessage,
+  type SenderIdentityPreference,
+} from "./sender-identity";
+import { REMINDER_FROM_ADDRESS } from "./resend";
+import {
   currentContent,
   contentVersionHash,
   emailHtmlForBody,
+  identityHasDrifted,
   type ReminderFacts,
   type StoredReminderContent,
 } from "./reminder-content";
@@ -16,6 +25,7 @@ import {
   statusForOutcome,
   contentHash,
   idempotencyKeyFor,
+  type ProviderOutcome,
   type ReminderSendStatus,
 } from "./reminder-send-state";
 import {
@@ -24,6 +34,23 @@ import {
   isAllowanceUnavailable,
   type AllowanceStore,
 } from "./allowance-claim";
+import {
+  channelAttemptKey,
+  isChannelClaimable,
+  statusesByChannel,
+  type ChannelDb,
+  type ChannelRowState,
+} from "./reminder-channel-state";
+import {
+  aggregateChannelOutcomes,
+  channelRetryable,
+  CHANNEL_LABEL,
+  partialSendSummary,
+  type ChannelOutcome,
+} from "./reminder-aggregate";
+import { normaliseUkMobile, PHONE_PROBLEM_MESSAGE } from "./phone";
+import { validateSmsBody, SMS_VALIDATION_MESSAGE } from "./reminder-sms";
+import type { ReminderChannel } from "./reminder-content";
 import type { ReminderSchedule, ReminderTone } from "@/types";
 
 /**
@@ -81,6 +108,14 @@ export interface ApprovalReminder {
    * migration 010, which then falls back to live composition.
    */
   storedContent: StoredReminderContent | null;
+  /**
+   * The sender identity that produced the CURRENTLY stored content, recorded
+   * once at preparation (migration 015). NULL for a legacy reminder (no stored
+   * content — never stale, see identityHasDrifted) or for one that predates the
+   * column. Compared against the freshly-resolved identity at Approve/Retry so
+   * a reminder generated under one identity can never dispatch under another.
+   */
+  generatedSenderName: string | null;
   invoice: ApprovalInvoice;
 }
 
@@ -97,9 +132,16 @@ export interface ClaimInput {
   startedAt: string;
 }
 
+/** The account's current sender-identity configuration — read fresh at every gate, never cached across a request. */
+export interface SenderIdentityInputs {
+  preference: SenderIdentityPreference;
+  businessName: string | null;
+  personalName: string | null;
+}
+
 export interface ApprovalDb {
   loadReminder(id: string): Promise<ApprovalReminder | null>;
-  loadBusinessName(userId: string): Promise<string | null>;
+  loadSenderIdentityInputs(userId: string): Promise<SenderIdentityInputs>;
   /** Used only by the paid-invoice kill switch. */
   dismiss(id: string): Promise<void>;
   /**
@@ -127,6 +169,29 @@ export type MailerResult =
   | { ok: true; id: string | null }
   | { ok: false; code: string | null; message: string };
 
+/**
+ * The SMS transport port, deliberately shaped like Mailer.
+ *
+ * `outcome` is returned by the ADAPTER, not inferred here, because Twilio's
+ * numeric codes and Resend's string codes share no namespace — see
+ * lib/twilio-send-state.ts. Passing a Twilio failure through the email
+ * classifier would match nothing, fall to `unknown`, and strand every SMS
+ * failure in a non-claimable state.
+ */
+export type TexterResult =
+  | { ok: true; id: string | null; providerStatus: string | null }
+  | { ok: false; outcome: "rejected" | "unknown"; message: string };
+
+export interface TexterMessage {
+  /** Already normalised to E.164 by the service. Never a raw stored value. */
+  to: string;
+  body: string;
+}
+
+export interface Texter {
+  send(message: TexterMessage, options: { attemptKey: string }): Promise<TexterResult>;
+}
+
 export interface MailerMessage {
   from: string;
   to: string;
@@ -152,6 +217,17 @@ export interface ApprovalDeps {
   allowance: AllowanceStore;
   /** null when RESEND_API_KEY is absent — handled, never crashed on. */
   mailer: Mailer | null;
+  /**
+   * null when Twilio is not configured — handled the same way.
+   *
+   * REQUIRED, not optional. SMS and email are equal channels, so a deployment
+   * missing Twilio must refuse the send rather than quietly deliver half the
+   * product; an optional port is one somebody forgets to wire, which is the
+   * argument the allowance store already makes above.
+   */
+  texter: Texter | null;
+  /** Per-channel lifecycle on reminder_channel_messages. Required, same reason. */
+  channelDb: ChannelDb;
   from: string;
   userId: string;
   userEmail: string | null;
@@ -174,6 +250,8 @@ export interface ApprovalResult {
   body: Record<string, unknown> & { success: boolean; message: string };
   outcome:
     | "sent"
+    /** At least one channel reached the provider and at least one did not. */
+    | "partially_sent"
     | "refused"
     | "rejected"
     | "delivery_unknown"
@@ -197,18 +275,22 @@ function refuse(
 // ── Composition ─────────────────────────────────────────────────────────────
 
 /**
- * The sender-name fallback chain. Exported because the review page must use the
- * identical one — if the two ever diverged the reviewed message and the sent
- * message would differ in the From line, which is exactly what the content hash
- * exists to prevent.
+ * Sender identity is resolved via lib/sender-identity.ts's resolveSenderIdentity()
+ * — the SAME function the review page uses, so a reviewed message and the sent
+ * message can never differ in the From line (the content hash below binds
+ * senderName, so any divergence invalidates the review token instead of
+ * silently sending something different from what was shown).
+ *
+ * NO CROSS-FALLBACK, NO EMAIL FALLBACK. Every caller that would use this to
+ * actually CONTACT a customer (approveAndSendReminder, retryReminderChannel,
+ * the prepare route) refuses outright when resolveSenderIdentity() returns
+ * null, the same way a missing phone number refuses rather than silently
+ * sending email-only. Display-only callers (the review page, the content
+ * editor) use resolveSenderIdentityForDisplay() instead, which may show a
+ * neutral placeholder — never the login email — because showing nothing is
+ * worse than showing "ServiceSignal" while nothing has been sent yet. That
+ * display fallback must never be used to gate an actual send.
  */
-export function resolveBusinessName(
-  profileBusinessName: string | null | undefined,
-  userEmail: string | null
-): string {
-  return profileBusinessName?.trim() || userEmail || "ServiceSignal";
-}
-
 /**
  * Builds the message AND its fingerprint from live data.
  *
@@ -218,7 +300,7 @@ export function resolveBusinessName(
  */
 export function composeReminderContent(
   reminder: ApprovalReminder,
-  businessName: string,
+  senderName: string,
   replyTo: string | null,
   now: Date = new Date()
 ): {
@@ -234,7 +316,7 @@ export function composeReminderContent(
     tone: reminder.invoice.reminderTone,
     schedule: reminder.schedule,
     customerName: reminder.invoice.customerName,
-    businessName,
+    senderName,
     amount: reminder.invoice.amount,
     dueDate: reminder.invoice.dueDate,
     paymentLink: reminder.invoice.paymentLink,
@@ -262,7 +344,7 @@ export function composeReminderContent(
     tone: facts.tone,
     schedule: facts.schedule,
     customerName: facts.customerName,
-    businessName,
+    senderName,
     amount: facts.amount,
     dueDate: facts.dueDate,
     paymentLink: facts.paymentLink || undefined,
@@ -283,9 +365,239 @@ export function composeReminderContent(
     hash: contentVersionHash(current, {
       recipientEmail: reminder.emailTo,
       recipientPhone: reminder.invoice.customerPhone ?? null,
-      senderName: businessName,
+      senderName,
       replyTo,
     }),
+  };
+}
+
+// ── Channel dispatch ────────────────────────────────────────────────────────
+
+interface DispatchResult {
+  outcomes: ChannelOutcome[];
+  /** Channel states AFTER dispatch, for the aggregate and the response. */
+  finalStates: ChannelRowState[];
+  emailProviderId: string | null;
+  smsProviderId: string | null;
+  /** Joined provider messages, for the parent's last_send_error. Logs only. */
+  errorSummary: string;
+}
+
+/**
+ * Submits each channel independently and records its own outcome.
+ *
+ * ── THE RULE THAT MAKES PARTIAL RECOVERY SAFE ────────────────────────────
+ *
+ * A channel already in `sent` is SKIPPED, not resubmitted. That is what stops a
+ * retry of a failed SMS from emailing the customer a second time: the email row
+ * is `sent`, fails isChannelClaimable, and never reaches its provider. The
+ * check is the row's own state, not a flag passed in, so it holds however the
+ * retry was triggered.
+ *
+ * Each channel gets its OWN idempotency key (channelAttemptKey), so the two
+ * cannot collide and a per-channel retry cannot recompute the key the other
+ * channel already used.
+ *
+ * Channels are dispatched SEQUENTIALLY rather than in parallel. Two concurrent
+ * provider calls would make an ambiguous outcome harder to attribute, and the
+ * latency of one extra round trip is worth a result we can reason about.
+ */
+async function dispatchChannels(input: {
+  deps: ApprovalDeps;
+  reminderId: string;
+  contentHash: string;
+  attemptNumber: number;
+  email: MailerMessage;
+  sms: TexterMessage;
+  /**
+   * Restricts dispatch to ONE channel — the recovery path.
+   *
+   * When set, the other channel is not iterated at all: its provider is never
+   * called and its row is never touched. That is what makes "a successful
+   * channel is never resent" a structural property rather than a check.
+   */
+  only?: ReminderChannel;
+  now: Date;
+  log: (level: "warn" | "error", message: string) => void;
+}): Promise<DispatchResult> {
+  const { deps, reminderId, contentHash, attemptNumber, now, log } = input;
+
+  const before = await deps.channelDb.loadChannelStates(reminderId);
+  const stateOf = (channel: ReminderChannel): ChannelRowState =>
+    before.find((r) => r.channel === channel) ?? {
+      channel,
+      // A legacy reminder with no channel row behaves as a fresh one. The
+      // aggregate still folds correctly; only the stored per-channel history
+      // is absent, which is what migration 010 backfilled for.
+      status: "pending",
+      sendAttemptCount: 0,
+    };
+
+  const outcomes: ChannelOutcome[] = [];
+  const finalStates: ChannelRowState[] = [];
+  const errors: string[] = [];
+  let emailProviderId: string | null = null;
+  let smsProviderId: string | null = null;
+
+  const channels = input.only ? ([input.only] as const) : (["email", "sms"] as const);
+
+  for (const channel of channels) {
+    const state = stateOf(channel);
+
+    // ALREADY DELIVERED TO THE PROVIDER. Not touched again, at any cost.
+    if (!isChannelClaimable(state.status)) {
+      outcomes.push({
+        channel,
+        outcome: state.status === "sent" ? "skipped_already_sent" : "unknown",
+      });
+      finalStates.push(state);
+      continue;
+    }
+
+    const nextCount = state.sendAttemptCount + 1;
+    const key = channelAttemptKey(reminderId, channel, contentHash, attemptNumber);
+
+    const claim = await deps.channelDb.claimChannel({
+      reminderId,
+      channel,
+      expectAttemptCount: state.sendAttemptCount,
+      nextAttemptCount: nextCount,
+      attemptKey: key,
+      startedAt: now.toISOString(),
+    });
+
+    if (!claim.claimed) {
+      // Another request owns this channel's attempt, or the row moved under us.
+      // Treated as UNKNOWN, never as a failure: a sibling may be submitting it
+      // right now, and reporting "failed" would invite a duplicate.
+      log(
+        "warn",
+        `[send-reminder] Could not claim ${channel} for ${reminderId}: ${claim.error ?? "already claimed"}.`
+      );
+      outcomes.push({ channel, outcome: "unknown" });
+      finalStates.push({ ...state, status: "delivery_unknown" });
+      errors.push(`${channel}: not claimed`);
+      continue;
+    }
+
+    let outcome: ProviderOutcome;
+    let providerId: string | null = null;
+    let providerEvent: string | null = null;
+    let message = "";
+
+    try {
+      if (channel === "email") {
+        const r = await deps.mailer!.send(input.email, { idempotencyKey: key });
+        if (r.ok) {
+          outcome = "accepted";
+          providerId = r.id;
+        } else {
+          outcome = classifyProviderError(r.code);
+          message = r.message;
+        }
+      } else {
+        const r = await deps.texter!.send(input.sms, { attemptKey: key });
+        if (r.ok) {
+          outcome = "accepted";
+          providerId = r.id;
+          providerEvent = r.providerStatus;
+        } else {
+          // The ADAPTER classified this using Twilio's own semantics — the
+          // email classifier is never applied to a Twilio code.
+          outcome = r.outcome;
+          message = r.message;
+        }
+      }
+    } catch (err) {
+      // Threw before an outcome was known. Textbook ambiguity.
+      outcome = "unknown";
+      message = err instanceof Error ? err.message : "Unknown transport error";
+    }
+
+    if (outcome === "accepted") {
+      if (channel === "email") emailProviderId = providerId;
+      else smsProviderId = providerId;
+
+      const recorded = await deps.channelDb.recordChannelAccepted({
+        reminderId,
+        channel,
+        providerMessageId: providerId,
+        providerEvent,
+        sentAt: now.toISOString(),
+      });
+      // A failed write AFTER acceptance is ambiguity, not success: the row does
+      // not reflect a message the customer may already have.
+      const status = recorded.ok ? "sent" : "delivery_unknown";
+      if (!recorded.ok) errors.push(`${channel}: ${recorded.error ?? "persist failed"}`);
+      outcomes.push({ channel, outcome: recorded.ok ? "accepted" : "unknown" });
+      finalStates.push({ channel, status, sendAttemptCount: nextCount });
+      continue;
+    }
+
+    // ── A NON-ACCEPTED OUTCOME STILL HAS TO BE RECORDED ────────────────────
+    //
+    // THE BUG THIS CLOSES. The result of this write was previously discarded,
+    // so the aggregate treated the channel as durably `failed` while the row
+    // could still be sitting at `sending`. With both providers rejecting and
+    // both writes failing, the parent became `failed` and the allowance trigger
+    // handed the unit back — for a reminder whose children were stuck mid-send
+    // and therefore NOT claimable. The owner would see a retryable reminder
+    // that no retry could ever move.
+    //
+    // The accepted branch above already made this distinction. This one now
+    // makes the same one, in the same direction.
+    const status = statusForOutcome(outcome);
+    const recorded = await deps.channelDb.recordChannelOutcome({
+      reminderId,
+      channel,
+      status,
+      error: message,
+    });
+
+    if (!recorded.ok) {
+      // TWO DIFFERENT FACTS, and only the first is known:
+      //
+      //   the PROVIDER outcome   known — it rejected, or it was ambiguous
+      //   the DATABASE lifecycle NOT safely recorded
+      //
+      // The provider's verdict is kept in the log and the error summary, but it
+      // must NOT be what the aggregate folds: claiming a durable `failed` we
+      // did not manage to write is exactly the inconsistency being fixed.
+      //
+      // `unknown` is the safe reading, and it is safe in both directions:
+      //   - the parent becomes delivery_unknown, which is NOT claimable, so no
+      //     retry can be triggered and no message can be duplicated;
+      //   - the allowance is NOT released, so a reminder in an unresolved state
+      //     never looks like a refunded, retryable one.
+      //
+      // The child row is very likely still `sending`, which is also not
+      // claimable — so the two agree that nothing may be attempted again until
+      // a human or reconciliation resolves it.
+      log(
+        "error",
+        `[send-reminder] ${channel} for reminder ${reminderId} was ${outcome} by the provider, ` +
+          `but the channel state could NOT be recorded: ${recorded.error ?? "unknown"}. ` +
+          `Treating as UNRESOLVED — the row may still be 'sending'. Do not retry without reconciliation.`
+      );
+      outcomes.push({ channel, outcome: "unknown" });
+      finalStates.push({ channel, status: "delivery_unknown", sendAttemptCount: nextCount });
+      errors.push(
+        `${channel}: ${message} (provider ${outcome}; state NOT recorded: ${recorded.error ?? "unknown"})`
+      );
+      continue;
+    }
+
+    outcomes.push({ channel, outcome });
+    finalStates.push({ channel, status, sendAttemptCount: nextCount });
+    errors.push(`${channel}: ${message}`);
+  }
+
+  return {
+    outcomes,
+    finalStates,
+    emailProviderId,
+    smsProviderId,
+    errorSummary: errors.join(" | "),
   };
 }
 
@@ -406,17 +718,118 @@ export async function approveAndSendReminder(
     };
   }
 
-  // ── Compose, using the SAME builder and SAME fallback as the review page ──
-  const businessName = resolveBusinessName(
-    await deps.db.loadBusinessName(deps.userId),
+  if (!deps.texter) {
+    // Equal channels. A deployment without Twilio must refuse rather than send
+    // the email alone and call the reminder done — that would be the
+    // "email-only reminder" mode the product contract does not have.
+    log("error", "[send-reminder] Twilio is not configured — cannot send.");
+    await deps.db.recordSubmissionOutcome({
+      id: reminder.id,
+      status: "failed",
+      error: "Twilio not configured",
+    });
+    return {
+      status: 503,
+      body: { success: false, state: "failed", message: "SMS service is not configured." },
+      outcome: "not_configured",
+    };
+  }
+
+  // ── MOBILE NUMBER, CHECKED BEFORE ANYTHING IS SPENT ──────────────────────
+  //
+  // Positioned with the other cheap refusals and BEFORE the allowance claim, so
+  // a historical invoice with customer_phone = null costs nothing and stays
+  // exactly as it was: still `pending`, still reviewable, sendable the moment a
+  // number is added.
+  //
+  // Refusing outright — rather than sending the email alone — is the contract.
+  // Both channels are the product; delivering one and reporting success would
+  // be the silent half-send this whole pass exists to prevent.
+  //
+  // NO MIGRATION. customer_phone stays nullable; production rows that predate
+  // the requirement are handled here, at the point of use.
+  const phone = normaliseUkMobile(reminder.invoice.customerPhone);
+  if (!phone.ok) {
+    log(
+      "warn",
+      `[send-reminder] Reminder ${reminder.id} refused: mobile number ${phone.problem}.`
+    );
+    return refuse(409, {
+      success: false,
+      state: "missing_phone",
+      reason: phone.problem,
+      message: PHONE_PROBLEM_MESSAGE[phone.problem],
+    });
+  }
+
+  // ── SENDER IDENTITY, CHECKED BEFORE ANYTHING IS SPENT ──────────────────
+  //
+  // Same reasoning and same position as the phone check above, and read
+  // FRESH here — not anything carried over from when the reminder was
+  // prepared or reviewed. No cross-fallback: a 'business' preference with a
+  // blank business_name refuses outright, it does not fall back to
+  // personal_name even if that happens to be set, and neither ever falls
+  // back to the account's login email.
+  const senderInputs = await deps.db.loadSenderIdentityInputs(deps.userId);
+  const identity = resolveSenderIdentity(senderInputs);
+
+  if (!identity) {
+    const reason = senderIdentityMissingReason(senderInputs);
+    log("warn", `[send-reminder] Reminder ${reminder.id} refused: sender identity unresolved (${reason}).`);
+    return refuse(409, {
+      success: false,
+      state: "missing_sender_identity",
+      reason,
+      message: missingSenderIdentityMessage(reason, "sending reminders"),
+    });
+  }
+  const senderName = identity.senderName;
+
+  // ── IDENTITY COHERENCE: the stored content must still agree with the ──
+  // ── identity just resolved above ────────────────────────────────────────
+  //
+  // The gate above proves an identity exists NOW. It says nothing about
+  // whether the STORED subject/body — frozen at preparation, never rewritten
+  // — was generated under THIS identity or a since-changed one. Composing
+  // and sending anyway would combine a fresh From header with a stale body:
+  // exactly the mismatch a customer would notice as the sign-off naming a
+  // different sender than the one the email claims to be from.
+  //
+  // Checked BEFORE composeReminderContent, before the review token, before
+  // the allowance claim, before the row claim — nothing downstream runs.
+  if (identityHasDrifted(reminder.storedContent ?? { email: null, sms: null }, reminder.generatedSenderName, senderName)) {
+    log(
+      "warn",
+      `[send-reminder] Reminder ${reminder.id} refused: sender identity changed since preparation ` +
+        `(generated under "${reminder.generatedSenderName ?? "unknown"}", now "${senderName}").`
+    );
+    return refuse(409, {
+      success: false,
+      state: "identity_drift",
+      message:
+        "Your sender identity has changed since this reminder was prepared, so it can't be sent — " +
+        "the message would show one name in the From address and sign off as another.",
+    });
+  }
+
+  const { subject, html, text, smsBody, hash: currentHash } = composeReminderContent(
+    reminder,
+    senderName,
     deps.userEmail
   );
 
-  const { subject, html, text, hash: currentHash } = composeReminderContent(
-    reminder,
-    businessName,
-    deps.userEmail
-  );
+  // The same rule the editor and the content API apply, re-checked server-side
+  // before dispatch. An over-long or empty body reaching Twilio would be a
+  // provider rejection the owner could not diagnose.
+  const smsProblem = validateSmsBody(smsBody);
+  if (smsProblem) {
+    log("error", `[send-reminder] Reminder ${reminder.id} SMS body invalid: ${smsProblem}.`);
+    return refuse(409, {
+      success: false,
+      state: "invalid_sms",
+      message: SMS_VALIDATION_MESSAGE[smsProblem],
+    });
+  }
 
   // ── Server-trusted review authorisation ──────────────────────────────────
   //
@@ -548,39 +961,85 @@ export async function approveAndSendReminder(
     });
   }
 
-  let result: MailerResult;
-  try {
-    result = await deps.mailer.send(
-      {
-        from: deps.from,
-        to: reminder.emailTo,
-        replyTo: deps.userEmail ?? undefined,
-        subject,
-        html,
-        text,
+  // ── TWO CHANNELS, ONE APPROVAL ───────────────────────────────────────────
+  //
+  // Dispatched through a channel-level dispatcher rather than "inside the same
+  // transaction as email", because there is no transaction available: two
+  // external providers and a database cannot commit atomically, which
+  // reminder-send-state.ts already states as the honest limit of this model.
+  //
+  // Each channel claims its own row, submits independently, and records its own
+  // outcome. The parent status is then FOLDED from both — see
+  // lib/reminder-aggregate.ts for why neither "sent" nor "failed" is safe as a
+  // blanket answer.
+  const channelOutcomes = await dispatchChannels({
+    deps,
+    reminderId: reminder.id,
+    contentHash: currentHash,
+    attemptNumber,
+    email: {
+      // The visible From display name — never the fixed generic string.
+      // senderName is validated non-null above (the missing_sender_identity
+      // refusal), so the recipient sees exactly who this is from.
+      from: reminderFromHeader(senderName, REMINDER_FROM_ADDRESS),
+      to: reminder.emailTo,
+      replyTo: deps.userEmail ?? undefined,
+      subject,
+      html,
+      text,
+    },
+    sms: { to: phone.e164, body: smsBody },
+    now: now(),
+    log,
+  });
+
+  const aggregate = aggregateChannelOutcomes(channelOutcomes.outcomes);
+  const channelStates = statusesByChannel(channelOutcomes.finalStates);
+  const partialSummary = partialSendSummary(channelStates);
+
+  // ── ALL CHANNELS DEFINITELY REJECTED ─────────────────────────────────────
+  //
+  // Nothing reached anyone, so the unit goes back and the reminder becomes
+  // claimable again. This is the ONLY branch that releases: one acceptance
+  // means the customer was contacted, and one ambiguity means they may have
+  // been.
+  if (aggregate.parentStatus === "failed") {
+    await deps.db.recordSubmissionOutcome({
+      id: reminder.id,
+      status: "failed",
+      error: channelOutcomes.errorSummary || "All channels were rejected",
+    });
+    await deps.allowance.release(reminder.id);
+    return {
+      status: 500,
+      body: {
+        success: false,
+        state: "failed",
+        channels: channelStates,
+        message: "This reminder couldn't be sent. Nothing reached your customer — you can try again.",
       },
-      // At-most-once submission for THIS attempt. A repeat of the same attempt
-      // recomputes the same key and Resend does not deliver twice.
-      { idempotencyKey: attemptKey }
-    );
-  } catch (err) {
-    // The call threw. We do not know whether it reached the provider — this is
-    // the textbook ambiguous case and must never be reported as a failure.
-    const message = err instanceof Error ? err.message : "Unknown error";
-    log(
-      "error",
-      `[send-reminder] Submission for reminder ${reminder.id} threw before an outcome was known: ${message}`
-    );
+      outcome: "rejected",
+      attemptKey,
+    };
+  }
+
+  // ── ANY CHANNEL AMBIGUOUS ────────────────────────────────────────────────
+  //
+  // Conservative by design: delivery_unknown is not claimable, so nothing
+  // retries and no second copy can be produced. The unit stays spent.
+  if (aggregate.parentStatus === "delivery_unknown") {
     await deps.db.recordSubmissionOutcome({
       id: reminder.id,
       status: "delivery_unknown",
-      error: message,
+      error: channelOutcomes.errorSummary || "A channel result could not be confirmed",
     });
     return {
       status: 409,
       body: {
         success: false,
         state: "delivery_unknown",
+        channels: channelStates,
+        partiallySent: aggregate.partiallySent,
         message:
           "We couldn't confirm the delivery result. Don't resend yet — your customer may already have received this.",
       },
@@ -589,68 +1048,25 @@ export async function approveAndSendReminder(
     };
   }
 
-  if (!result.ok) {
-    // Known rejection vs ambiguous result. Guessing "failed" on an ambiguous
-    // error is exactly how a customer gets emailed twice.
-    const outcome = classifyProviderError(result.code);
-    const nextStatus = statusForOutcome(outcome);
-
-    log(
-      "error",
-      `[send-reminder] Resend did not confirm reminder ${reminder.id}: ` +
-        `${result.code ?? "unknown_error"} - ${result.message} → ${nextStatus}`
-    );
-
-    await deps.db.recordSubmissionOutcome({
-      id: reminder.id,
-      status: nextStatus,
-      error: result.message,
-    });
-
-    const ambiguous = nextStatus === "delivery_unknown";
-
-    // DEFINITE pre-acceptance rejection: the provider certainly never took the
-    // message, so neither the SMS nor the email reached anyone. The unit goes
-    // back — a customer must not permanently lose a credit to a fault that
-    // reached nobody.
-    //
-    // Only on this branch. An ambiguous outcome keeps the unit, because a
-    // submission may well have happened, and refunding ambiguity would turn a
-    // repeatedly-flaky provider into an unlimited free tier.
-    //
-    // Safe to release even when the unit came from an earlier attempt
-    // (`already_held`): this request owns the `sending` claim, so no sibling
-    // can be submitting for this reminder.
-    if (!ambiguous) await deps.allowance.release(reminder.id);
-    return {
-      status: ambiguous ? 409 : 500,
-      body: {
-        success: false,
-        state: nextStatus,
-        message: ambiguous
-          ? "We couldn't confirm the delivery result. Don't resend yet — your customer may already have received this."
-          : `Failed to send email: ${result.message}`,
-      },
-      outcome: ambiguous ? "delivery_unknown" : "rejected",
-      attemptKey,
-    };
-  }
-
-  // ── Provider CONFIRMED acceptance ────────────────────────────────────────
+  // ── AT LEAST ONE CHANNEL ACCEPTED ────────────────────────────────────────
   const persisted = await deps.db.recordAccepted({
     id: reminder.id,
-    providerMessageId: result.id,
+    // The EMAIL provider id stays on the parent for backward compatibility
+    // with reconciliation, which polls reminder_logs.provider_message_id.
+    // Twilio's SID lives on the SMS channel row — see recordChannelAccepted.
+    providerMessageId: channelOutcomes.emailProviderId,
     sentAt: now().toISOString(),
   });
 
   if (!persisted.ok) {
-    // Accepted by Resend, but our record failed. NOT a failure to report as
-    // one, and never an automatic retry — the customer very likely has the
-    // email. Marked uncertain so reconciliation can settle it from the
-    // provider id, which is logged here because it may not have reached a row.
+    // A provider ACCEPTED, but our record failed. Never reported as a failure
+    // and never retried automatically — the customer very likely has it.
+    // Marked uncertain so reconciliation can settle it from the provider ids,
+    // which are logged here because they may not have reached a row.
     log(
       "error",
-      `[send-reminder] Resend ACCEPTED reminder ${reminder.id} (provider id ${result.id ?? "unknown"}) ` +
+      `[send-reminder] A provider ACCEPTED reminder ${reminder.id} ` +
+        `(email ${channelOutcomes.emailProviderId ?? "none"}, sms ${channelOutcomes.smsProviderId ?? "none"}) ` +
         `but persistence failed: ${persisted.error ?? "unknown"}. Do not resend without reconciliation.`
     );
     await deps.db.recordSubmissionOutcome({
@@ -664,6 +1080,7 @@ export async function approveAndSendReminder(
       body: {
         success: false,
         state: "delivery_unknown",
+        channels: channelStates,
         message:
           "We couldn't confirm the delivery result. Don't resend yet — your customer may already have received this.",
       },
@@ -674,10 +1091,295 @@ export async function approveAndSendReminder(
 
   await deps.db.appendScheduleSent(reminder.invoiceId, reminder.schedule);
 
+  // ── PARTIAL SUCCESS ──────────────────────────────────────────────────────
+  //
+  // The parent is `sent` — a unit is spent and the customer was contacted —
+  // but one channel did not get through. Reported as success:false so no
+  // surface can render this as a clean send, while `state` stays "sent" so the
+  // durable lifecycle and the two database triggers see the truth they act on.
+  //
+  // The failed channel is named in plain words ("Email sent · SMS failed"),
+  // never as a provider code, and only that channel is retryable — see
+  // channelRetryable in lib/reminder-aggregate.ts.
+  if (aggregate.partiallySent) {
+    const retryable = (["email", "sms"] as const).find((c) =>
+      channelRetryable(channelStates, c)
+    ) ?? null;
+    log(
+      "warn",
+      `[send-reminder] Reminder ${reminder.id} PARTIALLY sent: ${partialSummary ?? "mixed channels"}.`
+    );
+    return {
+      status: 207,
+      body: {
+        success: false,
+        // ── THE API STATE IS NOT THE DATABASE STATE ─────────────────────
+        //
+        // reminder_logs.status stays `sent` — the durable lifecycle both live
+        // triggers act on. This field is the API's answer to "what happened",
+        // and it must NOT be "sent": ReminderReviewPanel treats state "sent"
+        // as unsafe-to-retry and disables the action permanently, which would
+        // leave a partial send visible as an error with no way out.
+        //
+        // `partially_sent` exists only here and in application code. It is
+        // never written to a column, so migration 010's CHECK constraint is
+        // untouched.
+        state: "partially_sent",
+        partiallySent: true,
+        channels: channelStates,
+        // The channel that can be attempted again, so the client does not have
+        // to re-derive it from the statuses.
+        retryableChannel: retryable,
+        summary: partialSummary,
+        message: `${partialSummary}. Your customer received part of this reminder — you can retry the channel that didn't send.`,
+      },
+      outcome: "partially_sent",
+      attemptKey,
+    };
+  }
+
   return {
     status: 200,
-    body: { success: true, state: "sent", message: "Reminder sent." },
+    body: { success: true, state: "sent", channels: channelStates, message: "Reminder sent." },
     outcome: "sent",
     attemptKey,
+  };
+}
+
+// ── Single-channel recovery ─────────────────────────────────────────────────
+
+export interface ChannelRetryRequest {
+  reminderId: string;
+  channel: ReminderChannel;
+}
+
+/**
+ * Retries ONE channel of a partially-sent reminder.
+ *
+ * ── WHY THIS IS A SEPARATE ENTRY POINT ───────────────────────────────────
+ *
+ * After a partial send the parent is `sent`, which is deliberately NOT
+ * claimable — that is what stops the ordinary approve path from resending the
+ * channel that already worked. Making the parent claimable again to enable
+ * recovery would reopen exactly the duplicate-send hole the status model
+ * exists to close, and migration 011's dispatched-final trigger would refuse
+ * the transition anyway.
+ *
+ * So recovery is its own operation over the CHILD row, and the parent is never
+ * touched. Three guarantees hold it together:
+ *
+ *   1. channelRetryable() requires the target channel to have NOT reached the
+ *      provider AND another channel to have reached it. Both-failed is the
+ *      ordinary approve path (parent `failed`, claimable); an unresolved
+ *      channel is never retryable because the message may already be
+ *      delivered.
+ *   2. The claim is the same atomic conditional UPDATE, on the child row.
+ *   3. Only the named channel is dispatched. The successful channel's provider
+ *      is never called — structurally, because it is never passed.
+ *
+ * NO ALLOWANCE IS CLAIMED. The unit was consumed when the first channel was
+ * accepted, and the contract is one unit per logical reminder. Claiming again
+ * would charge a customer twice for one reminder; releasing would refund a
+ * reminder they received.
+ *
+ * NO REVIEW TOKEN. The content was already reviewed and approved — this resends
+ * the SAME stored body to the SAME recipient. Requiring a fresh token would
+ * mean re-approving a message the owner already approved, and the content hash
+ * is unchanged by definition because nothing here composes anything new.
+ */
+export async function retryReminderChannel(
+  deps: ApprovalDeps,
+  request: ChannelRetryRequest
+): Promise<ApprovalResult> {
+  const now = deps.now ?? (() => new Date());
+  const log = deps.log ?? (() => {});
+  const { channel } = request;
+
+  const reminder = await deps.db.loadReminder(request.reminderId);
+  if (!reminder) return refuse(404, { success: false, message: "Reminder not found." });
+
+  // Paid is the kill switch here too: a paid invoice never contacts the
+  // customer again, whatever state its channels are in.
+  if (reminder.invoice.status === "paid") {
+    return refuse(409, {
+      success: false,
+      message: "This invoice has already been marked paid. Reminders are stopped.",
+    });
+  }
+
+  const states = await deps.channelDb.loadChannelStates(reminder.id);
+  const byChannel = statusesByChannel(states);
+
+  if (!channelRetryable(byChannel, channel)) {
+    // One answer for every ineligible shape, and it names the rule rather than
+    // the row's internal status.
+    return refuse(409, {
+      success: false,
+      state: "not_retryable",
+      channels: byChannel,
+      message:
+        "This channel can't be retried on its own. Either nothing was sent, " +
+        "or the result hasn't been confirmed yet.",
+    });
+  }
+
+  const transport = channel === "email" ? deps.mailer : deps.texter;
+  if (!transport) {
+    return {
+      status: 503,
+      body: {
+        success: false,
+        state: "failed",
+        message: channel === "email"
+          ? "Email service is not configured."
+          : "SMS service is not configured.",
+      },
+      outcome: "not_configured",
+    };
+  }
+
+  // FRESH read — independent of whatever the original approval resolved.
+  // Same no-cross-fallback rule as approveAndSendReminder.
+  const senderInputs = await deps.db.loadSenderIdentityInputs(deps.userId);
+  const identity = resolveSenderIdentity(senderInputs);
+
+  if (!identity) {
+    const reason = senderIdentityMissingReason(senderInputs);
+    log("warn", `[retry-channel] Reminder ${reminder.id} refused: sender identity unresolved (${reason}).`);
+    return refuse(409, {
+      success: false,
+      state: "missing_sender_identity",
+      reason,
+      message: missingSenderIdentityMessage(reason, "sending reminders"),
+    });
+  }
+  const senderName = identity.senderName;
+
+  // ── IDENTITY COHERENCE — same rule and same position as approveAndSendReminder ──
+  //
+  // A retry must not let an old stored channel body reach the provider under a
+  // newly-selected identity just because ONE channel already sent under the
+  // old one and the other is being recovered now. Checked before this channel's
+  // content is composed, before the phone re-check, before dispatch.
+  if (identityHasDrifted(reminder.storedContent ?? { email: null, sms: null }, reminder.generatedSenderName, senderName)) {
+    log(
+      "warn",
+      `[retry-channel] Reminder ${reminder.id} refused: sender identity changed since preparation ` +
+        `(generated under "${reminder.generatedSenderName ?? "unknown"}", now "${senderName}").`
+    );
+    return refuse(409, {
+      success: false,
+      state: "identity_drift",
+      message:
+        "Your sender identity has changed since this reminder was prepared, so it can't be sent — " +
+        "the message would show one name in the From address and sign off as another.",
+    });
+  }
+
+  const { subject, html, text, smsBody, hash } = composeReminderContent(
+    reminder,
+    senderName,
+    deps.userEmail
+  );
+
+  // The SMS path re-checks the number, because a partial send may be being
+  // retried days later against an invoice whose phone has since been edited.
+  let smsTo = "";
+  if (channel === "sms") {
+    const phone = normaliseUkMobile(reminder.invoice.customerPhone);
+    if (!phone.ok) {
+      return refuse(409, {
+        success: false,
+        state: "missing_phone",
+        reason: phone.problem,
+        message: PHONE_PROBLEM_MESSAGE[phone.problem],
+      });
+    }
+    const problem = validateSmsBody(smsBody);
+    if (problem) {
+      return refuse(409, {
+        success: false,
+        state: "invalid_sms",
+        message: SMS_VALIDATION_MESSAGE[problem],
+      });
+    }
+    smsTo = phone.e164;
+  }
+
+  // ONE channel is dispatched. The other is not named, not loaded into a
+  // message, and its provider is never constructed — so "the successful channel
+  // is not resent" is structural rather than a check that could be forgotten.
+  const dispatched = await dispatchChannels({
+    deps,
+    reminderId: reminder.id,
+    contentHash: hash,
+    attemptNumber: (states.find((s) => s.channel === channel)?.sendAttemptCount ?? 0) + 1,
+    only: channel,
+    email: {
+      // Same identity-aware header as the approve path — a retried channel
+      // must never show a different sender than the one the owner reviewed.
+      from: reminderFromHeader(senderName, REMINDER_FROM_ADDRESS),
+      to: reminder.emailTo,
+      replyTo: deps.userEmail ?? undefined,
+      subject,
+      html,
+      text,
+    },
+    sms: { to: smsTo, body: smsBody },
+    now: now(),
+    log,
+  });
+
+  const outcome = dispatched.outcomes[0]?.outcome ?? "unknown";
+  const after = statusesByChannel([
+    ...states.filter((s) => s.channel !== channel),
+    ...dispatched.finalStates,
+  ]);
+  const summary = partialSendSummary(after);
+
+  if (outcome === "accepted") {
+    log("warn", `[retry-channel] ${channel} recovered for reminder ${reminder.id}.`);
+    return {
+      status: 200,
+      body: {
+        success: true,
+        state: "sent",
+        channels: after,
+        message: `${CHANNEL_LABEL[channel]} sent.`,
+      },
+      outcome: "sent",
+    };
+  }
+
+  if (outcome === "unknown") {
+    // The parent is ALREADY `sent` and stays there — the dispatched-final
+    // trigger would refuse a move anyway. Only the child records the
+    // ambiguity, and channelRetryable() will refuse a further attempt.
+    return {
+      status: 409,
+      body: {
+        success: false,
+        state: "delivery_unknown",
+        channels: after,
+        message:
+          "We couldn't confirm the result of that attempt. Don't try again yet — " +
+          "your customer may already have received it.",
+      },
+      outcome: "delivery_unknown",
+    };
+  }
+
+  return {
+    status: 500,
+    body: {
+      success: false,
+      state: "partially_sent",
+      partiallySent: true,
+      channels: after,
+      retryableChannel: channelRetryable(after, channel) ? channel : null,
+      summary,
+      message: `${CHANNEL_LABEL[channel]} didn't send. Nothing else was affected — you can try that channel again.`,
+    },
+    outcome: "partially_sent",
   };
 }
