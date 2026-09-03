@@ -117,7 +117,7 @@ test("[gate] [static] identityDrifted continues to drive the Approve-button refu
   const src = read("components/dashboard/ReminderReviewPanel.tsx");
   assert.match(
     src,
-    /disabled=\{busy \|\| !data\.approvable \|\| staleReview \|\| allowanceExhausted \|\| identityDrifted\}/,
+    /disabled=\{busy \|\| !data\.approvable \|\| staleReview \|\| allowanceExhausted \|\| identityDrifted \|\| approveLocked\}/,
     "the Approve button's disabled expression must still include identityDrifted, unconditioned on the gate"
   );
 });

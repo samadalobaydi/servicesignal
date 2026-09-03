@@ -165,14 +165,18 @@ test("49b. every blocked review state has its own distinct copy", () => {
   ];
 
   // The rule the page renders and the route enforces is one function.
-  assert.equal(reviewAvailability({ status: "pending", eligible: true }).approvable, true);
-  assert.equal(reviewAvailability({ status: "failed", eligible: true }).approvable, true);
-  assert.equal(reviewAvailability({ status: "failed", eligible: true }).blockedReason, "retryable");
-  assert.equal(reviewAvailability({ status: "pending", eligible: false }).approvable, false);
+  // channelStructureReady: true throughout — this block is exercising
+  // status/eligibility-based blocking specifically, with channels genuinely
+  // ready in every case; channel-row readiness itself is covered separately
+  // in tests/channel-readiness.test.ts.
+  assert.equal(reviewAvailability({ status: "pending", eligible: true, channelStructureReady: true, freshApproveReady: true }).approvable, true);
+  assert.equal(reviewAvailability({ status: "failed", eligible: true, channelStructureReady: true, freshApproveReady: true }).approvable, true);
+  assert.equal(reviewAvailability({ status: "failed", eligible: true, channelStructureReady: true, freshApproveReady: true }).blockedReason, "retryable");
+  assert.equal(reviewAvailability({ status: "pending", eligible: false, channelStructureReady: true, freshApproveReady: true }).approvable, false);
 
   for (const status of statuses) {
     for (const eligible of [true, false]) {
-      const { blockedReason, approvable } = reviewAvailability({ status, eligible });
+      const { blockedReason, approvable } = reviewAvailability({ status, eligible, channelStructureReady: true, freshApproveReady: true });
       if (approvable) continue;
       assert.ok(blockedReason, `${status}/${eligible} must explain itself`);
       assert.ok(
@@ -183,9 +187,9 @@ test("49b. every blocked review state has its own distinct copy", () => {
   }
 
   // Nothing accepted-but-undelivered may be offered a retry.
-  assert.equal(reviewAvailability({ status: "undelivered", eligible: true }).approvable, false);
+  assert.equal(reviewAvailability({ status: "undelivered", eligible: true, channelStructureReady: true, freshApproveReady: true }).approvable, false);
   assert.equal(
-    reviewAvailability({ status: "delivery_unknown", eligible: true }).approvable,
+    reviewAvailability({ status: "delivery_unknown", eligible: true, channelStructureReady: true, freshApproveReady: true }).approvable,
     false
   );
 
@@ -753,4 +757,132 @@ test("71. [static] every real content-generation call site threads senderKind, n
     const code = readFileSync(join(ROOT, file), "utf8");
     assert.match(code, /senderKind:/, `${file} must pass senderKind alongside senderName, so SMS wording is never guessed from the name string`);
   }
+});
+
+// ── 72+. approveLocked: distinct from `busy`, for channel_state_not_ready ──
+// ── and fresh_approve_not_ready only ────────────────────────────────────────
+//
+// Neither state means "a request is in flight" — both mean the request has
+// ALREADY finished and Approve is not currently valid. Conflating them with
+// `busy` would leave the button/status text falsely claiming "Sending…" /
+// "please wait" after the server has already answered. These tests pin the
+// separation directly against the component's source, matching this file's
+// existing static-assertion style (there is no rendering harness in this
+// repo — see tests 47-71 above).
+
+test("72. [static] approveLocked is a state distinct from busy, initialised false", () => {
+  const panel = stripComments(readFileSync(join(ROOT, "components/dashboard/ReminderReviewPanel.tsx"), "utf8"));
+  assert.match(panel, /const\s*\[\s*approveLocked\s*,\s*setApproveLocked\s*\]\s*=\s*useState\(false\)/);
+});
+
+test("72b. [static] A/B — channel_state_not_ready and fresh_approve_not_ready both set approveLocked, and NEITHER stays in unsafeToRetry", () => {
+  const panel = stripComments(readFileSync(join(ROOT, "components/dashboard/ReminderReviewPanel.tsx"), "utf8"));
+  const onApproveStart = panel.indexOf("const onApprove");
+  const onApproveEnd = panel.indexOf("return (", onApproveStart);
+  const onApprove = panel.slice(onApproveStart, onApproveEnd);
+
+  const unsafeToRetryStart = onApprove.indexOf("const unsafeToRetry");
+  const unsafeToRetryEnd = onApprove.indexOf(";", onApprove.indexOf("ALLOWANCE_EXHAUSTED_STATE", unsafeToRetryStart));
+  const unsafeToRetryBlock = onApprove.slice(unsafeToRetryStart, unsafeToRetryEnd);
+
+  assert.equal(
+    /channel_state_not_ready/.test(unsafeToRetryBlock),
+    false,
+    "channel_state_not_ready must NOT be part of unsafeToRetry — the request has finished, busy must reset"
+  );
+  assert.equal(
+    /fresh_approve_not_ready/.test(unsafeToRetryBlock),
+    false,
+    "fresh_approve_not_ready must NOT be part of unsafeToRetry anymore — it moved to the dedicated lock"
+  );
+
+  // The dedicated lock: both states, and ONLY both states, set it.
+  const lockCallCount = (onApprove.match(/setApproveLocked\(true\)/g) ?? []).length;
+  assert.equal(lockCallCount, 1, "exactly one call site sets the lock — no scattered duplicate logic");
+  assert.match(
+    onApprove,
+    /result\.state === "channel_state_not_ready" \|\| result\.state === "fresh_approve_not_ready"/
+  );
+
+  // Both states must still fall through to the unconditional `if
+  // (!unsafeToRetry) setBusy(false);` — since neither is in unsafeToRetry,
+  // this line is what actually clears `busy` for them.
+  assert.match(onApprove, /if\s*\(!unsafeToRetry\)\s*setBusy\(false\);/);
+});
+
+test("72c. [static] A/B — the error message is preserved (setError still runs unconditionally before any branching)", () => {
+  const panel = stripComments(readFileSync(join(ROOT, "components/dashboard/ReminderReviewPanel.tsx"), "utf8"));
+  const onApproveStart = panel.indexOf("const onApprove");
+  const notSuccessIdx = panel.indexOf("if (!result.success)", onApproveStart);
+  const setErrorIdx = panel.indexOf("setError(result.message)", notSuccessIdx);
+  const unsafeToRetryIdx = panel.indexOf("const unsafeToRetry", notSuccessIdx);
+  assert.ok(setErrorIdx > -1 && setErrorIdx < unsafeToRetryIdx, "setError(result.message) must run before any state-specific branching, unconditionally on every refusal");
+});
+
+test("72d. [static] C — the lock is set from exactly one condition; Retry and Regenerate never reference it, so a normal retryable/recoverable path is unaffected", () => {
+  const panel = stripComments(readFileSync(join(ROOT, "components/dashboard/ReminderReviewPanel.tsx"), "utf8"));
+
+  const onRetryStart = panel.indexOf("const onRetryChannel");
+  const onRetryEnd = panel.indexOf("const blocked =", onRetryStart);
+  const onRetryChannel = panel.slice(onRetryStart, onRetryEnd);
+  assert.equal(/approveLocked/.test(onRetryChannel), false, "onRetryChannel must never read or set approveLocked");
+
+  const onRegenStart = panel.indexOf("const onRegenerate");
+  const onRegenEnd = panel.indexOf("const onRetryChannel", onRegenStart);
+  const onRegenerate = panel.slice(onRegenStart, onRegenEnd);
+  assert.equal(/approveLocked/.test(onRegenerate), false, "onRegenerate must never read or set approveLocked");
+
+  // Only the Approve button's own controls reference the lock.
+  const retryButtonStart = panel.indexOf("onClick={onRetryChannel}");
+  const retryButtonBlock = panel.slice(Math.max(0, retryButtonStart - 100), retryButtonStart + 300);
+  assert.equal(/approveLocked/.test(retryButtonBlock), false, "the Retry button's own disabled condition must not reference approveLocked");
+
+  const regenButtonStart = panel.indexOf("onClick={onRegenerate}");
+  const regenButtonBlock = panel.slice(Math.max(0, regenButtonStart - 100), regenButtonStart + 300);
+  assert.equal(/approveLocked/.test(regenButtonBlock), false, "the Regenerate button's own disabled condition must not reference approveLocked");
+});
+
+test("72e. [static] D — every pre-existing unsafeToRetry state is unchanged by this correction", () => {
+  const panel = stripComments(readFileSync(join(ROOT, "components/dashboard/ReminderReviewPanel.tsx"), "utf8"));
+  const onApproveStart = panel.indexOf("const onApprove");
+  const unsafeToRetryStart = panel.indexOf("const unsafeToRetry", onApproveStart);
+  const unsafeToRetryEnd = panel.indexOf(";", panel.indexOf("ALLOWANCE_EXHAUSTED_STATE", unsafeToRetryStart));
+  const unsafeToRetryBlock = panel.slice(unsafeToRetryStart, unsafeToRetryEnd);
+
+  for (const state of ["delivery_unknown", "undelivered", "stale_review", "identity_drift", "sending", "sent"]) {
+    assert.match(unsafeToRetryBlock, new RegExp(`result\\.state === "${state}"`), `${state} must remain in unsafeToRetry, unchanged`);
+  }
+  assert.match(unsafeToRetryBlock, /ALLOWANCE_EXHAUSTED_STATE/, "the allowance-exhausted case must remain in unsafeToRetry, unchanged");
+});
+
+test("72f. [static] the lock joins the Approve button's disabled, aria-disabled, and opacity conditions — no other control", () => {
+  const panel = stripComments(readFileSync(join(ROOT, "components/dashboard/ReminderReviewPanel.tsx"), "utf8"));
+  const buttonIdx = panel.indexOf("onClick={onApprove}");
+  const buttonBlock = panel.slice(buttonIdx, buttonIdx + 900);
+
+  assert.match(buttonBlock, /disabled=\{busy \|\| !data\.approvable \|\| staleReview \|\| allowanceExhausted \|\| identityDrifted \|\| approveLocked\}/);
+  assert.match(buttonBlock, /aria-disabled=\{busy \|\| !data\.approvable \|\| staleReview \|\| allowanceExhausted \|\| identityDrifted \|\| approveLocked\}/);
+  assert.match(buttonBlock, /opacity:\s*busy \|\| !data\.approvable \|\| approveLocked \? 0\.6 : 1/);
+
+  // "Sending…" is driven purely by `busy`, which this correction resets to
+  // false for both locked states — the button text can never say "Sending…"
+  // while the request that produced the lock has already finished.
+  assert.match(buttonBlock, /\{busy\s*\?\s*"Sending…"/);
+});
+
+test("72g. [static] onApprove's own entry guard enforces approveLocked too — defence-in-depth, not just the button's disabled prop", () => {
+  // The button's disabled attribute already stops ordinary DOM interaction
+  // from ever calling onApprove while locked. This pins the SAME invariant
+  // enforced a second time, inside the handler itself — matching the
+  // pre-existing redundancy already present for `busy` and
+  // `!data.approvable`, so the lock holds regardless of what invokes the
+  // handler, not only literal button clicks.
+  const panel = stripComments(readFileSync(join(ROOT, "components/dashboard/ReminderReviewPanel.tsx"), "utf8"));
+  const onApproveStart = panel.indexOf("const onApprove");
+  const guardLine = panel.slice(onApproveStart, panel.indexOf("\n", onApproveStart + 1) + 200);
+  assert.match(
+    guardLine,
+    /if\s*\(\s*busy\s*\|\|\s*approveLocked\s*\|\|\s*!data\.approvable\s*\)\s*return;/,
+    "onApprove's entry guard must check busy, approveLocked, and !data.approvable, in that order"
+  );
 });

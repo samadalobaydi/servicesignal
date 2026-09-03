@@ -178,13 +178,26 @@ export function partialSendSummary(statuses: ChannelStatuses): string | null {
  *
  * `delivery_unknown` is excluded on purpose. An unresolved channel may already
  * have been delivered, and a "retry" there is a second message.
+ *
+ * OWN STATUS MUST BE EXACTLY `failed` — NOT `DID_NOT_REACH.includes(own)`.
+ * DID_NOT_REACH also matches `undelivered`, which is correct for THAT set's
+ * other, display-only purposes in this file (failedChannels(),
+ * partialSendSummary()) but wrong here: `undelivered` means the provider
+ * accepted the original message attempt, but final delivery was
+ * unsuccessful/unresolved under this lifecycle model — so it must not be
+ * automatically retried as though the provider had never accepted it. Any
+ * further send requires an explicit owner/recovery decision, never the
+ * automatic failed-channel Retry path. Using DID_NOT_REACH here previously
+ * let this function disagree with claimChannel()'s actual claim predicate
+ * (CHANNEL_CLAIMABLE_STATUSES = ["pending","failed"]) — offering a Retry
+ * action the atomic claim underneath it was guaranteed to refuse.
  */
 export function channelRetryable(
   statuses: ChannelStatuses,
   channel: ReminderChannel
 ): boolean {
   const own = statuses[channel];
-  if (!own || !DID_NOT_REACH.includes(own)) return false;
+  if (own !== "failed") return false;
   return (Object.keys(statuses) as ReminderChannel[]).some(
     (c) => c !== channel && REACHED_PROVIDER.includes(statuses[c] ?? ("pending" as ReminderSendStatus))
   );

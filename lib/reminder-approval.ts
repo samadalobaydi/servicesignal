@@ -39,6 +39,8 @@ import {
   channelAttemptKey,
   isChannelClaimable,
   statusesByChannel,
+  assessApproveReadiness,
+  assessChannelStructure,
   type ChannelDb,
   type ChannelRowState,
 } from "./reminder-channel-state";
@@ -256,6 +258,10 @@ export interface ApprovalResult {
     | "rejected"
     | "delivery_unknown"
     | "not_configured"
+    /** Required channel row(s) missing or duplicated — see assessChannelStructure(). */
+    | "channel_state_not_ready"
+    /** Channel rows structurally present but not BOTH currently claimable — see assessApproveReadiness(). */
+    | "fresh_approve_not_ready"
     | "db_error"
     | "allowance_exhausted"
     | "allowance_unavailable";
@@ -270,6 +276,11 @@ function refuse(
   body: Record<string, unknown> & { success: boolean; message: string }
 ): ApprovalResult {
   return { status, body, ...NO_SEND };
+}
+
+/** Log-only. Never shown to a customer or the owner — see the response `message` for that. */
+function describeChannelReadiness(readiness: { kind: string; status?: string }): string {
+  return readiness.kind === "not_ready" ? `not_ready(${readiness.status})` : readiness.kind;
 }
 
 // ── Composition ─────────────────────────────────────────────────────────────
@@ -734,6 +745,96 @@ export async function approveAndSendReminder(
       status: 503,
       body: { success: false, state: "failed", message: "SMS service is not configured." },
       outcome: "not_configured",
+    };
+  }
+
+  // ── CHANNEL STATE — TWO SEPARATE QUESTIONS, BOTH BEFORE ANYTHING IS SPENT ──
+  //
+  // THE INCIDENT THIS CLOSES (gate 1). A reminder whose Prepare-time
+  // channel-content insert had silently failed reached this far with ZERO
+  // reminder_channel_messages rows. dispatchChannels()'s legacy-reminder
+  // fallback then treated each missing row as a fake `pending` — claimable
+  // enough to consume an allowance slot and attempt a real per-channel claim,
+  // which could only ever fail ("already claimed" — misleading; nothing was
+  // ever claimed) without EVER reaching Resend or Twilio.
+  //
+  // THE FOLLOW-UP AUDIT FINDING THIS CLOSES (gate 2). A single combined check
+  // here previously reused Fresh-Approve claimability (assessApproveReadiness)
+  // as a proxy for "was this reminder ever prepared" — so a reminder whose
+  // channel rows are genuinely present, but where one has legitimately moved
+  // on (e.g. `sent` via an earlier attempt, or `sending` from another
+  // in-flight request) in a combination the parent-status checks above don't
+  // already catch, was told "wasn't fully prepared" — false. Split into two
+  // gates so each refusal says something true.
+  //
+  // BOTH ARE READS, NOT LOCKS. Neither is the concurrency safety mechanism —
+  // that remains claimChannel()'s atomic UPDATE ... WHERE status IN (...) AND
+  // send_attempt_count = $expected (lib/approval-wiring.ts), unchanged and
+  // untouched here. If channel state changes between these reads and the real
+  // claim moments later (a concurrent request, a double-click), the CAS is
+  // what makes that safe — exactly as it always has.
+  //
+  // Both write NOTHING on refusal — no allowance claim, no parent claim, no
+  // reminder_logs or reminder_channel_messages update. One load, reused by
+  // both checks below.
+  const channelRows = await deps.channelDb.loadChannelStates(reminder.id);
+
+  // ── GATE 1: STRUCTURAL VALIDITY — exactly one email row + one SMS row ────
+  const channelStructure = assessChannelStructure(channelRows);
+  if (!channelStructure.valid) {
+    log(
+      "error",
+      `[send-reminder] Reminder ${reminder.id} refused: channel structure invalid ` +
+        `(email=${channelStructure.email}, sms=${channelStructure.sms}).`
+    );
+    return {
+      // 409, not 503: this is a conflict with THIS reminder's own recorded
+      // state — the same per-reminder state-conflict convention used for
+      // `sending`/`sent`/`delivery_unknown`/`undelivered`/`not_eligible`
+      // elsewhere in this function. It is not a system-wide outage (503,
+      // reserved for the mailer/texter
+      // configuration checks above, where the SAME cause blocks every
+      // reminder and clears the moment the dependency is fixed) — other
+      // reminders with intact channel rows are unaffected right now, and
+      // fixing this one specifically requires a data change (re-preparing
+      // it, or an administrative repair), not merely waiting.
+      status: 409,
+      body: {
+        success: false,
+        state: "channel_state_not_ready",
+        message:
+          "This reminder can't be sent right now — its message wasn't fully prepared. " +
+          "Please contact support@servicesignal.app.",
+      },
+      outcome: "channel_state_not_ready",
+    };
+  }
+
+  // ── GATE 2: FRESH-APPROVE ADMISSIBILITY — both rows currently claimable ──
+  //
+  // Reached only when gate 1 passed — the rows genuinely exist, once each.
+  // This is the earlier, unchanged assessApproveReadiness() call, now scoped
+  // to its true question rather than doubling as a structural check. Its
+  // refusal deliberately does NOT claim the reminder "wasn't prepared" —
+  // that would be false here — and deliberately does NOT name a specific
+  // delivery outcome (never "sent", "sending", "delivery_unknown"): picking
+  // the single correct one for an arbitrary channel combination is the
+  // deferred parent/channel aggregation design, not decided or built here.
+  const channelReadiness = assessApproveReadiness(channelRows);
+  if (!channelReadiness.ready) {
+    log(
+      "error",
+      `[send-reminder] Reminder ${reminder.id} refused: not admissible for a fresh Approve ` +
+        `(email=${describeChannelReadiness(channelReadiness.email)}, sms=${describeChannelReadiness(channelReadiness.sms)}).`
+    );
+    return {
+      status: 409,
+      body: {
+        success: false,
+        state: "fresh_approve_not_ready",
+        message: "This reminder can't be approved as a full send in its current state.",
+      },
+      outcome: "fresh_approve_not_ready",
     };
   }
 

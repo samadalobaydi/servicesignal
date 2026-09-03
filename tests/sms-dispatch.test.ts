@@ -198,8 +198,23 @@ test("ambiguity outranks acceptance in the fold", () => {
 
 // ── Single-channel retry never resends the channel that worked ─────────────
 
-test("a channel already `sent` is skipped, not resubmitted", async () => {
-  // The state after "email sent, SMS failed": the retry must touch SMS only.
+test("a full Approve refuses outright when a channel is already `sent` — recovery is the per-channel Retry route, never a fresh Approve", async () => {
+  // The state after "email sent, SMS failed". Previously this file asserted
+  // that a FULL approve() call would quietly skip the sent channel and
+  // resubmit only the failed one — relying on dispatchChannels()'s own
+  // internal isChannelClaimable() skip as the sole guard. That is no longer
+  // the contract: assessApproveReadiness() (lib/reminder-channel-state.ts)
+  // now refuses a fresh Approve outright the moment either channel isn't
+  // BOTH present and claimable, before any provider is ever contacted —
+  // exactly the case a channel already `sent` represents. Recovering the
+  // failed channel alone is retryReminderChannel()'s job (see
+  // tests/sms-partial-recovery.test.ts's "email sent + SMS failed →
+  // SMS-only retry" for that path, unaffected by this change).
+  //
+  // The refusal is `fresh_approve_not_ready`, not `channel_state_not_ready`:
+  // these rows are structurally fine (exactly one each, gate 1 passes) — the
+  // problem is Fresh-Approve admissibility (gate 2), and the response must
+  // not falsely claim the reminder "wasn't fully prepared".
   const channelDb = new FakeChannelDb([
     { channel: "email", status: "sent", sendAttemptCount: 1 },
     { channel: "sms", status: "failed", sendAttemptCount: 1 },
@@ -207,11 +222,18 @@ test("a channel already `sent` is skipped, not resubmitted", async () => {
 
   const { mailer, texter, result } = await approve({ channelDb });
 
-  assert.equal(mailer.calls.length, 0, "the successful email must NEVER be sent again");
-  assert.equal(texter.calls.length, 1, "only the failed channel is retried");
-  assert.equal(result.outcome, "sent");
+  assert.equal(mailer.calls.length, 0, "the successful email must NEVER be contacted again");
+  assert.equal(texter.calls.length, 0, "no provider is contacted once channel state isn't ready for a fresh Approve");
+  // 409, not 503 — a conflict with this reminder's own recorded state
+  // (matches sending/sent/delivery_unknown/undelivered), never a
+  // system-wide outage.
+  assert.equal(result.status, 409);
+  assert.equal(result.outcome, "fresh_approve_not_ready");
+  assert.doesNotMatch(result.body.message as string, /wasn't fully prepared/, "a channel already sent was not left unprepared");
+  // Both rows are left exactly as they were — nothing about this refusal
+  // touches reminder_channel_messages.
   assert.equal(channelDb.rows.get("email")!.status, "sent");
-  assert.equal(channelDb.rows.get("sms")!.status, "sent");
+  assert.equal(channelDb.rows.get("sms")!.status, "failed");
 });
 
 test("the retry rule is the row's own state, not a caller-supplied flag", () => {

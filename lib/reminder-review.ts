@@ -18,6 +18,7 @@ import {
   partialSendSummary,
   type ChannelStatuses,
 } from "@/lib/reminder-aggregate";
+import { assessChannelStructure, assessApproveReadiness } from "@/lib/reminder-channel-state";
 import { issueReviewToken } from "@/lib/review-token";
 import type { ReminderSchedule, ReminderTone, ReminderLogStatus } from "@/types";
 
@@ -317,17 +318,54 @@ export async function loadReminderReview(
     .select("channel, status")
     .eq("reminder_log_id", reminder.id);
 
+  const typedChannelRows = (channelRows ?? []) as { channel: "email" | "sms"; status: ReminderSendStatus }[];
+
   const channelStatuses = Object.fromEntries(
-    ((channelRows ?? []) as { channel: string; status: string }[]).map((r) => [r.channel, r.status])
+    typedChannelRows.map((r) => [r.channel, r.status])
   ) as ChannelStatuses;
 
   const partiallySent = partiallySentFromStatuses(channelStatuses);
   const retryableChannel =
     (["email", "sms"] as const).find((c) => channelRetryable(channelStatuses, c)) ?? null;
 
+  // TWO SEPARATE questions, both computed below from the RAW row array —
+  // not the collapsed channelStatuses object above. That preservation
+  // (a duplicate row detected rather than silently overwritten by
+  // Object.fromEntries) applies specifically to these two classifications;
+  // channelStatuses itself is still built the same way it always was and is
+  // still what partiallySent/retryableChannel (above) are derived from — a
+  // separately-identified, impossible-on-live-data duplicate-row Retry
+  // rendering gap that this pass deliberately does not touch.
+  //
+  // 1. Structural validity — exactly one email row and exactly one SMS row.
+  //    A legitimate lifecycle channel status (sent/sending/delivery_unknown/
+  //    undelivered/dismissed) is NOT structural corruption and must not
+  //    produce channel_state_not_ready. After that check, reviewAvailability
+  //    gives precedence to whichever existing parent-level/specific
+  //    blockedReason branch applies (those branches read the PARENT
+  //    reminder's status, not an individual channel's, so a legitimate
+  //    channel status does not necessarily reach a matching branch of its
+  //    own — e.g. parent=pending with channels sent+pending does not reach
+  //    the parent `sent` branch); otherwise `freshApproveReady` below is the
+  //    fallback for a structurally-valid combination none of those specific
+  //    branches recognizes.
+  //
+  // 2. Fresh-Approve admissibility (assessApproveReadiness(), the same
+  //    function enforced by the send route's second gate) — whether those
+  //    structurally-valid rows are BOTH currently claimable. A reminder can
+  //    be structurally fine yet not fresh-approvable (e.g. one channel
+  //    already `sent` from an earlier attempt) — reviewAvailability's
+  //    `freshApproveReady` fallback catches that case only after every more
+  //    specific existing branch (partiallySent, sent, dismissed, sending,
+  //    delivery_unknown, undelivered) has had its chance.
+  const channelStructure = assessChannelStructure(typedChannelRows);
+  const channelReadiness = assessApproveReadiness(typedChannelRows);
+
   const { blockedReason, approvable } = reviewAvailability({
     status,
     partiallySent,
+    channelStructureReady: channelStructure.valid,
+    freshApproveReady: channelReadiness.ready,
     eligible: Boolean(
       prepareEligibility(
         invoice.reminder_schedules ?? [reminder.schedule],

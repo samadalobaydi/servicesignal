@@ -56,6 +56,28 @@ export function ReminderReviewPanel({ data }: { data: ReminderReviewData }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /**
+   * Set when Approve refused with "channel_state_not_ready" or
+   * "fresh_approve_not_ready" — the server has authoritatively refused this
+   * Approve request for THIS rendered review state. Immediately repeating
+   * Approve against the same rendered state is pointless and would only
+   * repeat the identical refusal, so this mounted review instance locks
+   * Approve rather than allowing that.
+   *
+   * Local React state only — it does NOT observe the underlying channel
+   * rows and does NOT automatically clear if/when they change. Recovery
+   * requires obtaining a fresh, reloaded review state after whatever
+   * underlying recovery is appropriate for the specific refusal (which
+   * varies — not universally a per-channel Retry).
+   *
+   * DELIBERATELY SEPARATE FROM `busy`. The request that produced this refusal
+   * has already finished — `busy` is reset to false alongside this, so the
+   * button stops claiming "Sending…"/"please wait" (both false the moment
+   * this fires). `busy` means a request is currently in flight;
+   * `approveLocked` means Approve is no longer valid for this rendered
+   * review state — the two are different facts and must not share one flag.
+   */
+  const [approveLocked, setApproveLocked] = useState(false);
+  /**
    * Set when the server refused because the message changed since this page
    * rendered. The only safe way forward is to reload and re-read, so the
    * approve action stays disabled and a reload control is offered instead.
@@ -141,7 +163,7 @@ export function ReminderReviewPanel({ data }: { data: ReminderReviewData }) {
       : null;
 
   const onApprove = async () => {
-    if (busy || !data.approvable) return;
+    if (busy || approveLocked || !data.approvable) return;
     setBusy(true);
     setError(null);
 
@@ -167,6 +189,18 @@ export function ReminderReviewPanel({ data }: { data: ReminderReviewData }) {
         // Retrying cannot help: the account is out of free reminders and the
         // server will refuse identically every time.
         result.state === ALLOWANCE_EXHAUSTED_STATE;
+
+      // These two are NOT part of unsafeToRetry/busy-latching: the request
+      // has genuinely finished, so `busy` resets to false below like any
+      // other refusal — "Sending…" would be false. Approve is instead locked
+      // by its own, separate flag (see approveLocked above): the server has
+      // authoritatively refused, so re-clicking against this same rendered
+      // state would only repeat the identical refusal. A fresh, reloaded
+      // review state is what recovery requires — this local flag does not
+      // observe the channel rows and will not clear on its own.
+      if (result.state === "channel_state_not_ready" || result.state === "fresh_approve_not_ready") {
+        setApproveLocked(true);
+      }
 
       if (result.state === "stale_review") setStaleReview(true);
       // Reload cannot fix this one — the stored content is frozen under the
@@ -484,8 +518,8 @@ export function ReminderReviewPanel({ data }: { data: ReminderReviewData }) {
             type="button"
             className="dash-btn justify-center"
             onClick={onApprove}
-            disabled={busy || !data.approvable || staleReview || allowanceExhausted || identityDrifted}
-            aria-disabled={busy || !data.approvable || staleReview || allowanceExhausted || identityDrifted}
+            disabled={busy || !data.approvable || staleReview || allowanceExhausted || identityDrifted || approveLocked}
+            aria-disabled={busy || !data.approvable || staleReview || allowanceExhausted || identityDrifted || approveLocked}
             // Names the consequence, not just the control. A screen-reader user
             // should know this sends a real email before activating it.
             aria-label={
@@ -493,7 +527,7 @@ export function ReminderReviewPanel({ data }: { data: ReminderReviewData }) {
                 ? `Approve and send this reminder to ${data.customerName}. This sends a real SMS and a real email.`
                 : "This reminder cannot be sent"
             }
-            style={{ padding: "0.7rem 1.35rem", fontSize: "0.95rem", opacity: busy || !data.approvable ? 0.6 : 1 }}
+            style={{ padding: "0.7rem 1.35rem", fontSize: "0.95rem", opacity: busy || !data.approvable || approveLocked ? 0.6 : 1 }}
           >
             {busy
               ? "Sending…"

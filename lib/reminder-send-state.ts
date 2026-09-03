@@ -295,7 +295,9 @@ export type SendUiState =
   | "retryable"
   | "delivery_unknown"
   | "undelivered"
-  | "stale_review";
+  | "stale_review"
+  | "channel_state_not_ready"
+  | "fresh_approve_not_ready";
 
 /**
  * Why the review page may refuse approval — and whether it may offer it.
@@ -312,6 +314,7 @@ export type SendUiState =
  */
 export type ReviewBlockedReason =
   | "not_found"
+  | "channel_state_not_ready"
   | "sent"
   | "dismissed"
   | "sending"
@@ -319,7 +322,8 @@ export type ReviewBlockedReason =
   | "undelivered"
   | "not_eligible"
   | "partially_sent"
-  | "retryable";
+  | "retryable"
+  | "fresh_approve_not_ready";
 
 export function reviewAvailability(input: {
   status: ReminderSendStatus;
@@ -332,11 +336,85 @@ export function reviewAvailability(input: {
    * which is `sent` in this case and cannot express it.
    */
   partiallySent?: boolean;
+  /**
+   * False when the required email + SMS reminder_channel_messages rows are
+   * NOT both structurally present — exactly one row per channel. See
+   * assessChannelStructure() (lib/reminder-channel-state.ts).
+   *
+   * Deliberately NOT the same question as "is each channel currently
+   * claimable for a fresh send" — that is Fresh-Approve claimability
+   * (assessApproveReadiness()), a separate question supplied here as
+   * `freshApproveReady` below and also enforced by the send route's own
+   * second gate. A row that is `sent`, `sending`, `delivery_unknown`,
+   * `undelivered`, or `dismissed` is still structurally valid — exactly one
+   * row exists — so it must not be mistaken for structural corruption. Only
+   * a missing or duplicate row is a genuine structural problem.
+   *
+   * REQUIRED, deliberately — no default. An optional flag defaulting to
+   * `true` is exactly the shape of bug this whole rule exists to close: a
+   * future caller that simply forgets to pass it would silently get the
+   * SAFE-LOOKING answer instead of a compile error forcing a conscious
+   * decision. Every caller must state explicitly whether the channel rows
+   * it is asking about are actually structurally intact.
+   */
+  channelStructureReady: boolean;
+  /**
+   * False when the channel rows ARE structurally present (see
+   * channelStructureReady above) but are not BOTH currently admissible for a
+   * fresh, full Approve — see assessApproveReadiness()
+   * (lib/reminder-channel-state.ts), the SAME function the send route's
+   * second gate enforces with.
+   *
+   * A DELIBERATE FALLBACK, not a specific lifecycle answer. Checked only
+   * after every more-specific existing branch below (partiallySent, sent,
+   * dismissed, sending, delivery_unknown, undelivered) has had its chance —
+   * those remain the truer, more specific reason when they apply. This
+   * catches everything else: a channel row that is legitimately present but
+   * not currently claimable in a combination none of those specific checks
+   * recognizes (e.g. one channel `sending` beside a `failed` sibling, or
+   * `delivery_unknown` beside a `pending` one) — previously left
+   * `blockedReason` at `null`/`"retryable"`, incorrectly offering a full
+   * Approve the send route was guaranteed to refuse. Deciding WHICH precise
+   * lifecycle word best fits an arbitrary channel combination is the
+   * deferred parent/channel aggregation design (Phase 2+, not implemented
+   * here) — this fallback deliberately says only that a fresh full send
+   * isn't currently valid, nothing more specific.
+   *
+   * REQUIRED, deliberately — no default, same reasoning as
+   * channelStructureReady above.
+   */
+  freshApproveReady: boolean;
 }): { blockedReason: ReviewBlockedReason | null; approvable: boolean } {
-  const { status, eligible, partiallySent = false } = input;
+  const { status, eligible, partiallySent = false, channelStructureReady, freshApproveReady } = input;
 
   let blockedReason: ReviewBlockedReason | null = null;
 
+  // ── STRUCTURAL VALIDITY OUTRANKS EVERYTHING ─────────────────────────────
+  //
+  // Checked first, ahead of even `partiallySent`: a reminder with a missing
+  // or duplicated channel row is not a normal lifecycle state at all — it is
+  // a data problem no amount of status-reading can paper over, and this
+  // function must never report it as approvable, nor describe it under any
+  // other, more specific blockedReason (previously, the broken reminder
+  // could progress far enough to consume an allowance slot and later fail
+  // with misleading "already claimed" diagnostics). This governs
+  // ONLY blockedReason/approvable — Retry's own availability is derived
+  // separately, from retryableChannel/channelRetryable, and is unaffected by
+  // this check.
+  //
+  // A legitimate non-claimable channel status (sent/sending/delivery_unknown/
+  // undelivered/dismissed) must NOT be mistaken for structural corruption —
+  // this check does not fire for those. What happens next for them is not
+  // "their own branch": the checks below read the PARENT reminder's status,
+  // not an individual channel's, so a legitimate channel status only reaches
+  // a matching specific branch when the PARENT status also matches it (e.g.
+  // parent=pending with channels sent+pending does NOT reach the `sent`
+  // branch below — it falls through to the freshApproveReady fallback
+  // instead). Where an existing parent-level/specific branch does apply, it
+  // keeps precedence; otherwise `freshApproveReady` below is the fallback
+  // that catches a structurally-valid-but-not-Fresh-Approve-admissible
+  // combination none of the more specific branches recognizes.
+  if (!channelStructureReady) blockedReason = "channel_state_not_ready";
   // ── PARTIAL OUTRANKS `sent` ─────────────────────────────────────────────
   //
   // THE FALSE STATEMENT THIS REMOVES. A partially-sent reminder is `sent` at
@@ -347,12 +425,22 @@ export function reviewAvailability(input: {
   // Both halves were untrue — one channel never arrived, and that channel CAN
   // be sent again. `approvable` stays false because the whole reminder must
   // not be re-approved; recovery is the per-channel route.
-  if (partiallySent) blockedReason = "partially_sent";
+  else if (partiallySent) blockedReason = "partially_sent";
   else if (status === "sent") blockedReason = "sent";
   else if (status === "dismissed") blockedReason = "dismissed";
   else if (status === "sending") blockedReason = "sending";
   else if (status === "delivery_unknown") blockedReason = "delivery_unknown";
   else if (status === "undelivered") blockedReason = "undelivered";
+  // ── FRESH-APPROVE FALLBACK — after every more specific check above ──────
+  //
+  // Everything above already had its chance to give a truer, more specific
+  // answer. If none applied, the channels are still structurally present but
+  // may not both be admissible for a fresh full send right now (see the
+  // `freshApproveReady` doc above). Checked before eligibility/`retryable`
+  // deliberately: a reminder whose channels aren't jointly fresh-approvable
+  // must not be reported as merely "not due yet" or offered as a retry the
+  // route would refuse for a reason unrelated to the checkpoint date.
+  else if (!freshApproveReady) blockedReason = "fresh_approve_not_ready";
   else if (!eligible) blockedReason = "not_eligible";
   else if (status === "failed") {
     // A NOTICE, not a block: a definite pre-acceptance rejection can genuinely
@@ -363,7 +451,10 @@ export function reviewAvailability(input: {
   return {
     blockedReason,
     approvable:
-      isClaimable(status) && (blockedReason === null || blockedReason === "retryable"),
+      channelStructureReady &&
+      freshApproveReady &&
+      isClaimable(status) &&
+      (blockedReason === null || blockedReason === "retryable"),
   };
 }
 
@@ -415,5 +506,35 @@ export const SEND_STATE_COPY: Record<
   stale_review: {
     title: "This reminder changed since you reviewed it",
     body: "Reload the latest version before sending.",
+  },
+  // Reserved for genuine structural corruption ONLY — a missing or duplicated
+  // channel row (assessChannelStructure().valid === false): incomplete or
+  // inconsistent channel preparation. A legitimate lifecycle channel status
+  // (sent/sending/delivery_unknown/undelivered/dismissed) is structurally
+  // valid and must NOT produce this state — the page then uses whichever
+  // existing parent-level/specific blockedReason copy applies, or otherwise
+  // falls to fresh_approve_not_ready (neither is necessarily "that channel
+  // status's own copy": the branches above are driven by the PARENT
+  // reminder's status, not an individual channel's). Deliberately NOT the
+  // delivery_unknown copy either — that implies a customer may already have
+  // the message, which this state does not establish either way; this is
+  // about the DATA being structurally invalid, not a claim about whether any
+  // provider attempt occurred.
+  channel_state_not_ready: {
+    title: "This reminder can't be sent yet",
+    body:
+      "Something isn't right with how this reminder was prepared. " +
+      "Please contact support@servicesignal.app so we can look into it.",
+  },
+  // The FALLBACK case: channel rows are structurally fine (exactly one each)
+  // but at least one isn't currently admissible for a fresh full send, in a
+  // combination none of the more specific states above already covers.
+  // Deliberately does NOT claim a specific delivery outcome — it never says
+  // "sent", "sending", or "delivery_unknown", because picking the single
+  // correct one for an arbitrary channel combination is the deferred
+  // parent/channel aggregation design, not decided here.
+  fresh_approve_not_ready: {
+    title: "This reminder can't be approved right now",
+    body: "This reminder can't be approved as a full send in its current state.",
   },
 };

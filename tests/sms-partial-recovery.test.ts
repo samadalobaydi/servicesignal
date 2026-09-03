@@ -119,7 +119,10 @@ test("no caller can read a 207 as success", () => {
 // ── Reminder Review tells the truth ────────────────────────────────────────
 
 test("Reminder Review never claims both channels were sent", () => {
-  const partial = reviewAvailability({ status: "sent", eligible: true, partiallySent: true });
+  // Both channel rows are genuinely resolved (one sent, one failed) — the
+  // concern under test here is partial-delivery wording, not channel-row
+  // existence, so channelStructureReady is explicitly true.
+  const partial = reviewAvailability({ status: "sent", eligible: true, partiallySent: true, channelStructureReady: true, freshApproveReady: true });
   assert.equal(partial.blockedReason, "partially_sent");
   assert.equal(partial.approvable, false, "the whole reminder must not be re-approved");
 
@@ -131,7 +134,7 @@ test("Reminder Review never claims both channels were sent", () => {
   assert.equal(/can't be sent again/.test(copy.body), false);
 
   // A fully-sent reminder keeps the original, correct wording.
-  const full = reviewAvailability({ status: "sent", eligible: true, partiallySent: false });
+  const full = reviewAvailability({ status: "sent", eligible: true, partiallySent: false, channelStructureReady: true, freshApproveReady: true });
   assert.equal(full.blockedReason, "sent");
   assert.match(SEND_STATE_COPY.sent.body, /can't be sent again/);
 });
